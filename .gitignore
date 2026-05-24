@@ -1,0 +1,13 @@
+node_modules
+dist
+build
+.DS_Store
+.env
+.env.local
+data/sqlite.db
+data/sqlite.db-journal
+data/sqlite.db-shm
+data/sqlite.db-wal
+data/screenshots
+*.log
+.vite
