@@ -86,7 +86,7 @@ export function ScenarioEditor() {
     reload();
   }, [scenarioId]);
 
-  async function takeSnapshot(useUrl: boolean) {
+  async function takeSnapshot(useUrl: boolean, interactiveOnly = false) {
     if (!data) return;
     setErr(null);
     setSnapshotting(true);
@@ -95,6 +95,7 @@ export function ScenarioEditor() {
         url: useUrl ? data.url : undefined,
         session: SESSION,
         compact: true,
+        interactiveOnly,
       });
       setTree(res.tree);
     } catch (e: any) {
@@ -171,11 +172,28 @@ export function ScenarioEditor() {
     }
   }
 
-  async function playScenario() {
+  async function playScenario(opts: { reset?: boolean } = {}) {
     setErr(null);
     setPlayStatus(null);
     if (!previewActive) setPreviewActive(true);
-    if (!sessionAlive) {
+    if (opts.reset) {
+      setPlayStatus('Resetting session…');
+      setSessionAlive(false);
+      try {
+        await api.closeSession(SESSION).catch(() => undefined);
+        const r = await api.bootstrapSession(SESSION);
+        setSessionAlive(r.alive);
+        if (!r.alive) {
+          setPlayStatus(null);
+          setErr('Reset finished but the session did not come back up.');
+          return;
+        }
+      } catch (e: any) {
+        setPlayStatus(null);
+        setErr(e.message ?? String(e));
+        return;
+      }
+    } else if (!sessionAlive) {
       setPlayStatus('Bootstrapping session…');
       try {
         const r = await api.bootstrapSession(SESSION);
@@ -454,8 +472,15 @@ export function ScenarioEditor() {
             <button onClick={() => setPreviewActive((v) => !v)}>
               {previewActive ? 'stop' : 'start'}
             </button>{' '}
-            <button onClick={playScenario} disabled={data.steps.length === 0}>
+            <button onClick={() => playScenario()} disabled={data.steps.length === 0}>
               ▶ Play scenario
+            </button>{' '}
+            <button
+              onClick={() => playScenario({ reset: true })}
+              disabled={data.steps.length === 0 || resetting}
+              title="Reset the browser session, then play the scenario"
+            >
+              ↻▶ Reset &amp; play
             </button>
             {playStatus && <span className="muted" style={{ marginLeft: 8 }}>{playStatus}</span>}
           </h2>
@@ -468,6 +493,13 @@ export function ScenarioEditor() {
             </button>
             <button onClick={() => takeSnapshot(false)} disabled={snapshotting}>
               Snapshot current page
+            </button>
+            <button
+              onClick={() => takeSnapshot(false, true)}
+              disabled={snapshotting}
+              title="Snapshot current page, interactive elements only (-i)"
+            >
+              Snapshot interactive (-i)
             </button>
           </div>
           {tree && (
