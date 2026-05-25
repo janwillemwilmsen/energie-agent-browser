@@ -3,8 +3,17 @@ export interface Scenario {
   name: string;
   url: string;
   viewport_preset: 'desktop' | 'mobile' | 'both';
+  brand: string | null;
+  type: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface ScenarioCard extends Scenario {
+  latest_run_id: number | null;
+  latest_run_started_at: string | null;
+  latest_run_status: 'queued' | 'running' | 'success' | 'failed' | null;
+  latest_screenshot: string | null;
 }
 
 export interface ScenarioStep {
@@ -70,6 +79,9 @@ export interface SnapshotResponse {
 
 export const api = {
   listScenarios: () => req<Scenario[]>('/api/scenarios'),
+  listScenarioCards: () => req<ScenarioCard[]>('/api/scenarios/cards'),
+  listScenarioRuns: (id: number) =>
+    req<Run[]>(`/api/scenarios/${id}/runs`),
   getScenario: (id: number) => req<ScenarioDetail>(`/api/scenarios/${id}`),
   snapshot: (body: { url?: string; session?: string; compact?: boolean; interactiveOnly?: boolean }) =>
     req<SnapshotResponse>('/api/snapshot', { method: 'POST', body: JSON.stringify(body) }),
@@ -89,10 +101,14 @@ export const api = {
     req<Schedule>(`/api/schedules/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
   deleteSchedule: (id: number) =>
     req<void>(`/api/schedules/${id}`, { method: 'DELETE' }),
-  createScenario: (body: Pick<Scenario, 'name' | 'url' | 'viewport_preset'>) =>
-    req<Scenario>('/api/scenarios', { method: 'POST', body: JSON.stringify(body) }),
-  updateScenario: (id: number, body: Partial<Pick<Scenario, 'name' | 'url' | 'viewport_preset'>>) =>
-    req<Scenario>(`/api/scenarios/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  createScenario: (
+    body: Pick<Scenario, 'name' | 'url' | 'viewport_preset'> &
+      Partial<Pick<Scenario, 'brand' | 'type'>>,
+  ) => req<Scenario>('/api/scenarios', { method: 'POST', body: JSON.stringify(body) }),
+  updateScenario: (
+    id: number,
+    body: Partial<Pick<Scenario, 'name' | 'url' | 'viewport_preset' | 'brand' | 'type'>>,
+  ) => req<Scenario>(`/api/scenarios/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
   deleteScenario: (id: number) =>
     req<void>(`/api/scenarios/${id}`, { method: 'DELETE' }),
   addStep: (

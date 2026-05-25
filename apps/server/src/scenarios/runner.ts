@@ -98,6 +98,33 @@ async function executeStep(ctx: RunContext, step: StepRow): Promise<void> {
       return;
     }
     case 'scroll': {
+      if (payload.toTop) {
+        appendLog(ctx, `scroll to top`);
+        const r = await run(['scroll', 'up', '100000'], {
+          session: ctx.session,
+          timeoutMs: 15_000,
+        });
+        if (r.exitCode !== 0) throw new Error(`scroll failed: ${r.stderr || r.stdout}`);
+        return;
+      }
+      if (payload.toBottom) {
+        // Mirrors agent-browser's documented infinite-scroll pattern
+        // (skill-data/core/templates/capture-workflow.sh): repeated scroll+wait
+        // so IntersectionObserver-based lazy loaders fire on each stride.
+        const stridePx = 800;
+        const waitMs = 600;
+        const iterations = 15;
+        appendLog(ctx, `scroll to bottom (${iterations} × ${stridePx}px)`);
+        for (let i = 0; i < iterations; i++) {
+          const r = await run(['scroll', 'down', String(stridePx)], {
+            session: ctx.session,
+            timeoutMs: 15_000,
+          });
+          if (r.exitCode !== 0) throw new Error(`scroll failed: ${r.stderr || r.stdout}`);
+          await new Promise((res) => setTimeout(res, waitMs));
+        }
+        return;
+      }
       const dy = Number(payload.dy ?? 400);
       const direction = dy >= 0 ? 'down' : 'up';
       appendLog(ctx, `scroll ${direction} ${Math.abs(dy)}`);

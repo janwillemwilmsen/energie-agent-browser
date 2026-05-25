@@ -18,6 +18,38 @@ interface SelectorStrategy {
 
 const SESSION = 'default';
 
+interface MetaDraft {
+  name: string;
+  url: string;
+  viewport_preset: 'desktop' | 'mobile' | 'both';
+  brand: string;
+  type: string;
+}
+
+function emptyDraft(): MetaDraft {
+  return { name: '', url: '', viewport_preset: 'desktop', brand: '', type: '' };
+}
+
+function draftFrom(d: ScenarioDetail): MetaDraft {
+  return {
+    name: d.name,
+    url: d.url,
+    viewport_preset: d.viewport_preset,
+    brand: d.brand ?? '',
+    type: d.type ?? '',
+  };
+}
+
+function draftsEqual(a: MetaDraft, b: MetaDraft): boolean {
+  return (
+    a.name === b.name &&
+    a.url === b.url &&
+    a.viewport_preset === b.viewport_preset &&
+    a.brand === b.brand &&
+    a.type === b.type
+  );
+}
+
 export function ScenarioEditor() {
   const { id } = useParams();
   const scenarioId = Number(id);
@@ -31,6 +63,9 @@ export function ScenarioEditor() {
   const [resetting, setResetting] = useState(false);
   const [sessionAlive, setSessionAlive] = useState<boolean | null>(null);
   const [playStatus, setPlayStatus] = useState<string | null>(null);
+  const [draft, setDraft] = useState<MetaDraft>(emptyDraft());
+  const [savingMeta, setSavingMeta] = useState(false);
+  const [metaSavedAt, setMetaSavedAt] = useState<number | null>(null);
   const termRef = useRef<TerminalShellHandle | null>(null);
 
   useEffect(() => {
@@ -40,7 +75,9 @@ export function ScenarioEditor() {
   async function reload() {
     if (!scenarioId) return;
     try {
-      setData(await api.getScenario(scenarioId));
+      const fresh = await api.getScenario(scenarioId);
+      setData(fresh);
+      setDraft(draftFrom(fresh));
     } catch (e: any) {
       setErr(e.message);
     }
@@ -196,16 +233,111 @@ export function ScenarioEditor() {
     }
   }
 
+  async function saveMeta(e?: React.FormEvent) {
+    e?.preventDefault();
+    if (!data) return;
+    if (savingMeta) return;
+    if (!draft.name.trim() || !draft.url.trim()) {
+      setErr('Name and URL are required.');
+      return;
+    }
+    setSavingMeta(true);
+    setErr(null);
+    try {
+      const updated = await api.updateScenario(scenarioId, {
+        name: draft.name.trim(),
+        url: draft.url.trim(),
+        viewport_preset: draft.viewport_preset,
+        brand: draft.brand.trim() || null,
+        type: draft.type.trim() || null,
+      });
+      const next = { ...data, ...updated };
+      setData(next);
+      setDraft(draftFrom(next));
+      setMetaSavedAt(Date.now());
+    } catch (err: any) {
+      setErr(err.message);
+    } finally {
+      setSavingMeta(false);
+    }
+  }
+
   if (err && !data) return <p className="error">{err}</p>;
   if (!data) return <p>Loading…</p>;
 
+  const dirty = !draftsEqual(draft, draftFrom(data));
+  const savedRecently = metaSavedAt != null && Date.now() - metaSavedAt < 3000;
+
   return (
     <section>
-      <h1>{data.name}</h1>
-      <p>
-        <strong>URL:</strong> {data.url} &mdash; <strong>Viewport:</strong>{' '}
-        {data.viewport_preset} &mdash; uses session <code>{SESSION}</code>
-      </p>
+      <form onSubmit={saveMeta} className="scenario-meta-form">
+        <div className="scenario-meta-row">
+          <label className="scenario-meta-name">
+            <span>Name</span>
+            <input
+              value={draft.name}
+              onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+              required
+            />
+          </label>
+          <label>
+            <span>Viewport</span>
+            <select
+              value={draft.viewport_preset}
+              onChange={(e) =>
+                setDraft({ ...draft, viewport_preset: e.target.value as MetaDraft['viewport_preset'] })
+              }
+            >
+              <option value="desktop">Desktop</option>
+              <option value="mobile">Mobile</option>
+              <option value="both">Both</option>
+            </select>
+          </label>
+        </div>
+        <label className="scenario-meta-url">
+          <span>URL</span>
+          <input
+            value={draft.url}
+            onChange={(e) => setDraft({ ...draft, url: e.target.value })}
+            required
+          />
+        </label>
+        <div className="scenario-meta-row">
+          <label>
+            <span>Brand</span>
+            <input
+              value={draft.brand}
+              onChange={(e) => setDraft({ ...draft, brand: e.target.value })}
+              placeholder="e.g. Acme"
+            />
+          </label>
+          <label>
+            <span>Type</span>
+            <input
+              value={draft.type}
+              onChange={(e) => setDraft({ ...draft, type: e.target.value })}
+              placeholder="e.g. Checkout flow"
+            />
+          </label>
+        </div>
+        <div className="scenario-meta-actions">
+          <button type="submit" disabled={!dirty || savingMeta}>
+            {savingMeta ? 'Saving…' : dirty ? 'Save scenario' : 'Saved'}
+          </button>
+          {dirty && (
+            <button
+              type="button"
+              className="scenario-meta-cancel"
+              onClick={() => setDraft(draftFrom(data))}
+              disabled={savingMeta}
+            >
+              Revert
+            </button>
+          )}
+          {!dirty && savedRecently && <span className="muted">Saved.</span>}
+          <span className="muted">uses session <code>{SESSION}</code></span>
+        </div>
+      </form>
       {err && <p className="error">{err}</p>}
 
       <div className="editor-grid">
@@ -280,6 +412,20 @@ export function ScenarioEditor() {
               disabled={savingStep}
             >
               + screenshot (viewport)
+            </button>
+            <button
+              onClick={() => addStep('scroll', { toBottom: true })}
+              disabled={savingStep}
+              title="Scroll the page to the bottom in strides so lazy-loaded images fire"
+            >
+              + scroll to bottom
+            </button>
+            <button
+              onClick={() => addStep('scroll', { toTop: true })}
+              disabled={savingStep}
+              title="Jump back to the top of the page (useful before targeting a header element)"
+            >
+              + scroll to top
             </button>
             <button
               onClick={() => {
@@ -378,6 +524,13 @@ function summarizeStep(kind: string, p: any): string {
     return `${s.role ?? ''} "${s.name ?? ''}"${txt ? ` ${JSON.stringify(txt)}` : ''}`;
   }
   if (kind === 'screenshot') return `${p.label ?? 'screenshot'}${p.fullPage ? ' (full)' : ''}`;
+  if (kind === 'scroll') {
+    if (p.toBottom) return 'to bottom (lazy-load)';
+    if (p.toTop) return 'to top';
+    const dy = Number(p.dy ?? 0);
+    if (dy) return `${dy > 0 ? 'down' : 'up'} ${Math.abs(dy)}px`;
+    return '';
+  }
   if (kind === 'wait') {
     if (p.selector) return `for ${p.selector.role} "${p.selector.name}"`;
     return `${p.ms ?? 0}ms`;

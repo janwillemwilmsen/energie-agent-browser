@@ -11,14 +11,17 @@ export function PreviewStream({
   const [status, setStatus] = useState<'idle' | 'connecting' | 'live' | 'error' | 'closed'>(
     'idle',
   );
+  const [hasFrame, setHasFrame] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!active) {
       setStatus('idle');
+      setHasFrame(false);
       return;
     }
     setStatus('connecting');
+    setHasFrame(false);
     setError(null);
 
     const url =
@@ -33,6 +36,7 @@ export function PreviewStream({
         const msg = JSON.parse(ev.data);
         if (msg.type === 'frame' && imgRef.current) {
           imgRef.current.src = `data:image/jpeg;base64,${msg.data}`;
+          setHasFrame(true);
           setStatus('live');
         } else if (msg.type === 'error') {
           setError(msg.message);
@@ -65,7 +69,17 @@ export function PreviewStream({
         </span>
       </div>
       {error && <pre className="preview-help">{error}</pre>}
-      <img ref={imgRef} alt="live preview" className="preview-frame" />
+      <img
+        ref={imgRef}
+        alt="live preview"
+        className="preview-frame"
+        style={{ display: hasFrame ? 'block' : 'none' }}
+      />
+      {!hasFrame && !error && (
+        <div className="preview-frame preview-frame-empty">
+          {status === 'connecting' ? 'Connecting to preview…' : 'Preview is off — click start.'}
+        </div>
+      )}
     </div>
   );
 }

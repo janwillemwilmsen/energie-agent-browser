@@ -43,6 +43,11 @@ const StepScroll = z.object({
   selector: SelectorStrategy.optional(),
   dx: z.number().default(0),
   dy: z.number().default(0),
+  // When true, the runner loops `scroll down` calls with short pauses to
+  // trigger IntersectionObserver-based lazy loaders, instead of using dy/dx.
+  toBottom: z.boolean().optional(),
+  // When true, jump back to the top of the page in one call.
+  toTop: z.boolean().optional(),
 });
 const StepScreenshot = z.object({
   kind: z.literal('screenshot'),
@@ -74,12 +79,20 @@ export const Scenario = z.object({
   name: z.string().min(1),
   url: z.string().url(),
   viewport_preset: ViewportPreset,
+  brand: z.string().nullable(),
+  type: z.string().nullable(),
   created_at: z.string(),
   updated_at: z.string(),
 });
 export type Scenario = z.infer<typeof Scenario>;
 
-export const ScenarioCreate = Scenario.pick({ name: true, url: true, viewport_preset: true });
+export const ScenarioCreate = z.object({
+  name: z.string().min(1),
+  url: z.string().url(),
+  viewport_preset: ViewportPreset,
+  brand: z.string().trim().min(1).nullable().optional(),
+  type: z.string().trim().min(1).nullable().optional(),
+});
 export type ScenarioCreate = z.infer<typeof ScenarioCreate>;
 
 export const ScenarioUpdate = ScenarioCreate.partial();

@@ -4,7 +4,9 @@
       "WebSearch",
       "WebFetch(domain:github.com)",
       "WebFetch(domain:agent-browser.dev)",
-      "Bash(git -C C:/www/energie-agent-browser log --oneline -5)"
+      "Bash(git -C C:/www/energie-agent-browser log --oneline -5)",
+      "Bash(npm run *)",
+      "Bash(npx tsc *)"
     ]
   }
 }

@@ -3,10 +3,56 @@ import { z } from 'zod';
 import { ScenarioCreate, ScenarioUpdate, ViewportPreset } from '@eab/shared';
 import { getDb } from '../db/index.js';
 
+function normalizeTag(value: unknown): string | null {
+  if (value == null) return null;
+  const trimmed = String(value).trim();
+  return trimmed === '' ? null : trimmed;
+}
+
 export async function scenariosRoutes(app: FastifyInstance) {
   app.get('/api/scenarios', async () => {
     const db = getDb();
     return db.prepare('SELECT * FROM scenarios ORDER BY updated_at DESC').all();
+  });
+
+  // Homepage data: one row per scenario with the latest run's last screenshot.
+  // The last screenshot in a run reflects the *final* state captured, which is
+  // what the user wants as the card thumbnail.
+  app.get('/api/scenarios/cards', async () => {
+    const db = getDb();
+    const scenarios = db
+      .prepare('SELECT * FROM scenarios ORDER BY updated_at DESC')
+      .all() as Array<{ id: number }>;
+
+    const latestRunStmt = db.prepare(
+      `SELECT id, started_at, status, screenshot_paths_json
+       FROM runs
+       WHERE scenario_id = ? AND status IN ('success', 'failed')
+       ORDER BY started_at DESC
+       LIMIT 1`,
+    );
+
+    return scenarios.map((s) => {
+      const run = latestRunStmt.get(s.id) as
+        | { id: number; started_at: string; status: string; screenshot_paths_json: string }
+        | undefined;
+      let lastShot: string | null = null;
+      if (run) {
+        try {
+          const shots = JSON.parse(run.screenshot_paths_json) as string[];
+          if (Array.isArray(shots) && shots.length > 0) lastShot = shots[shots.length - 1] ?? null;
+        } catch {
+          /* ignore */
+        }
+      }
+      return {
+        ...s,
+        latest_run_id: run?.id ?? null,
+        latest_run_started_at: run?.started_at ?? null,
+        latest_run_status: run?.status ?? null,
+        latest_screenshot: lastShot,
+      };
+    });
   });
 
   app.get<{ Params: { id: string } }>('/api/scenarios/:id', async (req, reply) => {
@@ -19,15 +65,36 @@ export async function scenariosRoutes(app: FastifyInstance) {
     return { ...row, steps };
   });
 
+  // Timeline data: every run for a single scenario, oldest first so the UI can
+  // render left-to-right without flipping. Screenshots stay as filenames; the
+  // existing /api/runs/:id/screenshots/:name endpoint serves the PNG bytes.
+  app.get<{ Params: { id: string } }>('/api/scenarios/:id/runs', async (req, reply) => {
+    const scenarioId = Number(req.params.id);
+    const db = getDb();
+    const scenario = db.prepare('SELECT id FROM scenarios WHERE id = ?').get(scenarioId);
+    if (!scenario) return reply.code(404).send({ error: 'not_found' });
+    return db
+      .prepare(
+        'SELECT * FROM runs WHERE scenario_id = ? ORDER BY started_at ASC, id ASC',
+      )
+      .all(scenarioId);
+  });
+
   app.post('/api/scenarios', async (req, reply) => {
     const body = ScenarioCreate.parse(req.body);
     const db = getDb();
     const info = db
       .prepare(
-        `INSERT INTO scenarios (name, url, viewport_preset)
-         VALUES (?, ?, ?)`,
+        `INSERT INTO scenarios (name, url, viewport_preset, brand, type)
+         VALUES (?, ?, ?, ?, ?)`,
       )
-      .run(body.name, body.url, body.viewport_preset ?? 'desktop');
+      .run(
+        body.name,
+        body.url,
+        body.viewport_preset ?? 'desktop',
+        normalizeTag(body.brand),
+        normalizeTag(body.type),
+      );
     return reply.code(201).send(
       db.prepare('SELECT * FROM scenarios WHERE id = ?').get(info.lastInsertRowid),
     );
@@ -42,9 +109,16 @@ export async function scenariosRoutes(app: FastifyInstance) {
     const next = { ...(existing as any), ...body };
     db.prepare(
       `UPDATE scenarios
-       SET name = ?, url = ?, viewport_preset = ?, updated_at = CURRENT_TIMESTAMP
+       SET name = ?, url = ?, viewport_preset = ?, brand = ?, type = ?, updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
-    ).run(next.name, next.url, next.viewport_preset, Number(req.params.id));
+    ).run(
+      next.name,
+      next.url,
+      next.viewport_preset,
+      normalizeTag(next.brand),
+      normalizeTag(next.type),
+      Number(req.params.id),
+    );
 
     return db.prepare('SELECT * FROM scenarios WHERE id = ?').get(Number(req.params.id));
   });
