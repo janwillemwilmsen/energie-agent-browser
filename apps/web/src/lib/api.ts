@@ -57,6 +57,48 @@ export interface Run {
   status: 'queued' | 'running' | 'success' | 'failed';
   log_text: string;
   screenshot_paths_json: string;
+  // Joined from the scenario by GET /api/runs (absent on the single-run endpoint).
+  scenario_name?: string | null;
+  brand?: string | null;
+  type?: string | null;
+}
+
+export interface Artifact {
+  id: number;
+  kind: 'run_screenshot' | 'diff';
+  file_path: string;
+  scenario_id: number | null;
+  source_run_id: number | null;
+  label: string | null;
+  viewport: string | null;
+  width: number | null;
+  height: number | null;
+  created_at: string;
+}
+
+export interface Comparison {
+  id: number;
+  scenario_id: number | null;
+  baseline_artifact_id: number;
+  target_artifact_id: number;
+  diff_artifact_id: number | null;
+  threshold: number;
+  mismatch_ratio: number | null;
+  status: 'ok' | 'size_mismatch' | 'error';
+  note: string | null;
+  created_at: string;
+  baseline: Artifact | null;
+  target: Artifact | null;
+  diff: Artifact | null;
+}
+
+export type ArtifactRef = { artifactId: number } | { runId: number; slot: string };
+
+export interface CompareRunsResult {
+  created: Comparison[];
+  matched: string[];
+  onlyBaseline: string[];
+  onlyTarget: string[];
 }
 
 export interface A11yNode {
@@ -149,4 +191,26 @@ export const api = {
       `/api/sessions/${encodeURIComponent(name)}/close`,
       { method: 'POST', body: JSON.stringify({}) },
     ),
+  listComparisons: (scenarioId?: number) =>
+    req<Comparison[]>(
+      `/api/comparisons${scenarioId != null ? `?scenario_id=${scenarioId}` : ''}`,
+    ),
+  getComparison: (id: number) => req<Comparison>(`/api/comparisons/${id}`),
+  createComparison: (body: {
+    scenarioId?: number;
+    threshold?: number;
+    baseline: ArtifactRef;
+    target: ArtifactRef;
+  }) => req<Comparison>('/api/comparisons', { method: 'POST', body: JSON.stringify(body) }),
+  deleteComparison: (id: number) =>
+    req<void>(`/api/comparisons/${id}`, { method: 'DELETE' }),
+  compareRuns: (
+    scenarioId: number,
+    body: { baselineRunId: number; targetRunId: number; threshold?: number },
+  ) =>
+    req<CompareRunsResult>(`/api/scenarios/${scenarioId}/compare-runs`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  artifactImageUrl: (id: number) => `/api/artifacts/${id}/image`,
 };

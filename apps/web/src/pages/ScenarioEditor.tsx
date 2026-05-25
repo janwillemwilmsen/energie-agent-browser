@@ -432,6 +432,32 @@ export function ScenarioEditor() {
               + screenshot (viewport)
             </button>
             <button
+              onClick={() =>
+                addStep('screenshot', {
+                  label: `step-${data.steps.length}`,
+                  fullPage: true,
+                  viewport: 'mobile',
+                })
+              }
+              disabled={savingStep}
+              title="Switch to the mobile device, capture a full-page screenshot, then restore the viewport"
+            >
+              + screenshot (mobile)
+            </button>
+            <button
+              onClick={() =>
+                addStep('screenshot', {
+                  label: `step-${data.steps.length}`,
+                  fullPage: true,
+                  annotate: true,
+                })
+              }
+              disabled={savingStep}
+              title="Full-page screenshot with numbered labels overlaid on interactive elements (legend in the run log)"
+            >
+              + screenshot (annotated)
+            </button>
+            <button
               onClick={() => addStep('scroll', { toBottom: true })}
               disabled={savingStep}
               title="Scroll the page to the bottom in strides so lazy-loaded images fire"
@@ -555,7 +581,8 @@ function summarizeStep(kind: string, p: any): string {
     const txt = p.text ?? p.value ?? '';
     return `${s.role ?? ''} "${s.name ?? ''}"${txt ? ` ${JSON.stringify(txt)}` : ''}`;
   }
-  if (kind === 'screenshot') return `${p.label ?? 'screenshot'}${p.fullPage ? ' (full)' : ''}`;
+  if (kind === 'screenshot')
+    return `${p.label ?? 'screenshot'}${p.fullPage ? ' (full)' : ''}${p.viewport === 'mobile' ? ' (mobile)' : ''}${p.annotate ? ' (annotated)' : ''}`;
   if (kind === 'scroll') {
     if (p.toBottom) return 'to bottom (lazy-load)';
     if (p.toTop) return 'to top';

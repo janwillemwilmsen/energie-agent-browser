@@ -53,6 +53,11 @@ const StepScreenshot = z.object({
   kind: z.literal('screenshot'),
   label: z.string().default('screenshot'),
   fullPage: z.boolean().default(true),
+  // When 'mobile', the runner temporarily switches to the mobile device,
+  // captures, then restores the run's viewport.
+  viewport: z.enum(['mobile']).optional(),
+  // Overlay numbered labels on interactive elements (agent-browser --annotate).
+  annotate: z.boolean().optional(),
 });
 const StepWait = z.object({
   kind: z.literal('wait'),

@@ -49,7 +49,14 @@ export async function runsRoutes(app: FastifyInstance) {
 
   app.get('/api/runs', async () => {
     const db = getDb();
-    return db.prepare('SELECT * FROM runs ORDER BY id DESC LIMIT 100').all();
+    return db
+      .prepare(
+        `SELECT runs.*, scenarios.name AS scenario_name, scenarios.brand, scenarios.type
+         FROM runs
+         LEFT JOIN scenarios ON scenarios.id = runs.scenario_id
+         ORDER BY runs.id DESC LIMIT 100`,
+      )
+      .all();
   });
 
   app.get<{ Params: { id: string } }>('/api/runs/:id', async (req, reply) => {

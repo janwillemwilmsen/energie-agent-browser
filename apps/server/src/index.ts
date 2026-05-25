@@ -6,6 +6,7 @@ import { migrate } from './db/migrate.js';
 import { scenariosRoutes } from './routes/scenarios.js';
 import { snapshotRoutes } from './routes/snapshot.js';
 import { runsRoutes } from './routes/runs.js';
+import { diffsRoutes } from './routes/diffs.js';
 import { schedulesRoutes } from './routes/schedules.js';
 import { sessionsRoutes } from './routes/sessions.js';
 import { terminalWsRoute } from './ws/terminal.js';
@@ -38,6 +39,7 @@ async function main() {
   await app.register(scenariosRoutes);
   await app.register(snapshotRoutes);
   await app.register(runsRoutes);
+  await app.register(diffsRoutes);
   await app.register(schedulesRoutes);
   await app.register(sessionsRoutes);
   await app.register(terminalWsRoute);

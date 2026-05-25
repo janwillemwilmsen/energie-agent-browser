@@ -38,6 +38,10 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function appendLog(ctx: RunContext, line: string): void {
   const stamped = `[${nowIso()}] ${line}`;
   ctx.log.push(stamped);
@@ -179,20 +183,51 @@ async function executeStep(ctx: RunContext, step: StepRow): Promise<void> {
     }
     case 'screenshot': {
       const label = String(payload.label ?? `step-${step.position}`).replace(/[^a-z0-9._-]/gi, '_');
-      const filename = `${step.position.toString().padStart(3, '0')}-${label}-${ctx.viewport}.png`;
+      // A 'mobile' shot captures at the mobile device regardless of the run's
+      // viewport, so it gets the 'mobile' suffix (and pairs across runs in the
+      // diff view). Otherwise it follows the run's current viewport.
+      const mobileShot = payload.viewport === 'mobile';
+      const suffix = mobileShot ? 'mobile' : ctx.viewport;
+      const filename = `${step.position.toString().padStart(3, '0')}-${label}-${suffix}.png`;
       const filepath = path.join(ctx.screenshotDir, filename);
       // agent-browser's screenshot default is VIEWPORT-only; --full captures
       // the entire scrollable page. Step payload's `fullPage` defaults to true
       // on the frontend, so most steps end up with --full unless explicitly
       // opted out.
       const fullPage = payload.fullPage !== false;
+      // --annotate overlays numbered labels on interactive elements and prints
+      // a legend (label [N] -> @eN role/name) to stdout.
+      const annotate = payload.annotate === true;
+
+      if (mobileShot) {
+        // Let the current layout settle, switch to the mobile device, let the
+        // responsive reflow happen, then capture.
+        await sleep(50);
+        appendLog(ctx, `> set device "${MOBILE_DEVICE}" (mobile screenshot)`);
+        await run(['set', 'device', MOBILE_DEVICE], { session: ctx.session, timeoutMs: 15_000 });
+        await sleep(50);
+      }
+
       const args = ['screenshot'];
       if (fullPage) args.push('--full');
+      if (annotate) args.push('--annotate');
       args.push(filepath);
-      appendLog(ctx, `screenshot${fullPage ? ' (full)' : ' (viewport)'} → ${filename}`);
+      appendLog(
+        ctx,
+        `screenshot${fullPage ? ' (full)' : ' (viewport)'}${mobileShot ? ' (mobile)' : ''}${annotate ? ' (annotated)' : ''} → ${filename}`,
+      );
       const r = await run(args, { session: ctx.session, timeoutMs: 60_000 });
       if (r.exitCode !== 0) throw new Error(`screenshot failed: ${r.stderr || r.stdout}`);
       ctx.screenshots.push(filename);
+      // The annotate legend is on stdout — keep it in the run log so the labels
+      // are interpretable later.
+      if (annotate && r.stdout.trim()) appendLog(ctx, r.stdout.trim());
+
+      if (mobileShot) {
+        // Restore the run's viewport so following steps run as before.
+        await sleep(50);
+        await applyViewport(ctx);
+      }
       return;
     }
     default:

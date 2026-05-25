@@ -9,5 +9,6 @@ data/sqlite.db-journal
 data/sqlite.db-shm
 data/sqlite.db-wal
 data/screenshots
+data/diffs
 *.log
 .vite

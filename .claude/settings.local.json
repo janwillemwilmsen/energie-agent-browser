@@ -6,7 +6,25 @@
       "WebFetch(domain:agent-browser.dev)",
       "Bash(git -C C:/www/energie-agent-browser log --oneline -5)",
       "Bash(npm run *)",
-      "Bash(npx tsc *)"
+      "Bash(npx tsc *)",
+      "Bash(grep -rB1 -A8 -i 'diff' \"C:/www/energie-agent-browser/node_modules/agent-browser/skill-data/core/references/commands.md\")",
+      "Bash(cat apps/server/package.json)",
+      "Bash(node -e \"const p=require\\('./package.json'\\); console.log\\(JSON.stringify\\({deps:p.dependencies,dev:p.devDependencies,workspaces:p.workspaces},null,2\\)\\)\")",
+      "Bash(npm install *)",
+      "Bash(node -e \"console.log\\('pixelmatch', require\\('pixelmatch/package.json'\\).version\\); console.log\\('pngjs', require\\('pngjs/package.json'\\).version\\)\")",
+      "Bash(node -e \"const fs=require\\('fs'\\); const e=fs.existsSync\\('.env'\\)?fs.readFileSync\\('.env','utf8'\\):''; console.log\\('has BROWSERLESS_URL:', /BROWSERLESS_URL=/.test\\(e\\)\\); console.log\\('has BROWSERLESS_TOKEN:', /BROWSERLESS_TOKEN=/.test\\(e\\)\\);\")",
+      "Bash(ls data *)",
+      "Bash(curl -s http://localhost:3001/health)",
+      "Bash(rm -f ._server.log)",
+      "Bash(curl -s http://localhost:3011/health)",
+      "Bash(curl -s -X POST http://localhost:3011/api/scenarios/1/compare-runs -H 'Content-Type: application/json' -d '{\"baselineRunId\":75,\"targetRunId\":76}')",
+      "Bash(curl -s -D - -o ._img.png http://localhost:3011/api/artifacts/3/image)",
+      "Bash(node -e \"console.log\\('bytes:', require\\('fs'\\).statSync\\('._img.png'\\).size\\)\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" -X DELETE http://localhost:3011/api/runs/75)",
+      "Bash(curl -s \"http://localhost:3011/api/comparisons?scenario_id=1\")",
+      "Bash(node -e \"let d='';process.stdin.on\\('data',c=>d+=c\\).on\\('end',\\(\\)=>{const j=JSON.parse\\(d\\);console.log\\('count:',j.length\\);for\\(const c of j\\)console.log\\('  cmp',c.id,'status',c.status,'baseline file:',c.baseline?.file_path,'exists baseline img?'\\)}\\)\")",
+      "Bash(curl -s -o /dev/null -w \"artifact1 http=%{http_code}\\\\n\" http://localhost:3011/api/artifacts/1/image)",
+      "Bash(node_modules/agent-browser/bin/agent-browser-win32-x64.exe screenshot *)"
     ]
   }
 }
