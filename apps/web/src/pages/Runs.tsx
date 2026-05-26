@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { api, type Run } from '../lib/api.js';
 
 export function Runs() {
@@ -8,10 +8,17 @@ export function Runs() {
   const [err, setErr] = useState<string | null>(null);
   const [selectedBrands, setSelectedBrands] = useState<Set<string>>(new Set());
   const [selectedTypes, setSelectedTypes] = useState<Set<string>>(new Set());
-  // Two runs staged for a screenshot comparison (baseline = first picked).
-  const [compareIds, setCompareIds] = useState<number[]>([]);
+  // Ordered, unbounded selection. Drives both bulk-delete and compare (which
+  // requires exactly two, baseline = first picked). Order is preserved.
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [lastIndex, setLastIndex] = useState<number | null>(null);
   const [comparing, setComparing] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  // Open a specific run's panel when arrived via /runs?run=<id> (e.g. from the
+  // editor's play status). Applied once, so the 4s refresh won't fight clicks.
+  const appliedRunParam = useRef(false);
 
   async function load() {
     try {
@@ -27,13 +34,16 @@ export function Runs() {
     return () => clearInterval(t);
   }, []);
 
-  function toggleCompare(id: number) {
-    setCompareIds((cur) => {
-      if (cur.includes(id)) return cur.filter((x) => x !== id);
-      if (cur.length >= 2) return [cur[1]!, id];
-      return [...cur, id];
-    });
-  }
+  useEffect(() => {
+    if (appliedRunParam.current) return;
+    const raw = searchParams.get('run');
+    if (!raw) return;
+    const r = runs.find((x) => x.id === Number(raw));
+    if (r) {
+      setSelected(r);
+      appliedRunParam.current = true;
+    }
+  }, [runs, searchParams]);
 
   const brands = useMemo(() => collectTagValues(runs, 'brand'), [runs]);
   const types = useMemo(() => collectTagValues(runs, 'type'), [runs]);
@@ -55,20 +65,56 @@ export function Runs() {
 
   const activeFilterCount = selectedBrands.size + selectedTypes.size;
 
-  const compareRunRows = compareIds
+  const isSelected = (id: number) => selectedIds.includes(id);
+
+  // Single toggle, or a shift-click range from the previously-clicked row
+  // (over the currently visible/filtered rows).
+  function toggleSelect(id: number, index: number, shift: boolean) {
+    if (shift && lastIndex != null) {
+      const [a, b] = lastIndex < index ? [lastIndex, index] : [index, lastIndex];
+      const rangeIds = visibleRuns.slice(a, b + 1).map((r) => r.id);
+      const selecting = !isSelected(id);
+      let next = selectedIds.slice();
+      if (selecting) {
+        for (const rid of rangeIds) if (!next.includes(rid)) next.push(rid);
+      } else {
+        next = next.filter((x) => !rangeIds.includes(x));
+      }
+      setSelectedIds(next);
+    } else {
+      setSelectedIds(isSelected(id) ? selectedIds.filter((x) => x !== id) : [...selectedIds, id]);
+    }
+    setLastIndex(index);
+  }
+
+  const allVisibleSelected =
+    visibleRuns.length > 0 && visibleRuns.every((r) => isSelected(r.id));
+  const someVisibleSelected = visibleRuns.some((r) => isSelected(r.id));
+
+  function toggleSelectAll() {
+    if (allVisibleSelected) {
+      const visible = new Set(visibleRuns.map((r) => r.id));
+      setSelectedIds(selectedIds.filter((id) => !visible.has(id)));
+    } else {
+      const next = selectedIds.slice();
+      for (const r of visibleRuns) if (!next.includes(r.id)) next.push(r.id);
+      setSelectedIds(next);
+    }
+  }
+
+  const selectedRows = selectedIds
     .map((id) => runs.find((r) => r.id === id))
     .filter((r): r is Run => !!r);
-  const sameScenario =
-    compareRunRows.length === 2 &&
-    compareRunRows[0]!.scenario_id === compareRunRows[1]!.scenario_id;
+  const canCompare =
+    selectedRows.length === 2 && selectedRows[0]!.scenario_id === selectedRows[1]!.scenario_id;
 
   async function runComparison() {
-    if (compareRunRows.length !== 2 || !sameScenario) return;
+    if (!canCompare) return;
     setComparing(true);
     setErr(null);
     try {
       // First picked run is the baseline.
-      const [baseline, target] = compareRunRows;
+      const [baseline, target] = selectedRows;
       const res = await api.compareRuns(baseline!.scenario_id, {
         baselineRunId: baseline!.id,
         targetRunId: target!.id,
@@ -77,12 +123,29 @@ export function Runs() {
         setErr('No matching screenshots between those runs (nothing to diff).');
         return;
       }
-      setCompareIds([]);
+      setSelectedIds([]);
       navigate('/diffs');
     } catch (e: any) {
       setErr(e.message);
     } finally {
       setComparing(false);
+    }
+  }
+
+  async function deleteSelected() {
+    if (selectedIds.length === 0) return;
+    if (!confirm(`Delete ${selectedIds.length} run(s) and their screenshots?`)) return;
+    setDeleting(true);
+    setErr(null);
+    try {
+      await api.deleteRuns(selectedIds);
+      if (selected && selectedIds.includes(selected.id)) setSelected(null);
+      setSelectedIds([]);
+      await load();
+    } catch (e: any) {
+      setErr(e.message);
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -181,24 +244,24 @@ export function Runs() {
 
       <div className="compare-bar">
         <span className="muted">
-          Tick two runs of the same scenario to compare their screenshots.
+          Tick runs to delete in bulk, or tick exactly two of the same scenario to compare.
         </span>
-        {compareIds.length > 0 && (
-          <span>
-            Selected: {compareIds.join(', ')}
-            {compareRunRows.length === 2 && !sameScenario && (
-              <span className="error"> — runs must share a scenario</span>
-            )}
-          </span>
+        {selectedIds.length > 0 && <span>{selectedIds.length} selected</span>}
+        {selectedRows.length === 2 && !canCompare && (
+          <span className="error">runs must share a scenario to compare</span>
         )}
-        <button
-          onClick={runComparison}
-          disabled={compareRunRows.length !== 2 || !sameScenario || comparing}
-        >
+        <button onClick={runComparison} disabled={!canCompare || comparing}>
           {comparing ? 'Comparing…' : 'Compare runs'}
         </button>
-        {compareIds.length > 0 && (
-          <button className="diff-tray-clear" onClick={() => setCompareIds([])}>
+        <button
+          className="btn-danger"
+          onClick={deleteSelected}
+          disabled={selectedIds.length === 0 || deleting}
+        >
+          {deleting ? 'Deleting…' : `Delete selected (${selectedIds.length})`}
+        </button>
+        {selectedIds.length > 0 && (
+          <button className="diff-tray-clear" onClick={() => setSelectedIds([])}>
             Clear
           </button>
         )}
@@ -208,7 +271,17 @@ export function Runs() {
         <table className="table">
           <thead>
             <tr>
-              <th></th>
+              <th>
+                <input
+                  type="checkbox"
+                  checked={allVisibleSelected}
+                  ref={(el) => {
+                    if (el) el.indeterminate = !allVisibleSelected && someVisibleSelected;
+                  }}
+                  onChange={toggleSelectAll}
+                  title="Select all (filtered)"
+                />
+              </th>
               <th>ID</th>
               <th>Scenario</th>
               <th>Name</th>
@@ -220,21 +293,27 @@ export function Runs() {
             </tr>
           </thead>
           <tbody>
-            {visibleRuns.map((r) => (
+            {visibleRuns.map((r, idx) => (
               <tr
                 key={r.id}
                 onClick={() => setSelected(r)}
                 style={{
                   cursor: 'pointer',
-                  background: selected?.id === r.id ? 'rgba(56,189,248,0.08)' : undefined,
+                  background: isSelected(r.id)
+                    ? 'rgba(56,189,248,0.12)'
+                    : selected?.id === r.id
+                      ? 'rgba(56,189,248,0.08)'
+                      : undefined,
                 }}
               >
                 <td onClick={(e) => e.stopPropagation()}>
                   <input
                     type="checkbox"
-                    checked={compareIds.includes(r.id)}
-                    onChange={() => toggleCompare(r.id)}
-                    title="Select for comparison"
+                    checked={isSelected(r.id)}
+                    onChange={(e) =>
+                      toggleSelect(r.id, idx, (e.nativeEvent as MouseEvent).shiftKey)
+                    }
+                    title="Select run (shift-click for a range)"
                   />
                 </td>
                 <td>{r.id}</td>

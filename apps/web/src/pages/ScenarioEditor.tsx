@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import {
   DndContext,
   closestCenter,
@@ -81,6 +81,7 @@ export function ScenarioEditor() {
   const [resetting, setResetting] = useState(false);
   const [sessionAlive, setSessionAlive] = useState<boolean | null>(null);
   const [playStatus, setPlayStatus] = useState<string | null>(null);
+  const [lastRunId, setLastRunId] = useState<number | null>(null);
   const [draft, setDraft] = useState<MetaDraft>(emptyDraft());
   const [savingMeta, setSavingMeta] = useState(false);
   const [metaSavedAt, setMetaSavedAt] = useState<number | null>(null);
@@ -219,6 +220,7 @@ export function ScenarioEditor() {
   async function playScenario(opts: { reset?: boolean } = {}) {
     setErr(null);
     setPlayStatus(null);
+    setLastRunId(null);
     if (!previewActive) setPreviewActive(true);
     if (opts.reset) {
       setPlayStatus('Resetting session…');
@@ -256,6 +258,7 @@ export function ScenarioEditor() {
     try {
       setPlayStatus('Starting run…');
       const run = await api.startRun(scenarioId);
+      setLastRunId(run.id);
       setPlayStatus(`Run #${run.id} ${run.status}`);
       // Poll the run row until it reaches a terminal state.
       const deadline = Date.now() + 120_000;
@@ -540,7 +543,14 @@ export function ScenarioEditor() {
             >
               ↻▶ Reset &amp; play
             </button>
-            {playStatus && <span className="muted" style={{ marginLeft: 8 }}>{playStatus}</span>}
+            {playStatus &&
+              (lastRunId != null ? (
+                <Link to={`/runs?run=${lastRunId}`} className="muted" style={{ marginLeft: 8 }}>
+                  {playStatus}
+                </Link>
+              ) : (
+                <span className="muted" style={{ marginLeft: 8 }}>{playStatus}</span>
+              ))}
           </h2>
           <PreviewStream session={SESSION} active={previewActive} />
 

@@ -2,6 +2,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
 import type { FastifyInstance } from 'fastify';
+import { z } from 'zod';
 import { config } from '../config.js';
 import { getDb } from '../db/index.js';
 import { executeScenario } from '../scenarios/runner.js';
@@ -78,6 +79,23 @@ export async function runsRoutes(app: FastifyInstance) {
       return reply.send(stream);
     },
   );
+
+  app.post('/api/runs/delete', async (req, reply) => {
+    const Body = z.object({ ids: z.array(z.number().int()).min(1) });
+    const { ids } = Body.parse(req.body);
+    const db = getDb();
+    const deleted = db.transaction((runIds: number[]) => {
+      const del = db.prepare('DELETE FROM runs WHERE id = ?');
+      let n = 0;
+      for (const id of runIds) n += del.run(id).changes;
+      return n;
+    })(ids);
+    for (const id of ids) {
+      const dir = path.join(config.dataDir, 'screenshots', String(id));
+      try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
+    }
+    return { deleted };
+  });
 
   app.delete<{ Params: { id: string } }>('/api/runs/:id', async (req, reply) => {
     const runId = Number(req.params.id);

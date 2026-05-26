@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, type Scenario } from '../lib/api.js';
 
+const SESSION = 'default';
+
 export function Scenarios() {
   const [items, setItems] = useState<Scenario[]>([]);
   const [name, setName] = useState('');
@@ -10,6 +12,10 @@ export function Scenarios() {
   const [brand, setBrand] = useState('');
   const [type, setType] = useState('');
   const [err, setErr] = useState<string | null>(null);
+  // Which scenario is currently being launched, and a short status line. Runs
+  // share the single 'default' session, so only one launch happens at a time.
+  const [runningId, setRunningId] = useState<number | null>(null);
+  const [runStatus, setRunStatus] = useState<string | null>(null);
 
   async function load() {
     try {
@@ -50,6 +56,32 @@ export function Scenarios() {
     await load();
   }
 
+  // Reset the browser session (close + bootstrap a fresh one) so the run starts
+  // clean, then kick off the run.
+  async function runScenario(s: Scenario) {
+    if (runningId != null) return;
+    setErr(null);
+    setRunningId(s.id);
+    setRunStatus(`Resetting browser for "${s.name}"…`);
+    try {
+      await api.closeSession(SESSION).catch(() => undefined);
+      const boot = await api.bootstrapSession(SESSION);
+      if (!boot.alive) {
+        setErr('Browser session did not come up after reset. Try again.');
+        setRunStatus(null);
+        return;
+      }
+      setRunStatus(`Starting run for "${s.name}"…`);
+      const run = await api.startRun(s.id);
+      setRunStatus(`Run #${run.id} started for "${s.name}".`);
+    } catch (e: any) {
+      setErr(e.message ?? String(e));
+      setRunStatus(null);
+    } finally {
+      setRunningId(null);
+    }
+  }
+
   async function updateTag(s: Scenario, field: 'brand' | 'type', value: string) {
     const next = value.trim() || null;
     if (next === s[field]) return;
@@ -65,6 +97,11 @@ export function Scenarios() {
     <section>
       <h1>Scenarios</h1>
       {err && <p className="error">{err}</p>}
+      {runStatus && (
+        <p className="muted">
+          {runStatus} <Link to="/runs">See Runs</Link>
+        </p>
+      )}
 
       <details className="card">
         <summary><h3>New scenario</h3></summary>
@@ -134,8 +171,17 @@ export function Scenarios() {
                 />
               </td>
               <td>{s.updated_at}</td>
-              <td>
-                <button onClick={() => remove(s.id)}>Delete</button>
+              <td className="scenario-actions">
+                <button
+                  onClick={() => runScenario(s)}
+                  disabled={runningId != null}
+                  title="Reset the browser session, then run this scenario"
+                >
+                  {runningId === s.id ? 'Running…' : '▶ Run'}
+                </button>
+                <button onClick={() => remove(s.id)} disabled={runningId != null}>
+                  Delete
+                </button>
               </td>
             </tr>
           ))}

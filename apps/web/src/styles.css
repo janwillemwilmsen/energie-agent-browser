@@ -185,6 +185,15 @@ code { background: rgba(255,255,255,0.06); padding: 2px 4px; border-radius: 3px;
   font-size: 11px;
 }
 
+.scenario-actions { display: flex; gap: 8px; white-space: nowrap; }
+
+.btn-danger {
+  background: rgba(248,113,113,0.15);
+  color: #f87171;
+  border: 1px solid rgba(248,113,113,0.6);
+}
+.btn-danger:disabled { opacity: 0.45; }
+
 .compare-bar {
   display: flex;
   align-items: center;

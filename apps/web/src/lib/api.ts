@@ -136,6 +136,11 @@ export const api = {
   getRun: (id: number) => req<Run>(`/api/runs/${id}`),
   deleteRun: (id: number) => req<void>(`/api/runs/${id}`, { method: 'DELETE' }),
   deleteAllRuns: () => req<void>('/api/runs', { method: 'DELETE' }),
+  deleteRuns: (ids: number[]) =>
+    req<{ deleted: number }>('/api/runs/delete', {
+      method: 'POST',
+      body: JSON.stringify({ ids }),
+    }),
   listSchedules: () => req<Schedule[]>('/api/schedules'),
   createSchedule: (body: { scenario_id: number; cron_expr: string; enabled: boolean }) =>
     req<Schedule>('/api/schedules', { method: 'POST', body: JSON.stringify(body) }),
