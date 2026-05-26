@@ -225,6 +225,50 @@ export async function scenariosRoutes(app: FastifyInstance) {
       return result;
     },
   );
+
+  // Reorder all of a scenario's steps in one shot. Body is the step ids in the
+  // desired order; positions are rewritten to match (0..n-1). Rejects unless the
+  // ids are exactly the scenario's current step set.
+  const ReorderBody = z.object({ order: z.array(z.number().int()).min(1) });
+  app.post<{ Params: { id: string } }>(
+    '/api/scenarios/:id/steps/reorder',
+    async (req, reply) => {
+      const { order } = ReorderBody.parse(req.body);
+      const scenarioId = Number(req.params.id);
+      const db = getDb();
+
+      const tx = db.transaction(() => {
+        const existing = db
+          .prepare('SELECT id FROM scenario_steps WHERE scenario_id = ?')
+          .all(scenarioId) as { id: number }[];
+        const existingIds = new Set(existing.map((s) => s.id));
+        const orderSet = new Set(order);
+        if (
+          order.length !== existingIds.size ||
+          orderSet.size !== order.length ||
+          !order.every((id) => existingIds.has(id))
+        ) {
+          return { ok: false as const };
+        }
+        // Two-phase to avoid transiently colliding on the UNIQUE-ish position
+        // values: park everything in a high range first, then assign 0..n-1.
+        const update = db.prepare(
+          'UPDATE scenario_steps SET position = ? WHERE id = ? AND scenario_id = ?',
+        );
+        order.forEach((id, i) => update.run(i + 1000, id, scenarioId));
+        order.forEach((id, i) => update.run(i, id, scenarioId));
+        return { ok: true as const };
+      });
+
+      if (!tx().ok) {
+        return reply.code(400).send({ error: 'order_mismatch' });
+      }
+      const steps = db
+        .prepare('SELECT * FROM scenario_steps WHERE scenario_id = ? ORDER BY position')
+        .all(scenarioId);
+      return { reordered: true, steps };
+    },
+  );
 }
 
 export { ViewportPreset };

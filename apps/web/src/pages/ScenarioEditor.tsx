@@ -1,10 +1,28 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+import {
   api,
   type A11yNode,
   type A11yTree,
   type ScenarioDetail,
+  type ScenarioStep,
 } from '../lib/api.js';
 import { PreviewStream } from '../lib/screencast.js';
 import { TerminalShell, type TerminalShellHandle } from '../lib/TerminalShell.js';
@@ -68,6 +86,12 @@ export function ScenarioEditor() {
   const [metaSavedAt, setMetaSavedAt] = useState<number | null>(null);
   const termRef = useRef<TerminalShellHandle | null>(null);
 
+  const sensors = useSensors(
+    // A small drag threshold so a click on the handle still works as a click.
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+
   useEffect(() => {
     api.sessionStatus(SESSION).then((s) => setSessionAlive(s.alive)).catch(() => undefined);
   }, []);
@@ -102,6 +126,26 @@ export function ScenarioEditor() {
       setErr(e.message);
     } finally {
       setSnapshotting(false);
+    }
+  }
+
+  async function onStepDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    if (!data || !over || active.id === over.id) return;
+    const ids = data.steps.map((s) => s.id);
+    const from = ids.indexOf(Number(active.id));
+    const to = ids.indexOf(Number(over.id));
+    if (from === -1 || to === -1) return;
+    const newSteps = arrayMove(data.steps, from, to);
+    setData({ ...data, steps: newSteps }); // optimistic
+    setSavingStep(true);
+    try {
+      await api.reorderSteps(scenarioId, newSteps.map((s) => s.id));
+    } catch (e: any) {
+      setErr(e.message);
+      await reload(); // revert to server truth
+    } finally {
+      setSavingStep(false);
     }
   }
 
@@ -366,43 +410,31 @@ export function ScenarioEditor() {
               No steps yet. Take a snapshot, then click any node to add a step.
             </p>
           ) : (
-            <ol className="step-list">
-              {data.steps.map((s, idx) => {
-                let p: any = {};
-                try { p = JSON.parse(s.payload_json); } catch {}
-                return (
-                  <li key={s.id}>
-                    <span className="step-body">
-                      <code>{s.kind}</code> {summarizeStep(s.kind, p)}
-                    </span>
-                    <button
-                      className="step-move"
-                      title="Move up"
-                      onClick={() => moveStep(s.id, 'up')}
-                      disabled={savingStep || idx === 0}
-                    >
-                      ▲
-                    </button>
-                    <button
-                      className="step-move"
-                      title="Move down"
-                      onClick={() => moveStep(s.id, 'down')}
-                      disabled={savingStep || idx === data.steps.length - 1}
-                    >
-                      ▼
-                    </button>
-                    <button
-                      className="step-del"
-                      title="Delete step"
-                      onClick={() => deleteStep(s.id)}
-                      disabled={savingStep}
-                    >
-                      ×
-                    </button>
-                  </li>
-                );
-              })}
-            </ol>
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragEnd={onStepDragEnd}
+            >
+              <SortableContext
+                items={data.steps.map((s) => s.id)}
+                strategy={verticalListSortingStrategy}
+              >
+                <ol className="step-list">
+                  {data.steps.map((s, idx) => (
+                    <SortableStep
+                      key={s.id}
+                      step={s}
+                      idx={idx}
+                      total={data.steps.length}
+                      savingStep={savingStep}
+                      onMoveUp={() => moveStep(s.id, 'up')}
+                      onMoveDown={() => moveStep(s.id, 'down')}
+                      onDelete={() => deleteStep(s.id)}
+                    />
+                  ))}
+                </ol>
+              </SortableContext>
+            </DndContext>
           )}
 
           <div className="actions">
@@ -571,6 +603,65 @@ export function ScenarioEditor() {
       </div>
       <TerminalShell ref={termRef} height={340} />
     </section>
+  );
+}
+
+function SortableStep({
+  step,
+  idx,
+  total,
+  savingStep,
+  onMoveUp,
+  onMoveDown,
+  onDelete,
+}: {
+  step: ScenarioStep;
+  idx: number;
+  total: number;
+  savingStep: boolean;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
+  onDelete: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: step.id,
+  });
+  let p: any = {};
+  try { p = JSON.parse(step.payload_json); } catch {}
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
+  return (
+    <li ref={setNodeRef} style={style}>
+      <button
+        className="step-drag"
+        title="Drag to reorder"
+        aria-label="Drag to reorder"
+        {...attributes}
+        {...listeners}
+      >
+        ⠿
+      </button>
+      <span className="step-body">
+        <code>{step.kind}</code> {summarizeStep(step.kind, p)}
+      </span>
+      <button className="step-move" title="Move up" onClick={onMoveUp} disabled={savingStep || idx === 0}>
+        ▲
+      </button>
+      <button
+        className="step-move"
+        title="Move down"
+        onClick={onMoveDown}
+        disabled={savingStep || idx === total - 1}
+      >
+        ▼
+      </button>
+      <button className="step-del" title="Delete step" onClick={onDelete} disabled={savingStep}>
+        ×
+      </button>
+    </li>
   );
 }
 

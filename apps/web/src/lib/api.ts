@@ -177,6 +177,11 @@ export const api = {
       `/api/scenarios/${scenarioId}/steps/${stepId}/move`,
       { method: 'POST', body: JSON.stringify({ direction }) },
     ),
+  reorderSteps: (scenarioId: number, order: number[]) =>
+    req<{ reordered: boolean; steps: ScenarioStep[] }>(
+      `/api/scenarios/${scenarioId}/steps/reorder`,
+      { method: 'POST', body: JSON.stringify({ order }) },
+    ),
   sessionStatus: (name: string) =>
     req<{ name: string; alive: boolean; pid: number | null }>(
       `/api/sessions/${encodeURIComponent(name)}/status`,
