@@ -94,6 +94,25 @@ code { background: rgba(255,255,255,0.06); padding: 2px 4px; border-radius: 3px;
 }
 .editor-grid h2 { margin-top: 0; }
 
+.retry-policy {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  color: var(--muted);
+  margin: 4px 0 12px;
+}
+.retry-policy label { display: inline-flex; align-items: center; gap: 4px; }
+.retry-policy input {
+  width: 64px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 6px;
+}
+
 .step-list { padding-left: 20px; margin: 0; }
 .step-list li {
   display: flex;

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { getDb } from '../db/index.js';
-import { run, runJson } from '../agentBrowser/driver.js';
+import { run, runJson, closeSession, ensureSession } from '../agentBrowser/driver.js';
 import { parseSnapshotText } from '../agentBrowser/parser.js';
 import { resolveSelector } from './selector.js';
 import type { SelectorStrategy, ViewportPreset } from '@eab/shared';
@@ -22,6 +22,10 @@ interface ScenarioRow {
   name: string;
   url: string;
   viewport_preset: ViewportPreset;
+  retries: number;
+  retry_wait_before_ms: number;
+  retry_wait_after_ms: number;
+  restart_on_failure: number;
 }
 
 interface RunContext {
@@ -42,7 +46,7 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function appendLog(ctx: RunContext, line: string): void {
+function appendLog(ctx: { runId: number; log: string[] }, line: string): void {
   const stamped = `[${nowIso()}] ${line}`;
   ctx.log.push(stamped);
   // eslint-disable-next-line no-console
@@ -102,6 +106,16 @@ async function executeStep(ctx: RunContext, step: StepRow): Promise<void> {
       return;
     }
     case 'scroll': {
+      // A scroll step carrying a selector means "scroll this element into
+      // view" — resolve the selector against a fresh snapshot, like click.
+      if (payload.selector) {
+        const tree = await snapshotTree(ctx.session);
+        const ref = resolveSelector(payload.selector as SelectorStrategy, tree);
+        appendLog(ctx, `scroll into view ${ref}`);
+        const r = await run(['scrollintoview', ref], { session: ctx.session, timeoutMs: 30_000 });
+        if (r.exitCode !== 0) throw new Error(`scroll into view failed: ${r.stderr || r.stdout}`);
+        return;
+      }
       if (payload.toTop) {
         appendLog(ctx, `scroll to top`);
         const r = await run(['scroll', 'up', '100000'], {
@@ -235,17 +249,51 @@ async function executeStep(ctx: RunContext, step: StepRow): Promise<void> {
   }
 }
 
+// Run one step, re-attempting on failure per the scenario's retry policy:
+// pause `retry_wait_before_ms` before each retry, and `retry_wait_after_ms`
+// after a retry that finally succeeds. Throws if all attempts fail.
+async function executeStepWithRetries(ctx: RunContext, step: StepRow): Promise<void> {
+  const retries = Math.max(0, ctx.scenario.retries ?? 0);
+  const waitBefore = Math.max(0, ctx.scenario.retry_wait_before_ms ?? 0);
+  const waitAfter = Math.max(0, ctx.scenario.retry_wait_after_ms ?? 0);
+
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      await executeStep(ctx, step);
+      if (attempt > 0 && waitAfter > 0) {
+        appendLog(ctx, `retry: waiting ${waitAfter}ms after success`);
+        await sleep(waitAfter);
+      }
+      return;
+    } catch (e: any) {
+      if (attempt >= retries) throw e;
+      appendLog(
+        ctx,
+        `step #${step.position} (${step.kind}) failed: ${e.message} — retry ${attempt + 1}/${retries}`,
+      );
+      if (waitBefore > 0) {
+        appendLog(ctx, `retry: waiting ${waitBefore}ms before re-attempt`);
+        await sleep(waitBefore);
+      }
+    }
+  }
+}
+
 async function runOnce(ctx: RunContext, steps: StepRow[]): Promise<void> {
   await applyViewport(ctx);
   for (const step of steps) {
-    await executeStep(ctx, step);
+    await executeStepWithRetries(ctx, step);
   }
 }
 
 export async function executeScenario(scenarioId: number): Promise<number> {
   const db = getDb();
   const scenario = db
-    .prepare('SELECT id, name, url, viewport_preset FROM scenarios WHERE id = ?')
+    .prepare(
+      `SELECT id, name, url, viewport_preset,
+              retries, retry_wait_before_ms, retry_wait_after_ms, restart_on_failure
+       FROM scenarios WHERE id = ?`,
+    )
     .get(scenarioId) as ScenarioRow | undefined;
   if (!scenario) throw new Error(`Scenario ${scenarioId} not found`);
 
@@ -273,25 +321,51 @@ export async function executeScenario(scenarioId: number): Promise<number> {
   // All work uses the shared `default` session — the user bootstraps it once
   // from any Terminal/Editor tab and every run + the live preview share it.
   const session = 'default';
+  const maxRestarts = Math.max(0, scenario.restart_on_failure ?? 0);
 
-  for (const viewport of viewports) {
-    const ctx: RunContext = {
-      runId,
-      session,
-      scenario,
-      viewport,
-      screenshotDir,
-      log,
-      screenshots,
-    };
-    appendLog(ctx, `=== viewport: ${viewport} ===`);
-    try {
-      await runOnce(ctx, steps);
-    } catch (e: any) {
-      status = 'failed';
-      appendLog(ctx, `ERROR: ${e.message}`);
-      break;
+  // Whole-run restart loop. A run that fails (a step exhausted its retries) is
+  // retried from the top, after resetting the browser connection — this re-runs
+  // all prior steps, so it's safe for stateful flows (unlike reloading mid-run).
+  for (let attempt = 0; attempt <= maxRestarts; attempt++) {
+    if (attempt > 0) {
+      appendLog(
+        { runId, log },
+        `run failed — resetting browser connection and restarting (restart ${attempt}/${maxRestarts})`,
+      );
+      try {
+        await closeSession(session).catch(() => undefined);
+        await ensureSession(session);
+        appendLog({ runId, log }, 'browser connection reset; re-running scenario from the top');
+      } catch (e: any) {
+        appendLog({ runId, log }, `connection reset failed: ${e.message}`);
+      }
     }
+
+    // Each attempt starts from a clean screenshot set (filenames are reused).
+    screenshots.length = 0;
+    status = 'success';
+
+    for (const viewport of viewports) {
+      const ctx: RunContext = {
+        runId,
+        session,
+        scenario,
+        viewport,
+        screenshotDir,
+        log,
+        screenshots,
+      };
+      appendLog(ctx, `=== viewport: ${viewport} ===`);
+      try {
+        await runOnce(ctx, steps);
+      } catch (e: any) {
+        status = 'failed';
+        appendLog(ctx, `ERROR: ${e.message}`);
+        break;
+      }
+    }
+
+    if (status === 'success') break;
   }
 
   db.prepare(

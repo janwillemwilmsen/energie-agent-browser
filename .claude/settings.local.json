@@ -24,7 +24,9 @@
       "Bash(curl -s \"http://localhost:3011/api/comparisons?scenario_id=1\")",
       "Bash(node -e \"let d='';process.stdin.on\\('data',c=>d+=c\\).on\\('end',\\(\\)=>{const j=JSON.parse\\(d\\);console.log\\('count:',j.length\\);for\\(const c of j\\)console.log\\('  cmp',c.id,'status',c.status,'baseline file:',c.baseline?.file_path,'exists baseline img?'\\)}\\)\")",
       "Bash(curl -s -o /dev/null -w \"artifact1 http=%{http_code}\\\\n\" http://localhost:3011/api/artifacts/1/image)",
-      "Bash(node_modules/agent-browser/bin/agent-browser-win32-x64.exe screenshot *)"
+      "Bash(node_modules/agent-browser/bin/agent-browser-win32-x64.exe screenshot *)",
+      "Bash(PORT=3099 timeout 12 npm run start -w @eab/server)",
+      "Bash(rm -f ._srv.log)"
     ]
   }
 }

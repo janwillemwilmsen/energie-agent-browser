@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "node ../../scripts/wait-for-port.mjs 3011 && vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview"
   },

@@ -5,6 +5,10 @@ export interface Scenario {
   viewport_preset: 'desktop' | 'mobile' | 'both';
   brand: string | null;
   type: string | null;
+  retries: number;
+  retry_wait_before_ms: number;
+  retry_wait_after_ms: number;
+  restart_on_failure: number;
   created_at: string;
   updated_at: string;
 }
@@ -154,7 +158,20 @@ export const api = {
   ) => req<Scenario>('/api/scenarios', { method: 'POST', body: JSON.stringify(body) }),
   updateScenario: (
     id: number,
-    body: Partial<Pick<Scenario, 'name' | 'url' | 'viewport_preset' | 'brand' | 'type'>>,
+    body: Partial<
+      Pick<
+        Scenario,
+        | 'name'
+        | 'url'
+        | 'viewport_preset'
+        | 'brand'
+        | 'type'
+        | 'retries'
+        | 'retry_wait_before_ms'
+        | 'retry_wait_after_ms'
+        | 'restart_on_failure'
+      >
+    >,
   ) => req<Scenario>(`/api/scenarios/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
   deleteScenario: (id: number) =>
     req<void>(`/api/scenarios/${id}`, { method: 'DELETE' }),

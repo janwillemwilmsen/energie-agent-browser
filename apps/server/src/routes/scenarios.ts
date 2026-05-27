@@ -109,7 +109,9 @@ export async function scenariosRoutes(app: FastifyInstance) {
     const next = { ...(existing as any), ...body };
     db.prepare(
       `UPDATE scenarios
-       SET name = ?, url = ?, viewport_preset = ?, brand = ?, type = ?, updated_at = CURRENT_TIMESTAMP
+       SET name = ?, url = ?, viewport_preset = ?, brand = ?, type = ?,
+           retries = ?, retry_wait_before_ms = ?, retry_wait_after_ms = ?, restart_on_failure = ?,
+           updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
     ).run(
       next.name,
@@ -117,6 +119,10 @@ export async function scenariosRoutes(app: FastifyInstance) {
       next.viewport_preset,
       normalizeTag(next.brand),
       normalizeTag(next.type),
+      Math.max(0, Number(next.retries ?? 0)),
+      Math.max(0, Number(next.retry_wait_before_ms ?? 0)),
+      Math.max(0, Number(next.retry_wait_after_ms ?? 0)),
+      Math.max(0, Number(next.restart_on_failure ?? 0)),
       Number(req.params.id),
     );
 

@@ -191,6 +191,22 @@ export function ScenarioEditor() {
     }
   }
 
+  async function saveRetry(
+    patch: Partial<{
+      retries: number;
+      retry_wait_before_ms: number;
+      retry_wait_after_ms: number;
+      restart_on_failure: number;
+    }>,
+  ) {
+    try {
+      const updated = await api.updateScenario(scenarioId, patch);
+      setData((d) => (d ? { ...d, ...updated } : d));
+    } catch (e: any) {
+      setErr(e.message);
+    }
+  }
+
   async function runNow() {
     setErr(null);
     try {
@@ -408,6 +424,50 @@ export function ScenarioEditor() {
       <div className="editor-grid">
         <div>
           <h2>Steps</h2>
+          <div className="retry-policy">
+            <span className="muted">On step failure, retry</span>
+            <label>
+              <input
+                type="number"
+                min={0}
+                defaultValue={data.retries}
+                onBlur={(e) => saveRetry({ retries: clampInt(e.target.value) })}
+              />
+              <span>times</span>
+            </label>
+            <label>
+              <span>wait before</span>
+              <input
+                type="number"
+                min={0}
+                defaultValue={data.retry_wait_before_ms}
+                onBlur={(e) => saveRetry({ retry_wait_before_ms: clampInt(e.target.value) })}
+              />
+              <span>ms</span>
+            </label>
+            <label>
+              <span>wait after</span>
+              <input
+                type="number"
+                min={0}
+                defaultValue={data.retry_wait_after_ms}
+                onBlur={(e) => saveRetry({ retry_wait_after_ms: clampInt(e.target.value) })}
+              />
+              <span>ms</span>
+            </label>
+          </div>
+          <div className="retry-policy">
+            <span className="muted">If the whole run fails, reset the browser &amp; restart</span>
+            <label>
+              <input
+                type="number"
+                min={0}
+                defaultValue={data.restart_on_failure}
+                onBlur={(e) => saveRetry({ restart_on_failure: clampInt(e.target.value) })}
+              />
+              <span>times</span>
+            </label>
+          </div>
           {data.steps.length === 0 ? (
             <p className="muted">
               No steps yet. Take a snapshot, then click any node to add a step.
@@ -583,6 +643,7 @@ export function ScenarioEditor() {
                 if (value != null) addStep('fill', { selector: strategy, value });
               }}
               onPickWait={(strategy) => addStep('wait', { selector: strategy })}
+              onPickScroll={(strategy) => addStep('scroll', { selector: strategy })}
             />
           )}
         </div>
@@ -675,6 +736,11 @@ function SortableStep({
   );
 }
 
+function clampInt(v: string): number {
+  const n = Math.floor(Number(v));
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
 function summarizeStep(kind: string, p: any): string {
   if (kind === 'navigate') return `→ ${p.url ?? ''}`;
   if (kind === 'click' || kind === 'type' || kind === 'fill') {
@@ -685,6 +751,7 @@ function summarizeStep(kind: string, p: any): string {
   if (kind === 'screenshot')
     return `${p.label ?? 'screenshot'}${p.fullPage ? ' (full)' : ''}${p.viewport === 'mobile' ? ' (mobile)' : ''}${p.annotate ? ' (annotated)' : ''}`;
   if (kind === 'scroll') {
+    if (p.selector) return `into view: ${p.selector.role ?? ''} "${p.selector.name ?? ''}"`;
     if (p.toBottom) return 'to bottom (lazy-load)';
     if (p.toTop) return 'to top';
     const dy = Number(p.dy ?? 0);
@@ -734,12 +801,14 @@ function TreeView({
   onPickType,
   onPickFill,
   onPickWait,
+  onPickScroll,
 }: {
   tree: A11yTree;
   onPickClick: (s: SelectorStrategy) => void;
   onPickType: (s: SelectorStrategy) => void;
   onPickFill: (s: SelectorStrategy) => void;
   onPickWait: (s: SelectorStrategy) => void;
+  onPickScroll: (s: SelectorStrategy) => void;
 }) {
   const flat = useMemo(() => flatten(tree.root, 0, []), [tree]);
   const allNodes = useMemo(() => flat.map((x) => x.node), [flat]);
@@ -760,6 +829,12 @@ function TreeView({
                 <button onClick={() => onPickType(strategy)}>type</button>
                 <button onClick={() => onPickFill(strategy)}>fill</button>
                 <button onClick={() => onPickWait(strategy)}>wait</button>
+                <button
+                  onClick={() => onPickScroll(strategy)}
+                  title="Scroll this element into view"
+                >
+                  scrollIntoView
+                </button>
               </span>
             )}
           </li>

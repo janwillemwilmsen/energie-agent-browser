@@ -86,6 +86,10 @@ export const Scenario = z.object({
   viewport_preset: ViewportPreset,
   brand: z.string().nullable(),
   type: z.string().nullable(),
+  retries: z.number().int().nonnegative(),
+  retry_wait_before_ms: z.number().int().nonnegative(),
+  retry_wait_after_ms: z.number().int().nonnegative(),
+  restart_on_failure: z.number().int().nonnegative(),
   created_at: z.string(),
   updated_at: z.string(),
 });
@@ -97,6 +101,10 @@ export const ScenarioCreate = z.object({
   viewport_preset: ViewportPreset,
   brand: z.string().trim().min(1).nullable().optional(),
   type: z.string().trim().min(1).nullable().optional(),
+  retries: z.number().int().min(0).optional(),
+  retry_wait_before_ms: z.number().int().min(0).optional(),
+  retry_wait_after_ms: z.number().int().min(0).optional(),
+  restart_on_failure: z.number().int().min(0).optional(),
 });
 export type ScenarioCreate = z.infer<typeof ScenarioCreate>;
 
