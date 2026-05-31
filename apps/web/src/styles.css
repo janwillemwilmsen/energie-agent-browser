@@ -204,7 +204,20 @@ code { background: rgba(255,255,255,0.06); padding: 2px 4px; border-radius: 3px;
   font-size: 11px;
 }
 
-.scenario-actions { display: flex; gap: 8px; white-space: nowrap; }
+.scenario-actions { display: flex; gap: 8px; white-space: nowrap; align-items: center; }
+.scenario-actions .btn-link {
+  background: var(--accent);
+  color: #0f172a;
+  border-radius: 4px;
+  padding: 6px 12px;
+  font-weight: 600;
+  font-size: 14px;
+  text-decoration: none;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+}
+.scenario-actions .btn-link:hover { filter: brightness(1.1); }
 
 .btn-danger {
   background: rgba(248,113,113,0.15);
