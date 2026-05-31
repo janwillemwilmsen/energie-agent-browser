@@ -196,6 +196,10 @@ code { background: rgba(255,255,255,0.06); padding: 2px 4px; border-radius: 3px;
 .screenshots { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
 .shot img { width: 100%; height: auto; border: 1px solid var(--border); border-radius: 4px; }
 .run-tags { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+.run-scenario-cell { line-height: 1.4; }
+.run-scenario-cell a { color: var(--accent); text-decoration: none; }
+.run-scenario-cell a:hover { text-decoration: underline; }
+.run-scenario-id { font-size: 12px; }
 .run-tag {
   background: rgba(56,189,248,0.12);
   color: var(--accent);
