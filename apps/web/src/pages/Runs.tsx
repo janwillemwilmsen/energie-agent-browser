@@ -28,11 +28,24 @@ export function Runs() {
     }
   }
 
+  // `selected` captures the run row at click-time, so its log never grew
+  // between polls. `liveSelected` re-resolves the same id against the latest
+  // `runs` list every render, so the detail panel reflects the current log.
+  const liveSelected = useMemo(
+    () => (selected ? runs.find((r) => r.id === selected.id) ?? selected : null),
+    [selected, runs],
+  );
+  const watching = !!liveSelected &&
+    (liveSelected.status === 'running' || liveSelected.status === 'queued');
+
   useEffect(() => {
     load();
-    const t = setInterval(load, 4000);
+    // Poll faster while you're staring at a not-yet-finished run, slower
+    // otherwise — keeps idle pages cheap but the log feels live when it
+    // matters. Re-arms whenever `watching` flips.
+    const t = setInterval(load, watching ? 1500 : 4000);
     return () => clearInterval(t);
-  }, []);
+  }, [watching]);
 
   useEffect(() => {
     if (appliedRunParam.current) return;
@@ -370,15 +383,35 @@ export function Runs() {
           </tbody>
         </table>
 
-        {selected && <RunDetail run={selected} onDelete={removeOne} />}
+        {liveSelected && (
+          <RunDetail run={liveSelected} live={watching} onDelete={removeOne} />
+        )}
       </div>
     </section>
   );
 }
 
-function RunDetail({ run, onDelete }: { run: Run; onDelete: (id: number) => void }) {
+function RunDetail({
+  run,
+  live,
+  onDelete,
+}: {
+  run: Run;
+  live: boolean;
+  onDelete: (id: number) => void;
+}) {
   let screenshots: string[] = [];
   try { screenshots = JSON.parse(run.screenshot_paths_json); } catch {}
+
+  // Reverse the log so the newest line is on top — the runner appends one
+  // stamped line per step, so a simple line-reverse keeps each entry intact.
+  const reversedLog = useMemo(() => {
+    const lines = (run.log_text || '').split(/\r?\n/);
+    // Drop a trailing empty line so the reversed view doesn't start with a
+    // blank gap from `join('\n')` on the server side.
+    while (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
+    return lines.reverse().join('\n');
+  }, [run.log_text]);
 
   return (
     <div className="run-detail">
@@ -389,8 +422,12 @@ function RunDetail({ run, onDelete }: { run: Run; onDelete: (id: number) => void
         </button>
       </h2>
       <p className="muted">{run.started_at} → {run.finished_at ?? 'in progress'}</p>
-      <h3>Log</h3>
-      <pre className="run-log">{run.log_text || '(no log yet)'}</pre>
+      <h3>
+        Log <span className="muted" style={{ fontSize: 12, fontWeight: 400 }}>
+          (newest first{live ? ' · live' : ''})
+        </span>
+      </h3>
+      <pre className="run-log">{reversedLog || '(no log yet)'}</pre>
       <h3>Screenshots ({screenshots.length})</h3>
       <div className="screenshots">
         {screenshots.map((name) => (

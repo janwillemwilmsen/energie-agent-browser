@@ -289,6 +289,31 @@ code { background: rgba(255,255,255,0.06); padding: 2px 4px; border-radius: 3px;
 .status-running { background: rgba(56,189,248,0.2); color: #38bdf8; }
 .status-queued { background: rgba(148,163,184,0.2); color: var(--muted); }
 
+.bl-health {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin: 0 0 16px;
+}
+.bl-health-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.bl-health-row button { padding: 4px 10px; font-size: 12px; }
+.bl-health-grid {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 14px;
+  margin: 10px 0 0;
+  font-size: 13px;
+}
+.bl-health-grid dt { color: var(--muted); }
+.bl-health-grid dd { margin: 0; }
+.bl-health-grid code { word-break: break-all; }
+
 .preview-stream {
   border: 1px solid var(--border);
   border-radius: 6px;

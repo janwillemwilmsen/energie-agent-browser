@@ -9,6 +9,7 @@ import { runsRoutes } from './routes/runs.js';
 import { diffsRoutes } from './routes/diffs.js';
 import { schedulesRoutes } from './routes/schedules.js';
 import { sessionsRoutes } from './routes/sessions.js';
+import { browserlessHealthRoutes } from './routes/browserlessHealth.js';
 import { terminalWsRoute } from './ws/terminal.js';
 import { screencastWsRoute } from './ws/screencast.js';
 import { startScheduler } from './scheduler/index.js';
@@ -42,6 +43,7 @@ async function main() {
   await app.register(diffsRoutes);
   await app.register(schedulesRoutes);
   await app.register(sessionsRoutes);
+  await app.register(browserlessHealthRoutes);
   await app.register(terminalWsRoute);
   await app.register(screencastWsRoute);
 

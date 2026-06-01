@@ -241,12 +241,28 @@ function spawnConnectDetached(session: string): void {
   }
 }
 
+// agent-browser prints `✗ Could not configure browser: …` to its pty log and
+// exits when it can't complete the wss handshake with browserless. Without
+// log-tailing we'd burn the full READY_TIMEOUT_MS waiting for a pid file that
+// will never appear; with it, we surface the actual cause in ~1s.
+const FAIL_LINE_RE = /✗\s*(Could not configure browser:[^\r\n]+|[^\r\n]+(?:error|fail(?:ed)?)[^\r\n]*)/i;
+const ANSI_ESC_RE = /\x1b(?:\[[0-9;?]*[a-zA-Z]|\][^\x07]*\x07)/g;
+function detectBootstrapFailure(logPath: string): string | null {
+  let text = '';
+  try { text = fs.readFileSync(logPath, 'utf-8'); } catch { return null; }
+  const m = text.replace(ANSI_ESC_RE, '').match(FAIL_LINE_RE);
+  return m && m[1] ? m[1].trim() : null;
+}
+
 async function connectSession(session: string): Promise<void> {
   spawnConnectDetached(session);
 
+  const logPath = path.join(config.dataDir, 'agent-browser-logs', `${session}.log`);
   const start = Date.now();
   while (Date.now() - start < READY_TIMEOUT_MS) {
     if (isSessionAlive(session)) return;
+    const fail = detectBootstrapFailure(logPath);
+    if (fail) throw new Error(`agent-browser bootstrap failed: ${fail}`);
     await new Promise((r) => setTimeout(r, READY_POLL_MS));
   }
   throw new Error(

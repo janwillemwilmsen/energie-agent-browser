@@ -16,6 +16,10 @@ export function Scenarios() {
   // share the single 'default' session, so only one launch happens at a time.
   const [runningId, setRunningId] = useState<number | null>(null);
   const [runStatus, setRunStatus] = useState<string | null>(null);
+  // Capture the id of the most-recently-started run so the "See Runs" link
+  // can deep-link to /runs?run=<id>, which the Runs page picks up to open
+  // that run's detail panel.
+  const [lastRunId, setLastRunId] = useState<number | null>(null);
 
   async function load() {
     try {
@@ -73,6 +77,7 @@ export function Scenarios() {
       }
       setRunStatus(`Starting run for "${s.name}"…`);
       const run = await api.startRun(s.id);
+      setLastRunId(run.id);
       setRunStatus(`Run #${run.id} started for "${s.name}".`);
     } catch (e: any) {
       setErr(e.message ?? String(e));
@@ -99,7 +104,8 @@ export function Scenarios() {
       {err && <p className="error">{err}</p>}
       {runStatus && (
         <p className="muted">
-          {runStatus} <Link to="/runs">See Runs</Link>
+          {runStatus}{' '}
+          <Link to={lastRunId != null ? `/runs?run=${lastRunId}` : '/runs'}>See Runs</Link>
         </p>
       )}
 

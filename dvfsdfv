@@ -1,0 +1,71 @@
+[33mcommit 2cfeb7e896d2bf1265718d845bd6b8754e8955cb[m[33m ([m[1;36mHEAD -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m)[m
+Author: Jan-Willem Wilmsen <janwillemwilmsen@gmail.com>
+Date:   Sun May 31 22:07:49 2026 +0200
+
+    remove delete all  button
+
+[33mcommit e9a457bd4022a11e794350e90b5f072f6901d228[m
+Author: Jan-Willem Wilmsen <janwillemwilmsen@gmail.com>
+Date:   Sun May 31 21:54:41 2026 +0200
+
+    diff better
+
+[33mcommit 3f3d0e405cf2b1e0dc5dfaf05beed11138d29738[m
+Author: Jan-Willem Wilmsen <janwillemwilmsen@gmail.com>
+Date:   Sun May 31 21:35:50 2026 +0200
+
+    tune crons
+
+[33mcommit da0fe2370e1fa935a4e9713de3736830d336010b[m
+Author: Jan-Willem Wilmsen <janwillemwilmsen@gmail.com>
+Date:   Wed May 27 23:56:52 2026 +0200
+
+    retry after fail plus scrollintoview
+
+[33mcommit b10cbe16a681aa4daa8ff7fa859811634f46beff[m
+Author: Jan-Willem Wilmsen <janwillemwilmsen@gmail.com>
+Date:   Tue May 26 17:36:38 2026 +0200
+
+    link to resultspanel
+
+[33mcommit 38cf9511a684febfbdf68f1571cdc4a1a9f04d9f[m
+Author: Jan-Willem Wilmsen <janwillemwilmsen@gmail.com>
+Date:   Tue May 26 06:26:31 2026 +0200
+
+    drag and drop steps in scen builder
+
+[33mcommit c484e04f899a6d0d89efb04240225793b7962ae2[m
+Author: Jan-Willem Wilmsen <janwillemwilmsen@gmail.com>
+Date:   Mon May 25 22:31:44 2026 +0200
+
+    add diffing
+
+[33mcommit dba3b1e961346912a868d109b8c4b5abe4e8c403[m
+Author: Jan-Willem Wilmsen <janwillemwilmsen@gmail.com>
+Date:   Mon May 25 08:58:56 2026 +0200
+
+    interactive snapshot button
+
+[33mcommit e253df9499abb452fad4f96c53cafda8d3e8a159[m
+Author: Jan-Willem Wilmsen <janwillemwilmsen@gmail.com>
+Date:   Mon May 25 06:38:44 2026 +0200
+
+    Add tags and homepage
+
+[33mcommit d3d87c0e6de276a54339d333ff28d3e8d4b8f132[m
+Author: Jan-Willem Wilmsen <janwillemwilmsen@gmail.com>
+Date:   Sun May 24 14:01:29 2026 +0200
+
+    base app setup - before tags and homepage
+
+[33mcommit 6a0161e1c3862d289d88b655f3043f7815cc52ac[m
+Author: Jan-Willem Wilmsen <janwillemwilmsen@gmail.com>
+Date:   Fri May 22 08:20:14 2026 +0200
+
+    one
+
+[33mcommit 76c190aadc45b7e71177a3b26bea4449a15cdabf[m
+Author: Jan-Willem Wilmsen <janwillemwilmsen@gmail.com>
+Date:   Fri May 22 08:19:20 2026 +0200
+
+    first commit

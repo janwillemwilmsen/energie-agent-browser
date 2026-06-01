@@ -105,6 +105,27 @@ export interface CompareRunsResult {
   onlyTarget: string[];
 }
 
+export interface BrowserlessHealth {
+  ok: boolean;
+  checkedAt: string;
+  latencyMs: number;
+  docs: {
+    url: string;
+    status: number | null;
+    ok: boolean;
+    error: string | null;
+  };
+  version: {
+    browser: string | null;
+    protocolVersion: string | null;
+    userAgent: string | null;
+    webSocketDebuggerUrl: string | null;
+  } | null;
+  cdp: {
+    configuredUrl: string;
+  };
+}
+
 export interface A11yNode {
   ref: string;
   role: string;
@@ -218,6 +239,8 @@ export const api = {
       `/api/sessions/${encodeURIComponent(name)}/close`,
       { method: 'POST', body: JSON.stringify({}) },
     ),
+  browserlessHealth: () =>
+    req<BrowserlessHealth>('/api/browserless/health'),
   listComparisons: (scenarioId?: number) =>
     req<Comparison[]>(
       `/api/comparisons${scenarioId != null ? `?scenario_id=${scenarioId}` : ''}`,
