@@ -185,6 +185,9 @@ export function Scenarios() {
                 >
                   {runningId === s.id ? 'Running…' : '▶ Run'}
                 </button>
+                <Link to={`/scenarios/${s.id}/timeline`} className="btn-link">
+                  Screenshots
+                </Link>
                 <button onClick={() => remove(s.id)} disabled={runningId != null}>
                   Delete
                 </button>

@@ -249,26 +249,41 @@ export async function diffsRoutes(app: FastifyInstance) {
       try { return JSON.parse(s) as string[]; } catch { return []; }
     };
     const baseSlots = parse(baseRun.screenshot_paths_json);
-    const targetSet = new Set(parse(targetRun.screenshot_paths_json));
+    const targetSlots = parse(targetRun.screenshot_paths_json);
+
+    // The leading NNN- prefix is `step.position`, which shifts whenever the
+    // scenario is edited (inserting a step bumps every later position). Pair
+    // on the stable suffix — `<label>-<viewport>.png` — so the same logical
+    // screenshot still matches across runs taken before vs. after an edit.
+    const canonical = (slot: string): string => slot.replace(/^\d+-/, '');
+    const targetByKey = new Map<string, string>();
+    for (const t of targetSlots) {
+      const k = canonical(t);
+      if (!targetByKey.has(k)) targetByKey.set(k, t);
+    }
 
     const created: unknown[] = [];
     const matched: string[] = [];
+    const matchedKeys = new Set<string>();
     for (const slot of baseSlots) {
-      if (!targetSet.has(slot)) continue;
+      const key = canonical(slot);
+      const targetSlot = targetByKey.get(key);
+      if (!targetSlot) continue;
       try {
         const baseline = materializeRunScreenshot(body.baselineRunId, slot, scenarioId);
-        const target = materializeRunScreenshot(body.targetRunId, slot, scenarioId);
+        const target = materializeRunScreenshot(body.targetRunId, targetSlot, scenarioId);
         const id = createComparison(baseline, target, scenarioId, body.threshold);
         const row = db.prepare('SELECT * FROM comparisons WHERE id = ?').get(id) as ComparisonRow;
         created.push(enrichComparison(row));
         matched.push(slot);
+        matchedKeys.add(key);
       } catch (e: any) {
         app.log.error({ err: e, slot }, 'compare-runs slot failed');
       }
     }
 
-    const onlyBaseline = baseSlots.filter((s) => !targetSet.has(s));
-    const onlyTarget = [...targetSet].filter((s) => !baseSlots.includes(s));
+    const onlyBaseline = baseSlots.filter((s) => !matchedKeys.has(canonical(s)));
+    const onlyTarget = targetSlots.filter((s) => !matchedKeys.has(canonical(s)));
     return reply.code(201).send({ created, matched, onlyBaseline, onlyTarget });
   });
 

@@ -173,27 +173,9 @@ export function Runs() {
     }
   }
 
-  async function removeAll() {
-    if (!confirm(`Delete ALL ${runs.length} runs and their screenshots?`)) return;
-    try {
-      await api.deleteAllRuns();
-      setSelected(null);
-      await load();
-    } catch (e: any) {
-      setErr(e.message);
-    }
-  }
-
   return (
     <section>
-      <h1>
-        Runs{' '}
-        {runs.length > 0 && (
-          <button onClick={removeAll} style={{ marginLeft: 12, fontSize: 13 }}>
-            Delete all
-          </button>
-        )}
-      </h1>
+      <h1>Runs</h1>
       {err && <p className="error">{err}</p>}
 
       <details className="filter-panel" open={activeFilterCount > 0}>
@@ -296,8 +278,7 @@ export function Runs() {
                 />
               </th>
               <th>ID</th>
-              <th>Scenario</th>
-              <th>Name</th>
+              <th>Scenario name</th>
               <th>Tags</th>
               <th>Status</th>
               <th>Started</th>
@@ -330,12 +311,7 @@ export function Runs() {
                   />
                 </td>
                 <td>{r.id}</td>
-                <td onClick={(e) => e.stopPropagation()}>
-                  <Link to={`/scenarios/${r.scenario_id}`} title="Edit scenario">
-                    {r.scenario_id}
-                  </Link>
-                </td>
-                <td onClick={(e) => e.stopPropagation()}>
+                <td onClick={(e) => e.stopPropagation()} className="run-scenario-cell">
                   {r.scenario_name != null ? (
                     <Link to={`/scenarios/${r.scenario_id}`} title="Edit scenario">
                       {r.scenario_name}
@@ -343,6 +319,19 @@ export function Runs() {
                   ) : (
                     '—'
                   )}
+                  <div className="muted run-scenario-id">
+                    <Link to={`/scenarios/${r.scenario_id}`} title="Edit scenario">
+                      #{r.scenario_id}
+                    </Link>
+                  </div>
+                  <div>
+                    <Link
+                      to={`/scenarios/${r.scenario_id}/timeline`}
+                      title="Open the scenario timeline"
+                    >
+                      Screenshots
+                    </Link>
+                  </div>
                 </td>
                 <td>
                   {r.brand || r.type ? (
@@ -375,7 +364,7 @@ export function Runs() {
             ))}
             {runs.length > 0 && visibleRuns.length === 0 && (
               <tr>
-                <td colSpan={9} className="muted" style={{ textAlign: 'center', padding: 16 }}>
+                <td colSpan={8} className="muted" style={{ textAlign: 'center', padding: 16 }}>
                   No runs match the current filters.
                 </td>
               </tr>
