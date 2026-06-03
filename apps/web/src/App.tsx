@@ -8,6 +8,7 @@ import { Schedules } from './pages/Schedules.js';
 import { Runs } from './pages/Runs.js';
 import { Diffs } from './pages/Diffs.js';
 import { PreflightPage } from './pages/Preflight.js';
+import { Screenshots } from './pages/Screenshots.js';
 
 export function App() {
   return (
@@ -19,6 +20,7 @@ export function App() {
         <Link to="/terminal">Terminal</Link>
         <Link to="/schedules">Schedules</Link>
         <Link to="/runs">Runs</Link>
+        <Link to="/screenshots">Screenshots</Link>
         <Link to="/diffs">Diffs</Link>
       </nav>
       <main className="main">
@@ -31,6 +33,7 @@ export function App() {
           <Route path="/preflight" element={<PreflightPage />} />
           <Route path="/schedules" element={<Schedules />} />
           <Route path="/runs" element={<Runs />} />
+          <Route path="/screenshots" element={<Screenshots />} />
           <Route path="/diffs" element={<Diffs />} />
         </Routes>
       </main>
