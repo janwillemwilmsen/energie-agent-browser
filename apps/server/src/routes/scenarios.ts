@@ -85,8 +85,8 @@ export async function scenariosRoutes(app: FastifyInstance) {
     const db = getDb();
     const info = db
       .prepare(
-        `INSERT INTO scenarios (name, url, viewport_preset, brand, type)
-         VALUES (?, ?, ?, ?, ?)`,
+        `INSERT INTO scenarios (name, url, viewport_preset, brand, type, preflight_id)
+         VALUES (?, ?, ?, ?, ?, ?)`,
       )
       .run(
         body.name,
@@ -94,6 +94,7 @@ export async function scenariosRoutes(app: FastifyInstance) {
         body.viewport_preset ?? 'desktop',
         normalizeTag(body.brand),
         normalizeTag(body.type),
+        body.preflight_id ?? null,
       );
     return reply.code(201).send(
       db.prepare('SELECT * FROM scenarios WHERE id = ?').get(info.lastInsertRowid),
@@ -107,10 +108,13 @@ export async function scenariosRoutes(app: FastifyInstance) {
     if (!existing) return reply.code(404).send({ error: 'not_found' });
 
     const next = { ...(existing as any), ...body };
+    const preflightId =
+      next.preflight_id == null ? null : Number(next.preflight_id);
     db.prepare(
       `UPDATE scenarios
        SET name = ?, url = ?, viewport_preset = ?, brand = ?, type = ?,
            retries = ?, retry_wait_before_ms = ?, retry_wait_after_ms = ?, restart_on_failure = ?,
+           preflight_id = ?,
            updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
     ).run(
@@ -123,6 +127,7 @@ export async function scenariosRoutes(app: FastifyInstance) {
       Math.max(0, Number(next.retry_wait_before_ms ?? 0)),
       Math.max(0, Number(next.retry_wait_after_ms ?? 0)),
       Math.max(0, Number(next.restart_on_failure ?? 0)),
+      preflightId,
       Number(req.params.id),
     );
 

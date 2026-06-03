@@ -30,7 +30,9 @@
       "Read(//c/Users/31626/.agent-browser/**)",
       "Bash(powershell -NoProfile -Command \"Get-Process -Name 'agent-browser-win32-x64' -ErrorAction SilentlyContinue | Select-Object Id,StartTime\")",
       "Bash(npm --workspace apps/web run build)",
-      "Bash(node -e \"const Database = require\\('better-sqlite3'\\); const db = new Database\\('data/sqlite.db', {readonly:true}\\); const rows = db.prepare\\('SELECT id, scenario_id, status, screenshot_paths_json FROM runs WHERE id IN \\(168, 169\\)'\\).all\\(\\); for \\(const r of rows\\) { console.log\\('run', r.id, 'scenario', r.scenario_id, 'status', r.status\\); try { const arr = JSON.parse\\(r.screenshot_paths_json\\); console.log\\('  slots:', arr\\); } catch\\(e\\) { console.log\\('  bad json', r.screenshot_paths_json\\); } }\")"
+      "Bash(node -e \"const Database = require\\('better-sqlite3'\\); const db = new Database\\('data/sqlite.db', {readonly:true}\\); const rows = db.prepare\\('SELECT id, scenario_id, status, screenshot_paths_json FROM runs WHERE id IN \\(168, 169\\)'\\).all\\(\\); for \\(const r of rows\\) { console.log\\('run', r.id, 'scenario', r.scenario_id, 'status', r.status\\); try { const arr = JSON.parse\\(r.screenshot_paths_json\\); console.log\\('  slots:', arr\\); } catch\\(e\\) { console.log\\('  bad json', r.screenshot_paths_json\\); } }\")",
+      "Bash(npm --workspace apps/server run build)",
+      "Bash(npm --workspace apps/server test)"
     ]
   }
 }

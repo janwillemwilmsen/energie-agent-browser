@@ -5,7 +5,8 @@ import { getDb } from '../db/index.js';
 import { run, runJson, closeSession, ensureSession } from '../agentBrowser/driver.js';
 import { parseSnapshotText } from '../agentBrowser/parser.js';
 import { resolveSelector } from './selector.js';
-import type { SelectorStrategy, ViewportPreset } from '@eab/shared';
+import { executePreflightSteps } from './preflightExecutor.js';
+import type { PreflightStep, SelectorStrategy, ViewportPreset } from '@eab/shared';
 
 const MOBILE_DEVICE = 'iPhone 14';
 
@@ -26,6 +27,7 @@ interface ScenarioRow {
   retry_wait_before_ms: number;
   retry_wait_after_ms: number;
   restart_on_failure: number;
+  preflight_id: number | null;
 }
 
 interface RunContext {
@@ -291,11 +293,32 @@ export async function executeScenario(scenarioId: number): Promise<number> {
   const scenario = db
     .prepare(
       `SELECT id, name, url, viewport_preset,
-              retries, retry_wait_before_ms, retry_wait_after_ms, restart_on_failure
+              retries, retry_wait_before_ms, retry_wait_after_ms, restart_on_failure,
+              preflight_id
        FROM scenarios WHERE id = ?`,
     )
     .get(scenarioId) as ScenarioRow | undefined;
   if (!scenario) throw new Error(`Scenario ${scenarioId} not found`);
+
+  // If a preflight is attached, load BOTH its name (for daemon binding) AND
+  // its step list (to execute as a step prefix before the scenario's own
+  // steps). Executing the steps every time is what gives us durable session
+  // semantics: it doesn't matter that the auth.json's Auth0 session cookie
+  // expires after ~2 hours, because every scenario run goes through the
+  // login flow fresh. Soft-deleted preflights resolve to null here and the
+  // scenario degrades to running with no preflight.
+  let preflightName: string | null = null;
+  let preflightSteps: PreflightStep[] = [];
+  if (scenario.preflight_id != null) {
+    const pf = db
+      .prepare('SELECT name, steps_json FROM preflights WHERE id = ? AND deleted_at IS NULL')
+      .get(scenario.preflight_id) as { name: string; steps_json: string } | undefined;
+    if (pf) {
+      preflightName = pf.name;
+      try { preflightSteps = JSON.parse(pf.steps_json) as PreflightStep[]; }
+      catch { preflightSteps = []; }
+    }
+  }
 
   const steps = db
     .prepare('SELECT * FROM scenario_steps WHERE scenario_id = ? ORDER BY position')
@@ -322,6 +345,40 @@ export async function executeScenario(scenarioId: number): Promise<number> {
   // from any Terminal/Editor tab and every run + the live preview share it.
   const session = 'default';
   const maxRestarts = Math.max(0, scenario.restart_on_failure ?? 0);
+
+  // Preflight handling: bind the daemon to the preflight's --session-name (so
+  // any state save still lands in the right slot) AND execute the preflight's
+  // step list fresh. The freshness is the whole point — if you've recorded a
+  // login flow in the preflight, this is the line that re-runs it on every
+  // scenario run, sidestepping the Auth0/IdP session-cookie TTL problem.
+  if (preflightName) {
+    appendLog(
+      { runId, log },
+      `preflight "${preflightName}": binding daemon + executing ${preflightSteps.length} step(s)`,
+    );
+    try {
+      await ensureSession(session, { sessionName: preflightName });
+      if (preflightSteps.length > 0) {
+        await executePreflightSteps(
+          session,
+          preflightSteps,
+          (msg) => appendLog({ runId, log }, '  ' + msg),
+        );
+        appendLog({ runId, log }, `preflight "${preflightName}": ok`);
+      }
+    } catch (e: any) {
+      // Hard-fail the run: scenarios that depend on the preflight (e.g. a
+      // logged-in scenario) can't usefully run without it. Better to surface
+      // the preflight error in the run log than silently hit the login page.
+      appendLog({ runId, log }, `preflight "${preflightName}" failed: ${e.message}`);
+      const screenshotPathsJson = JSON.stringify([]);
+      db.prepare(
+        `UPDATE runs SET status = 'failed', finished_at = CURRENT_TIMESTAMP,
+                         log_text = ?, screenshot_paths_json = ? WHERE id = ?`,
+      ).run(log.join('\n'), screenshotPathsJson, runId);
+      return runId;
+    }
+  }
 
   // Whole-run restart loop. A run that fails (a step exhausted its retries) is
   // retried from the top, after resetting the browser connection — this re-runs

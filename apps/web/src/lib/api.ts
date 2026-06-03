@@ -9,8 +9,40 @@ export interface Scenario {
   retry_wait_before_ms: number;
   retry_wait_after_ms: number;
   restart_on_failure: number;
+  preflight_id: number | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface Preflight {
+  id: number;
+  name: string;
+  description: string;
+  steps_json: string;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+}
+
+export interface SelectorStrategy {
+  role: string;
+  name: string;
+  textContains?: string;
+  ordinal?: number;
+  ancestorPath?: { role: string; name: string }[];
+}
+
+export type PreflightStep =
+  | { kind: 'navigate'; url: string }
+  | { kind: 'wait'; ms: number }
+  | { kind: 'click'; selector: SelectorStrategy }
+  | { kind: 'type'; selector: SelectorStrategy; text: string }
+  | { kind: 'auth-login'; name: string };
+
+export interface AuthProfile {
+  name: string;
+  url: string;
+  username: string;
 }
 
 export interface ScenarioCard extends Scenario {
@@ -175,7 +207,7 @@ export const api = {
     req<void>(`/api/schedules/${id}`, { method: 'DELETE' }),
   createScenario: (
     body: Pick<Scenario, 'name' | 'url' | 'viewport_preset'> &
-      Partial<Pick<Scenario, 'brand' | 'type'>>,
+      Partial<Pick<Scenario, 'brand' | 'type' | 'preflight_id'>>,
   ) => req<Scenario>('/api/scenarios', { method: 'POST', body: JSON.stringify(body) }),
   updateScenario: (
     id: number,
@@ -191,9 +223,63 @@ export const api = {
         | 'retry_wait_before_ms'
         | 'retry_wait_after_ms'
         | 'restart_on_failure'
+        | 'preflight_id'
       >
     >,
   ) => req<Scenario>(`/api/scenarios/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  listPreflights: () => req<Preflight[]>('/api/preflights'),
+  getPreflight: (id: number) => req<Preflight>(`/api/preflights/${id}`),
+  createPreflight: (body: { name: string; description?: string; steps?: PreflightStep[] }) =>
+    req<Preflight>('/api/preflights', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  updatePreflight: (
+    id: number,
+    body: { name?: string; description?: string; steps?: PreflightStep[] },
+  ) =>
+    req<Preflight>(`/api/preflights/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+  deletePreflight: (id: number) =>
+    req<void>(`/api/preflights/${id}`, { method: 'DELETE' }),
+  startPreflightRecorder: (name: string) =>
+    req<{ ok: true; session: string; sessionName: string } | { ok: false; error: string }>(
+      '/api/preflights/recorder/start',
+      { method: 'POST', body: JSON.stringify({ name }) },
+    ),
+  stopPreflightRecorder: () =>
+    req<{ ok: true }>('/api/preflights/recorder/stop', {
+      method: 'POST',
+      body: JSON.stringify({}),
+    }),
+  execPreflightStep: (step: PreflightStep) =>
+    req<{ ok: true } | { ok: false; error: string }>(
+      '/api/preflights/recorder/exec-step',
+      { method: 'POST', body: JSON.stringify({ step }) },
+    ),
+  replayPreflight: (id: number) =>
+    req<{ ok: true } | { ok: false; error: string }>(
+      `/api/preflights/${id}/replay`,
+      { method: 'POST', body: JSON.stringify({}) },
+    ),
+  listAuthProfiles: () => req<AuthProfile[]>('/api/auth-profiles'),
+  saveAuthProfile: (body: {
+    name: string;
+    url: string;
+    username: string;
+    password: string;
+    usernameSelector?: string;
+    passwordSelector?: string;
+    submitSelector?: string;
+  }) =>
+    req<AuthProfile>('/api/auth-profiles', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  deleteAuthProfile: (name: string) =>
+    req<void>(`/api/auth-profiles/${encodeURIComponent(name)}`, { method: 'DELETE' }),
   deleteScenario: (id: number) =>
     req<void>(`/api/scenarios/${id}`, { method: 'DELETE' }),
   addStep: (

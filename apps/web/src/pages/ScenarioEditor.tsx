@@ -21,6 +21,7 @@ import {
   api,
   type A11yNode,
   type A11yTree,
+  type Preflight,
   type ScenarioDetail,
   type ScenarioStep,
 } from '../lib/api.js';
@@ -42,10 +43,18 @@ interface MetaDraft {
   viewport_preset: 'desktop' | 'mobile' | 'both';
   brand: string;
   type: string;
+  preflight_id: number | null;
 }
 
 function emptyDraft(): MetaDraft {
-  return { name: '', url: '', viewport_preset: 'desktop', brand: '', type: '' };
+  return {
+    name: '',
+    url: '',
+    viewport_preset: 'desktop',
+    brand: '',
+    type: '',
+    preflight_id: null,
+  };
 }
 
 function draftFrom(d: ScenarioDetail): MetaDraft {
@@ -55,6 +64,7 @@ function draftFrom(d: ScenarioDetail): MetaDraft {
     viewport_preset: d.viewport_preset,
     brand: d.brand ?? '',
     type: d.type ?? '',
+    preflight_id: d.preflight_id ?? null,
   };
 }
 
@@ -64,7 +74,8 @@ function draftsEqual(a: MetaDraft, b: MetaDraft): boolean {
     a.url === b.url &&
     a.viewport_preset === b.viewport_preset &&
     a.brand === b.brand &&
-    a.type === b.type
+    a.type === b.type &&
+    a.preflight_id === b.preflight_id
   );
 }
 
@@ -85,6 +96,7 @@ export function ScenarioEditor() {
   const [draft, setDraft] = useState<MetaDraft>(emptyDraft());
   const [savingMeta, setSavingMeta] = useState(false);
   const [metaSavedAt, setMetaSavedAt] = useState<number | null>(null);
+  const [preflights, setPreflights] = useState<Preflight[]>([]);
   const termRef = useRef<TerminalShellHandle | null>(null);
 
   const sensors = useSensors(
@@ -95,6 +107,7 @@ export function ScenarioEditor() {
 
   useEffect(() => {
     api.sessionStatus(SESSION).then((s) => setSessionAlive(s.alive)).catch(() => undefined);
+    api.listPreflights().then(setPreflights).catch(() => undefined);
   }, []);
 
   async function reload() {
@@ -331,6 +344,7 @@ export function ScenarioEditor() {
         viewport_preset: draft.viewport_preset,
         brand: draft.brand.trim() || null,
         type: draft.type.trim() || null,
+        preflight_id: draft.preflight_id,
       });
       const next = { ...data, ...updated };
       setData(next);
@@ -399,6 +413,26 @@ export function ScenarioEditor() {
               onChange={(e) => setDraft({ ...draft, type: e.target.value })}
               placeholder="e.g. Checkout flow"
             />
+          </label>
+          <label>
+            <span>Use auth from</span>
+            <select
+              value={draft.preflight_id ?? ''}
+              onChange={(e) =>
+                setDraft({
+                  ...draft,
+                  preflight_id: e.target.value === '' ? null : Number(e.target.value),
+                })
+              }
+              title="Pick a saved preflight. Its cookies/localStorage are restored before this scenario's steps run. Manage preflights on the Preflights page."
+            >
+              <option value="">— none —</option>
+              {preflights.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
           </label>
         </div>
         <div className="scenario-meta-actions">

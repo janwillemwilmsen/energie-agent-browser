@@ -413,6 +413,14 @@ code { background: rgba(255,255,255,0.06); padding: 2px 4px; border-radius: 3px;
   letter-spacing: 0.05em;
 }
 .chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.session-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0 16px;
+}
+.session-bar .chip { font-size: 13px; }
 .chip {
   background: transparent;
   color: var(--text);
@@ -563,6 +571,7 @@ code { background: rgba(255,255,255,0.06); padding: 2px 4px; border-radius: 3px;
 .scenario-meta-url { width: 100%; }
 .scenario-meta-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 12px;
   margin-top: 4px;

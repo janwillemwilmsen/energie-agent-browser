@@ -7,6 +7,7 @@ import { Terminal } from './pages/Terminal.js';
 import { Schedules } from './pages/Schedules.js';
 import { Runs } from './pages/Runs.js';
 import { Diffs } from './pages/Diffs.js';
+import { PreflightPage } from './pages/Preflight.js';
 
 export function App() {
   return (
@@ -14,6 +15,7 @@ export function App() {
       <nav className="nav">
         <Link to="/">Home</Link>
         <Link to="/scenarios">Scenarios</Link>
+        <Link to="/preflight">Preflights</Link>
         <Link to="/terminal">Terminal</Link>
         <Link to="/schedules">Schedules</Link>
         <Link to="/runs">Runs</Link>
@@ -26,6 +28,7 @@ export function App() {
           <Route path="/scenarios/:id" element={<ScenarioEditor />} />
           <Route path="/scenarios/:id/timeline" element={<ScenarioTimeline />} />
           <Route path="/terminal" element={<Terminal />} />
+          <Route path="/preflight" element={<PreflightPage />} />
           <Route path="/schedules" element={<Schedules />} />
           <Route path="/runs" element={<Runs />} />
           <Route path="/diffs" element={<Diffs />} />
