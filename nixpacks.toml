@@ -1,0 +1,91 @@
+# Nixpacks build config for Coolify (and any other Nixpacks-based host).
+#
+# This builds the whole monorepo and runs the API server. See the "SPA",
+# "Persistence", and "Required env vars" sections below for things you must
+# also configure on the Coolify side — Nixpacks alone can't do those.
+#
+# ───────────────────────── Required env vars on Coolify ─────────────────────
+#   BROWSERLESS_URL    e.g. wss://browserless.your-host/   (NOT /chromium)
+#   BROWSERLESS_TOKEN  the token your browserless instance was started with
+#   PORT               (optional) defaults to 3001
+#   WEB_ORIGIN         (optional) front-end origin for CORS; default
+#                      http://localhost:5173 only matters if you separate the
+#                      frontend
+#   DATA_DIR           (optional) defaults to ./data; point at a mounted
+#                      volume for persistence (see "Persistence" below)
+#
+# ───────────────────────── SPA (apps/web/dist) ──────────────────────────────
+# `npm run build` produces apps/web/dist/. The Fastify server in this repo
+# does NOT currently serve those files. Pick one:
+#   1. Run a second Coolify service (Static type) pointed at apps/web/dist/
+#      and reverse-proxy /api → this server. Simple if you already use Coolify
+#      that way.
+#   2. Add a small static-serving block to apps/server/src/index.ts —
+#      @fastify/static is already in deps for exactly this. Then this single
+#      container serves both API and SPA on PORT.
+# Until one of those is in place, this container only exposes the API.
+#
+# ───────────────────────── Persistence (volumes) ────────────────────────────
+# Two paths hold mutable state. Mount Coolify volumes on both, otherwise you
+# lose everything on every redeploy.
+#   /app/data                       → SQLite DB + screenshots + run logs
+#   /root/.agent-browser            → daemon pid files + saved auth.json
+#                                     state + auth vault (encrypted)
+# The auth vault encryption key lives at /root/.agent-browser/.encryption-key
+# — losing that means every saved auth profile becomes unreadable. Back it up.
+#
+# ───────────────────────── Native build toolchain ───────────────────────────
+# better-sqlite3 and node-pty are compiled from source unless prebuilt
+# binaries exist for the exact Node version. python3 + make + gcc cover both.
+# agent-browser itself ships a prebuilt Linux binary inside its npm tarball,
+# so no extra system Chromium or `agent-browser install` is needed — we
+# connect to browserless remotely over wss.
+
+providers = ["node"]
+
+[variables]
+# Pin Node 22 LTS. Matches the @types/node line in apps/server/package.json
+# and is what tsx + better-sqlite3 ship prebuilt binaries for. Bumping to 24
+# usually works but pushes us off prebuilts more often.
+NIXPACKS_NODE_VERSION = "22"
+# Production env. Skips dev-only behavior in Fastify and Vite.
+NODE_ENV = "production"
+
+[phases.setup]
+# Toolchain for native modules. nixPkgs are installed before any npm work.
+nixPkgs = [
+  "nodejs_22",
+  "python3",
+  "gnumake",
+  "gcc",
+  "pkg-config",
+]
+
+[phases.install]
+# `npm ci` is reproducible and matches package-lock.json exactly. We DO need
+# devDependencies during the build (tsc, vite, tsx) — `tsx` even stays
+# required at runtime since `apps/server` runs via `tsx src/index.ts`. So
+# we install everything; the production image carries node_modules as-is.
+cmds = [
+  "npm ci --include=dev",
+]
+
+[phases.build]
+# Builds, in workspace order:
+#   packages/shared  → tsc --noEmit  (type-check only; runtime imports .ts)
+#   apps/server      → tsc --noEmit  (type-check)
+#   apps/web         → tsc -b && vite build  → apps/web/dist/
+# Then runs SQLite migrations so the deployed DB is at the schema this code
+# expects. Safe to re-run on every deploy: each migration file is recorded
+# in the _migrations table and skipped if already applied.
+cmds = [
+  "npm run build",
+  "npm run migrate",
+]
+
+[start]
+# Boots the Fastify API + websockets on $PORT (default 3001). The server's
+# graceful-shutdown handler (SIGTERM) flushes any active agent-browser
+# --session-name state to disk before exit, so Coolify-initiated restarts
+# don't strand auth tokens in browser memory.
+cmd = "npm --workspace apps/server start"

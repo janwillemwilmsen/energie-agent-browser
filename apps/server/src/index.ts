@@ -1,5 +1,9 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import fastifyStatic from '@fastify/static';
 import websocket from '@fastify/websocket';
 import { config } from './config.js';
 import { migrate } from './db/migrate.js';
@@ -51,6 +55,34 @@ async function main() {
   await app.register(browserlessHealthRoutes);
   await app.register(terminalWsRoute);
   await app.register(screencastWsRoute);
+
+  // Static SPA: serve apps/web/dist/ when the build output exists. Skipped
+  // silently in development, where Vite runs on its own port and proxies
+  // /api + /ws to this server. In production (Coolify / Docker) this is what
+  // makes a single container serve both the API and the React SPA on $PORT.
+  // Order matters: all API + WS routes are already registered above, so the
+  // static handler only catches things they didn't claim.
+  const __dirname = path.dirname(fileURLToPath(import.meta.url));
+  const webDist = path.resolve(__dirname, '..', '..', 'web', 'dist');
+  if (fs.existsSync(path.join(webDist, 'index.html'))) {
+    await app.register(fastifyStatic, { root: webDist, prefix: '/' });
+    // React Router uses client-side routes (/preflight, /scenarios/12, …). On
+    // a hard refresh the browser asks the server for those paths and we'd
+    // 404 without this fallback — return index.html so the SPA hydrates and
+    // the in-app router takes over. Excludes /api/* and /ws/* to keep their
+    // 404s honest (so a typo'd API path doesn't silently return HTML).
+    app.setNotFoundHandler((req, reply) => {
+      const url = req.raw.url ?? '';
+      if (url.startsWith('/api/') || url.startsWith('/ws/')) {
+        reply.code(404).send({ error: 'not_found', path: url });
+        return;
+      }
+      reply.type('text/html').sendFile('index.html');
+    });
+    app.log.info({ webDist }, 'SPA: serving apps/web/dist from this server');
+  } else {
+    app.log.info('SPA: apps/web/dist not built — only the API is exposed on this port');
+  }
 
   startScheduler();
 
