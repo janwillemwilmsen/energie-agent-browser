@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import * as pty from 'node-pty';
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config, browserlessCdpUrl } from '../config.js';
@@ -11,7 +12,24 @@ function shellCommand(): { cmd: string; args: string[] } {
   if (process.platform === 'win32') {
     return { cmd: process.env.COMSPEC ?? 'cmd.exe', args: [] };
   }
-  return { cmd: process.env.SHELL ?? '/bin/bash', args: [] };
+  // Walk a list of candidates and return the first one that exists. Coolify /
+  // Nixpacks slim base images often ship only `/bin/sh` (dash), not bash —
+  // hardcoding `/bin/bash` makes pty.spawn fail with ENOENT and the xterm
+  // panel just shows "[connection error] [connection closed]" with no clue.
+  const candidates = [
+    process.env.SHELL,
+    '/bin/bash',
+    '/usr/bin/bash',
+    '/bin/sh',
+    '/usr/bin/sh',
+  ].filter((c): c is string => !!c);
+  for (const cmd of candidates) {
+    try {
+      if (fs.existsSync(cmd)) return { cmd, args: [] };
+    } catch { /* ignore */ }
+  }
+  // Last resort — let node-pty throw a useful ENOENT we can surface.
+  return { cmd: '/bin/sh', args: [] };
 }
 
 function ptyEnv(): NodeJS.ProcessEnv {
@@ -58,16 +76,17 @@ export async function terminalWsRoute(app: FastifyInstance) {
         env: ptyEnv() as { [key: string]: string },
       });
     } catch (e: any) {
-      // node-pty intermittently throws AttachConsole on Windows. Don't crash the
-      // whole server; just close this socket with an error frame.
+      // Surface the actual cause via the xterm panel. Without this the
+      // client just sees [connection error] / [connection closed] and you
+      // have to dig into server logs to know it's e.g. ENOENT on /bin/bash.
+      const msg = `pty spawn failed (${cmd}): ${e?.message ?? e}`;
+      // Log server-side too — useful in Coolify's logs panel.
+      app.log.error({ cmd, err: e }, 'terminal pty spawn failed');
       try {
-        socket.send(
-          JSON.stringify({ type: 'error', message: `pty spawn failed: ${e?.message ?? e}` }),
-        );
+        socket.send(JSON.stringify({ type: 'data', data: `\r\n\x1b[31m${msg}\x1b[0m\r\n` }));
+        socket.send(JSON.stringify({ type: 'exit', exitCode: -1 }));
         socket.close();
-      } catch {
-        /* ignore */
-      }
+      } catch { /* ignore */ }
       return;
     }
 
