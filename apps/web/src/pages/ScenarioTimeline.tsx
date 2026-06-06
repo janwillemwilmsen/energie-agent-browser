@@ -9,6 +9,17 @@ export function ScenarioTimeline() {
   const [runs, setRuns] = useState<Run[]>([]);
   const [err, setErr] = useState<string | null>(null);
 
+  async function removeRun(runId: number) {
+    if (!confirm(`Delete run #${runId} and its screenshots?`)) return;
+    setErr(null);
+    try {
+      await api.deleteRun(runId);
+      setRuns((cur) => cur.filter((r) => r.id !== runId));
+    } catch (e: any) {
+      setErr(e?.message ?? String(e));
+    }
+  }
+
   useEffect(() => {
     if (!scenarioId) return;
     Promise.all([api.getScenario(scenarioId), api.listScenarioRuns(scenarioId)])
@@ -59,7 +70,14 @@ export function ScenarioTimeline() {
                       <span className={`status status-${r.status}`}>{r.status}</span>{' '}
                       <Link to={`/runs?run=${r.id}`} className="muted">
                         #{r.id}
-                      </Link>
+                      </Link>{' '}
+                      <button
+                        className="step-del"
+                        title="Delete run"
+                        onClick={() => void removeRun(r.id)}
+                      >
+                        🗑
+                      </button>
                     </div>
                   </th>
                 ))}

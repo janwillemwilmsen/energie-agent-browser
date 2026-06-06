@@ -331,3 +331,8 @@ iOS Simulator (requires Xcode and Appium):
 
 
     agent-browser --session-name essent-cookie-login-mijn open https://mijn.essent.nl
+
+agent-browser -p browserless open https://example.com
+agent-browser -p browserless open https://www.whatsmyip.org/
+
+agent-browser -p browserless snapshot  

@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -275,22 +275,28 @@ function isSessionAlive(session: string): boolean {
 const LAUNCH_HELPER = path.join(__dirname, 'launchConnect.cjs');
 
 function killStaleDaemons(): void {
-  // Zombie agent-browser daemons left over from prior failed bootstraps seem to
-  // correlate with 10060 errors on fresh connects. Wipe them so each bootstrap
-  // starts clean. Use taskkill on Windows; pkill elsewhere. Errors ignored.
+  // Zombie agent-browser daemons left over from prior failed bootstraps
+  // correlate with 10060 errors on fresh connects. Use spawnSync so the
+  // kill completes before we return — fire-and-forget races pty.spawn
+  // below and lets the new daemon come up alongside the zombies.
   if (process.platform === 'win32') {
     try {
-      spawn('taskkill', ['/F', '/IM', 'agent-browser-win32-x64.exe'], {
+      spawnSync('taskkill', ['/F', '/IM', 'agent-browser-win32-x64.exe'], {
         shell: false,
         windowsHide: true,
         stdio: 'ignore',
+        timeout: 5_000,
       });
     } catch {
       /* ignore */
     }
   } else {
     try {
-      spawn('pkill', ['-f', 'agent-browser-'], { shell: false, stdio: 'ignore' });
+      spawnSync('pkill', ['-f', 'agent-browser-'], {
+        shell: false,
+        stdio: 'ignore',
+        timeout: 5_000,
+      });
     } catch {
       /* ignore */
     }
