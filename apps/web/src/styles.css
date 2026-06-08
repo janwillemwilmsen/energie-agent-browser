@@ -20,6 +20,11 @@ body {
   display: grid;
   grid-template-columns: 220px 1fr;
   height: 100%;
+  /* Animate the column width when the sidebar collapses/expands. */
+  transition: grid-template-columns 0.18s ease;
+}
+.app-collapsed {
+  grid-template-columns: 60px 1fr;
 }
 
 .nav {
@@ -29,16 +34,81 @@ body {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  overflow: hidden;
 }
 .nav a {
   color: var(--text);
   text-decoration: none;
   padding: 8px 12px;
   border-radius: 6px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  white-space: nowrap;
 }
 .nav a:hover { background: rgba(255,255,255,0.06); }
+/* Active route — set by NavLink's isActive. */
+.nav a.nav-active {
+  background: rgba(56,189,248,0.14);
+  color: var(--accent);
+}
+.nav-icon { flex-shrink: 0; }
+.nav-label { overflow: hidden; text-overflow: ellipsis; }
+
+/* Admin link: pinned to the bottom of the sidebar, smaller + muted so it reads
+   as a secondary/utility entry rather than a primary destination. */
+.nav a.nav-admin {
+  margin-top: auto;
+  font-size: 13px;
+  color: var(--muted);
+  gap: 10px;
+}
+.nav a.nav-admin:hover { color: var(--text); }
+.nav a.nav-admin.nav-active { color: var(--accent); }
+
+/* Collapse toggle button — styled to sit in the nav like the links. */
+.nav-toggle {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  padding: 8px 12px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  white-space: nowrap;
+  margin-bottom: 4px;
+}
+.nav-toggle:hover { background: rgba(255,255,255,0.06); color: var(--text); }
+
+/* Collapsed (icons-only) state: centre the single icon in each row and hide
+   the toggle's own label. Labels are not rendered in JSX when collapsed, so
+   there's nothing else to hide. */
+.nav-collapsed a,
+.nav-collapsed .nav-toggle {
+  justify-content: center;
+  padding: 8px 0;
+  gap: 0;
+}
 
 .main { padding: 24px; overflow: auto; }
+
+/* Admin page link list. */
+.admin-links { display: flex; flex-direction: column; gap: 8px; max-width: 480px; }
+.admin-link {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  text-decoration: none;
+}
+.admin-link:hover { border-color: var(--accent); }
 
 .card {
   background: var(--panel);
