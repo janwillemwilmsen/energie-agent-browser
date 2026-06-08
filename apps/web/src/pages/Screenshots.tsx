@@ -301,6 +301,13 @@ function ScenarioBlock({
         )}
         {data.brand && <span className="tag tag-brand">{data.brand}</span>}
         {data.type && <span className="tag tag-type">{data.type}</span>}
+        <Link
+          to={`/screenshots/timeline/${data.scenario_id}`}
+          className="ss-timeline-link"
+          title="Compare this scenario's screenshots across runs"
+        >
+          ◷ timeline
+        </Link>
 
         <div className="screenshots-day" style={{ marginLeft: 'auto' }}>
           <button

@@ -44,7 +44,9 @@ export function ScenarioTimeline() {
   return (
     <section>
       <p>
-        <Link to="/">← Dashboard</Link>{' '}
+        <Link to="/screenshots">← Screenshots</Link>{' '}
+        <span className="muted">/</span>{' '}
+        <Link to="/">Dashboard</Link>{' '}
         <span className="muted">/</span>{' '}
         <Link to={`/scenarios/${scenarioId}`}>Editor</Link>
       </p>

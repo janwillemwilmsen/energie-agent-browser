@@ -326,7 +326,7 @@ export function Runs() {
                   </div>
                   <div>
                     <Link
-                      to={`/scenarios/${r.scenario_id}/timeline`}
+                      to={`/screenshots/timeline/${r.scenario_id}`}
                       title="Open the scenario timeline"
                     >
                       Screenshots

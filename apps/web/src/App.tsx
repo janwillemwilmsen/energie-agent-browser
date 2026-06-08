@@ -24,6 +24,9 @@ import { Diffs } from './pages/Diffs.js';
 import { PreflightPage } from './pages/Preflight.js';
 import { Screenshots } from './pages/Screenshots.js';
 import { Admin } from './pages/Admin.js';
+import { AdminScenarioSteps } from './pages/AdminScenarioSteps.js';
+import { AdminScenarioIO } from './pages/AdminScenarioIO.js';
+import { AdminNetwork } from './pages/AdminNetwork.js';
 
 interface NavItem {
   to: string;
@@ -106,9 +109,12 @@ export function App() {
           <Route path="/" element={<Home />} />
           <Route path="/scenarios" element={<Scenarios />} />
           <Route path="/scenarios/:id" element={<ScenarioEditor />} />
-          <Route path="/scenarios/:id/timeline" element={<ScenarioTimeline />} />
+          <Route path="/screenshots/timeline/:id" element={<ScenarioTimeline />} />
           <Route path="/terminal" element={<Terminal />} />
           <Route path="/admin" element={<Admin />} />
+          <Route path="/admin/scenario-steps" element={<AdminScenarioSteps />} />
+          <Route path="/admin/scenarios-io" element={<AdminScenarioIO />} />
+          <Route path="/admin/network" element={<AdminNetwork />} />
           <Route path="/preflight" element={<PreflightPage />} />
           <Route path="/schedules" element={<Schedules />} />
           <Route path="/runs" element={<Runs />} />

@@ -127,7 +127,7 @@ function ScenarioCardView({ card }: { card: ScenarioCard }) {
       : null;
 
   return (
-    <Link to={`/scenarios/${card.id}/timeline`} className="scenario-card">
+    <Link to={`/screenshots/timeline/${card.id}`} className="scenario-card">
       <div className="scenario-card-thumb">
         {thumb ? (
           <img src={thumb} alt={`Latest run of ${card.name}`} loading="lazy" />
