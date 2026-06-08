@@ -252,10 +252,11 @@ export async function diffsRoutes(app: FastifyInstance) {
     const targetSlots = parse(targetRun.screenshot_paths_json);
 
     // The leading NNN- prefix is `step.position`, which shifts whenever the
-    // scenario is edited (inserting a step bumps every later position). Pair
-    // on the stable suffix — `<label>-<viewport>.png` — so the same logical
-    // screenshot still matches across runs taken before vs. after an edit.
-    const canonical = (slot: string): string => slot.replace(/^\d+-/, '');
+    // scenario is edited (inserting a step bumps every later position), and the
+    // optional YYYYMMDD-HHMMSS block is the per-run creation stamp. Strip both
+    // and pair on the stable suffix — `<label>-<viewport>.png` — so the same
+    // logical screenshot still matches across runs (incl. older, un-stamped ones).
+    const canonical = (slot: string): string => slot.replace(/^\d+-(?:\d{8}-\d{6}-)?/, '');
     const targetByKey = new Map<string, string>();
     for (const t of targetSlots) {
       const k = canonical(t);

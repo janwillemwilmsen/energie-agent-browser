@@ -31,8 +31,9 @@ export function ScenarioTimeline() {
   }, [scenarioId]);
 
   // Build a row-per-screenshot-filename matrix so the same step from different
-  // runs lines up horizontally. Filenames are `NNN-label-viewport.png` (see
-  // runner.ts) — that prefix gives a stable sort key across runs.
+  // runs lines up horizontally. Filenames are `NNN-YYYYMMDD-HHMMSS-label-viewport.png`
+  // (see runner.ts); stripping the position + timestamp leaves a stable key shared
+  // across runs (older un-stamped `NNN-label-viewport.png` files still match).
   const matrix = useMemo(() => buildMatrix(runs), [runs]);
 
   if (err && !scenario) return <p className="error">{err}</p>;
@@ -139,8 +140,8 @@ function buildMatrix(runs: Run[]): Matrix {
     }
     const map = new Map<string, string>();
     for (const filename of shots) {
-      // Strip the .png and the leading 3-digit position so screenshots with the
-      // same label/viewport from different runs share a row.
+      // Strip the leading position (and per-run timestamp) so screenshots with
+      // the same label/viewport from different runs share a row.
       const key = stripPosition(filename);
       const label = labelFromFilename(filename);
       if (!rowMap.has(key)) rowMap.set(key, label);
@@ -156,17 +157,21 @@ function buildMatrix(runs: Run[]): Matrix {
   return { rows, byRun };
 }
 
+// Strip the leading position and the optional per-run YYYYMMDD-HHMMSS stamp.
+// "003-20260606-143025-checkout-mobile.png" -> "checkout-mobile.png"
+// "003-checkout-mobile.png" (older, un-stamped)  -> "checkout-mobile.png"
+const SLOT_PREFIX_RE = /^\d+-(?:\d{8}-\d{6}-)?/;
+
 function stripPosition(filename: string): string {
-  // "003-checkout-mobile.png" -> "checkout-mobile.png"
-  return filename.replace(/^\d+-/, '');
+  return filename.replace(SLOT_PREFIX_RE, '');
 }
 
 function labelFromFilename(filename: string): string {
-  // "003-checkout-mobile.png" -> "checkout (mobile)"
-  const base = filename.replace(/\.png$/i, '');
-  const m = base.match(/^(\d+)-(.+)-(desktop|mobile)$/);
-  if (m) return `${m[2]} (${m[3]})`;
-  return base.replace(/^\d+-/, '');
+  // "003-20260606-143025-checkout-mobile.png" -> "checkout (mobile)"
+  const base = filename.replace(/\.png$/i, '').replace(SLOT_PREFIX_RE, '');
+  const m = base.match(/^(.+)-(desktop|mobile)$/);
+  if (m) return `${m[1]} (${m[2]})`;
+  return base;
 }
 
 function formatDate(iso: string): string {

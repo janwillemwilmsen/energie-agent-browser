@@ -36,12 +36,29 @@ interface RunContext {
   scenario: ScenarioRow;
   viewport: 'desktop' | 'mobile';
   screenshotDir: string;
+  // Compact local-time stamp (YYYYMMDD-HHMMSS) of when the run started, embedded
+  // into every screenshot filename so the file carries its own creation date.
+  // Shared across the whole run (and reused on restart) so re-attempts overwrite
+  // rather than leaving orphan files behind.
+  fileStamp: string;
   log: string[];
   screenshots: string[];
 }
 
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+// Compact, filesystem-safe, sortable local-time stamp for screenshot filenames:
+// "20260606-143025" (YYYYMMDD-HHMMSS). Local time so it matches the timestamps
+// the UI renders elsewhere (toLocaleString). The cross-run slot matchers in the
+// timeline and diff pairing strip this block, so it's purely informational.
+function fileStamp(d: Date): string {
+  const p = (n: number) => String(n).padStart(2, '0');
+  return (
+    `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}` +
+    `-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`
+  );
 }
 
 function sleep(ms: number): Promise<void> {
@@ -204,7 +221,10 @@ async function executeStep(ctx: RunContext, step: StepRow): Promise<void> {
       // diff view). Otherwise it follows the run's current viewport.
       const mobileShot = payload.viewport === 'mobile';
       const suffix = mobileShot ? 'mobile' : ctx.viewport;
-      const filename = `${step.position.toString().padStart(3, '0')}-${label}-${suffix}.png`;
+      // NNN-YYYYMMDD-HHMMSS-label-viewport.png — position stays first (diff sort
+      // relies on it); the timestamp block sits between position and label and is
+      // stripped by the cross-run slot matchers so screenshots still pair up.
+      const filename = `${step.position.toString().padStart(3, '0')}-${ctx.fileStamp}-${label}-${suffix}.png`;
       const filepath = path.join(ctx.screenshotDir, filename);
       // agent-browser's screenshot default is VIEWPORT-only; --full captures
       // the entire scrollable page. Step payload's `fullPage` defaults to true
@@ -309,14 +329,38 @@ export async function executeScenario(scenarioId: number): Promise<number> {
   // scenario degrades to running with no preflight.
   let preflightName: string | null = null;
   let preflightSteps: PreflightStep[] = [];
+  // The preflight carries its own retry/restart policy (configured on the
+  // /preflight page). Per-step retries apply to every attempt; restarts re-run
+  // the whole preflight after resetting the browser connection.
+  let preflightPolicy = { retries: 0, retryWaitBeforeMs: 0, retryWaitAfterMs: 0 };
+  let preflightRestarts = 0;
   if (scenario.preflight_id != null) {
     const pf = db
-      .prepare('SELECT name, steps_json FROM preflights WHERE id = ? AND deleted_at IS NULL')
-      .get(scenario.preflight_id) as { name: string; steps_json: string } | undefined;
+      .prepare(
+        `SELECT name, steps_json,
+                retries, retry_wait_before_ms, retry_wait_after_ms, restart_on_failure
+         FROM preflights WHERE id = ? AND deleted_at IS NULL`,
+      )
+      .get(scenario.preflight_id) as
+      | {
+          name: string;
+          steps_json: string;
+          retries: number;
+          retry_wait_before_ms: number;
+          retry_wait_after_ms: number;
+          restart_on_failure: number;
+        }
+      | undefined;
     if (pf) {
       preflightName = pf.name;
       try { preflightSteps = JSON.parse(pf.steps_json) as PreflightStep[]; }
       catch { preflightSteps = []; }
+      preflightPolicy = {
+        retries: Math.max(0, pf.retries ?? 0),
+        retryWaitBeforeMs: Math.max(0, pf.retry_wait_before_ms ?? 0),
+        retryWaitAfterMs: Math.max(0, pf.retry_wait_after_ms ?? 0),
+      };
+      preflightRestarts = Math.max(0, pf.restart_on_failure ?? 0);
     }
   }
 
@@ -332,6 +376,8 @@ export async function executeScenario(scenarioId: number): Promise<number> {
   const runId = Number(runRow.lastInsertRowid);
   const screenshotDir = path.join(config.dataDir, 'screenshots', String(runId));
   fs.mkdirSync(screenshotDir, { recursive: true });
+  // One stamp for the whole run; reused across viewports and restart attempts.
+  const runFileStamp = fileStamp(new Date());
 
   const viewports: ('desktop' | 'mobile')[] =
     scenario.viewport_preset === 'both'
@@ -356,21 +402,41 @@ export async function executeScenario(scenarioId: number): Promise<number> {
       { runId, log },
       `preflight "${preflightName}": binding daemon + executing ${preflightSteps.length} step(s)`,
     );
-    try {
-      await ensureSession(session, { sessionName: preflightName });
-      if (preflightSteps.length > 0) {
-        await executePreflightSteps(
-          session,
-          preflightSteps,
-          (msg) => appendLog({ runId, log }, '  ' + msg),
-        );
-        appendLog({ runId, log }, `preflight "${preflightName}": ok`);
+    // Whole-preflight restart loop. Unlike Replay, a scenario run does NOT wipe
+    // persisted state between attempts — the preflight re-runs its login flow
+    // fresh anyway; we only reset the browser connection so a hung/flaky daemon
+    // gets a clean socket before re-running.
+    let preflightErr: any = null;
+    for (let attempt = 0; attempt <= preflightRestarts; attempt++) {
+      try {
+        if (attempt > 0) {
+          appendLog(
+            { runId, log },
+            `preflight "${preflightName}" failed — resetting browser and restarting (restart ${attempt}/${preflightRestarts})`,
+          );
+          await closeSession(session).catch(() => undefined);
+        }
+        await ensureSession(session, { sessionName: preflightName });
+        if (preflightSteps.length > 0) {
+          await executePreflightSteps(
+            session,
+            preflightSteps,
+            (msg) => appendLog({ runId, log }, '  ' + msg),
+            preflightPolicy,
+          );
+          appendLog({ runId, log }, `preflight "${preflightName}": ok`);
+        }
+        preflightErr = null;
+        break;
+      } catch (e: any) {
+        preflightErr = e;
       }
-    } catch (e: any) {
+    }
+    if (preflightErr) {
       // Hard-fail the run: scenarios that depend on the preflight (e.g. a
       // logged-in scenario) can't usefully run without it. Better to surface
       // the preflight error in the run log than silently hit the login page.
-      appendLog({ runId, log }, `preflight "${preflightName}" failed: ${e.message}`);
+      appendLog({ runId, log }, `preflight "${preflightName}" failed: ${preflightErr.message}`);
       const screenshotPathsJson = JSON.stringify([]);
       db.prepare(
         `UPDATE runs SET status = 'failed', finished_at = CURRENT_TIMESTAMP,
@@ -409,6 +475,7 @@ export async function executeScenario(scenarioId: number): Promise<number> {
         scenario,
         viewport,
         screenshotDir,
+        fileStamp: runFileStamp,
         log,
         screenshots,
       };

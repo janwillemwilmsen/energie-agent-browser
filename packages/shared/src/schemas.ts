@@ -175,6 +175,12 @@ export const Preflight = z.object({
   name: z.string(),
   description: z.string(),
   steps_json: z.string(),
+  // Retry/restart policy, applied when the preflight runs as a whole (Replay,
+  // or as a scenario's preflight prefix). Mirrors the scenario columns.
+  retries: z.number().int().nonnegative(),
+  retry_wait_before_ms: z.number().int().nonnegative(),
+  retry_wait_after_ms: z.number().int().nonnegative(),
+  restart_on_failure: z.number().int().nonnegative(),
   created_at: z.string(),
   updated_at: z.string(),
   deleted_at: z.string().nullable(),
@@ -185,6 +191,10 @@ export const PreflightCreate = z.object({
   name: PreflightName,
   description: z.string().optional(),
   steps: z.array(PreflightStep).optional(),
+  retries: z.number().int().min(0).optional(),
+  retry_wait_before_ms: z.number().int().min(0).optional(),
+  retry_wait_after_ms: z.number().int().min(0).optional(),
+  restart_on_failure: z.number().int().min(0).optional(),
 });
 export type PreflightCreate = z.infer<typeof PreflightCreate>;
 
@@ -192,6 +202,10 @@ export const PreflightUpdate = z.object({
   name: PreflightName.optional(),
   description: z.string().optional(),
   steps: z.array(PreflightStep).optional(),
+  retries: z.number().int().min(0).optional(),
+  retry_wait_before_ms: z.number().int().min(0).optional(),
+  retry_wait_after_ms: z.number().int().min(0).optional(),
+  restart_on_failure: z.number().int().min(0).optional(),
 });
 export type PreflightUpdate = z.infer<typeof PreflightUpdate>;
 

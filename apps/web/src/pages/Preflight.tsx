@@ -22,10 +22,31 @@ interface Draft {
   name: string;
   description: string;
   steps: PreflightStep[];
+  // Retry/restart policy, applied when the preflight runs as a whole (Replay,
+  // or as a scenario's preflight prefix). Mirrors the scenario editor.
+  retries: number;
+  retryWaitBeforeMs: number;
+  retryWaitAfterMs: number;
+  restartOnFailure: number;
 }
 
 function emptyDraft(): Draft {
-  return { id: null, name: '', description: '', steps: [] };
+  return {
+    id: null,
+    name: '',
+    description: '',
+    steps: [],
+    retries: 0,
+    retryWaitBeforeMs: 0,
+    retryWaitAfterMs: 0,
+    restartOnFailure: 0,
+  };
+}
+
+// Coerce a number-input value to a non-negative integer (empty / invalid → 0).
+function coerceInt(v: string): number {
+  const n = Math.floor(Number(v));
+  return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
 function summarize(step: PreflightStep): string {
@@ -79,7 +100,16 @@ export function PreflightPage() {
   }, []);
 
   const draftDirty = useMemo(() => {
-    if (draft.id == null) return draft.name.trim().length > 0 || draft.steps.length > 0;
+    if (draft.id == null) {
+      return (
+        draft.name.trim().length > 0 ||
+        draft.steps.length > 0 ||
+        draft.retries > 0 ||
+        draft.retryWaitBeforeMs > 0 ||
+        draft.retryWaitAfterMs > 0 ||
+        draft.restartOnFailure > 0
+      );
+    }
     const orig = preflights.find((p) => p.id === draft.id);
     if (!orig) return true;
     let origSteps: PreflightStep[] = [];
@@ -87,7 +117,11 @@ export function PreflightPage() {
     return (
       orig.name !== draft.name ||
       orig.description !== draft.description ||
-      JSON.stringify(origSteps) !== JSON.stringify(draft.steps)
+      JSON.stringify(origSteps) !== JSON.stringify(draft.steps) ||
+      orig.retries !== draft.retries ||
+      orig.retry_wait_before_ms !== draft.retryWaitBeforeMs ||
+      orig.retry_wait_after_ms !== draft.retryWaitAfterMs ||
+      orig.restart_on_failure !== draft.restartOnFailure
     );
   }, [draft, preflights]);
 
@@ -143,7 +177,16 @@ export function PreflightPage() {
     setShowSaved(false);
     let steps: PreflightStep[] = [];
     try { steps = JSON.parse(p.steps_json); } catch { /* ignore */ }
-    setDraft({ id: p.id, name: p.name, description: p.description, steps });
+    setDraft({
+      id: p.id,
+      name: p.name,
+      description: p.description,
+      steps,
+      retries: p.retries,
+      retryWaitBeforeMs: p.retry_wait_before_ms,
+      retryWaitAfterMs: p.retry_wait_after_ms,
+      restartOnFailure: p.restart_on_failure,
+    });
     setTree(null);
     try {
       setBusy('Loading browser state…');
@@ -170,23 +213,35 @@ export function PreflightPage() {
     setSaving(true);
     setError(null);
     try {
+      const policy = {
+        retries: draft.retries,
+        retry_wait_before_ms: draft.retryWaitBeforeMs,
+        retry_wait_after_ms: draft.retryWaitAfterMs,
+        restart_on_failure: draft.restartOnFailure,
+      };
       const saved =
         draft.id == null
           ? await api.createPreflight({
               name,
               description: draft.description,
               steps: draft.steps,
+              ...policy,
             })
           : await api.updatePreflight(draft.id, {
               name,
               description: draft.description,
               steps: draft.steps,
+              ...policy,
             });
       setDraft({
         id: saved.id,
         name: saved.name,
         description: saved.description,
         steps: draft.steps,
+        retries: saved.retries,
+        retryWaitBeforeMs: saved.retry_wait_before_ms,
+        retryWaitAfterMs: saved.retry_wait_after_ms,
+        restartOnFailure: saved.restart_on_failure,
       });
       setBoundTo(saved.name);
       setShowSaved(true);
@@ -398,6 +453,60 @@ export function PreflightPage() {
       <div className="editor-grid">
         <div>
           <h2>Steps</h2>
+          <div className="retry-policy">
+            <span className="muted">On step failure, retry</span>
+            <label>
+              <input
+                type="number"
+                min={0}
+                value={draft.retries}
+                onChange={(e) => setDraft((d) => ({ ...d, retries: coerceInt(e.target.value) }))}
+              />
+              <span>times</span>
+            </label>
+            <label>
+              <span>wait before</span>
+              <input
+                type="number"
+                min={0}
+                value={draft.retryWaitBeforeMs}
+                onChange={(e) =>
+                  setDraft((d) => ({ ...d, retryWaitBeforeMs: coerceInt(e.target.value) }))
+                }
+              />
+              <span>ms</span>
+            </label>
+            <label>
+              <span>wait after</span>
+              <input
+                type="number"
+                min={0}
+                value={draft.retryWaitAfterMs}
+                onChange={(e) =>
+                  setDraft((d) => ({ ...d, retryWaitAfterMs: coerceInt(e.target.value) }))
+                }
+              />
+              <span>ms</span>
+            </label>
+          </div>
+          <div className="retry-policy">
+            <span className="muted">If the whole preflight fails, reset the browser &amp; restart</span>
+            <label>
+              <input
+                type="number"
+                min={0}
+                value={draft.restartOnFailure}
+                onChange={(e) =>
+                  setDraft((d) => ({ ...d, restartOnFailure: coerceInt(e.target.value) }))
+                }
+              />
+              <span>times</span>
+            </label>
+          </div>
+          <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>
+            Applied when this preflight runs as a whole — on <strong>Replay (clean)</strong> and as the
+            preflight prefix of any scenario that uses it. Remember to <strong>Save</strong> after changing.
+          </p>
           {draft.steps.length === 0 ? (
             <p className="muted">
               No steps yet. Add a navigate step, then snapshot the page and pick nodes

@@ -121,6 +121,26 @@ async function execNavigate(session: string, url: string): Promise<void> {
   );
 }
 
+// Per-step retry policy for a preflight (mirrors the scenario runner's policy).
+// `restartOnFailure` is a whole-run concern handled by the callers (Replay /
+// scenario runner) because resetting the browser connection — and whether to
+// also wipe persisted state — differs between those surfaces.
+export interface PreflightRetryPolicy {
+  retries: number;
+  retryWaitBeforeMs: number;
+  retryWaitAfterMs: number;
+}
+
+const NO_RETRY: PreflightRetryPolicy = {
+  retries: 0,
+  retryWaitBeforeMs: 0,
+  retryWaitAfterMs: 0,
+};
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
 export async function executePreflightStep(session: string, step: PreflightStep): Promise<void> {
   if (step.kind === 'navigate') {
     await execNavigate(session, step.url);
@@ -149,10 +169,44 @@ export async function executePreflightStep(session: string, step: PreflightStep)
   if (r.exitCode !== 0) throw new Error(`${step.kind} failed: ${r.stderr || r.stdout}`);
 }
 
+// Run one preflight step, re-attempting on failure per the policy: pause
+// `retryWaitBeforeMs` before each retry and `retryWaitAfterMs` after a retry
+// that finally succeeds. Throws if every attempt fails. Mirrors the scenario
+// runner's executeStepWithRetries.
+async function executePreflightStepWithRetries(
+  session: string,
+  step: PreflightStep,
+  policy: PreflightRetryPolicy,
+  onStepLog?: (msg: string) => void,
+): Promise<void> {
+  const retries = Math.max(0, policy.retries ?? 0);
+  const waitBefore = Math.max(0, policy.retryWaitBeforeMs ?? 0);
+  const waitAfter = Math.max(0, policy.retryWaitAfterMs ?? 0);
+
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      await executePreflightStep(session, step);
+      if (attempt > 0 && waitAfter > 0) {
+        onStepLog?.(`retry: waiting ${waitAfter}ms after success`);
+        await sleep(waitAfter);
+      }
+      return;
+    } catch (e: any) {
+      if (attempt >= retries) throw e;
+      onStepLog?.(`${step.kind} failed: ${e?.message ?? e} — retry ${attempt + 1}/${retries}`);
+      if (waitBefore > 0) {
+        onStepLog?.(`retry: waiting ${waitBefore}ms before re-attempt`);
+        await sleep(waitBefore);
+      }
+    }
+  }
+}
+
 export async function executePreflightSteps(
   session: string,
   steps: PreflightStep[],
   onStepLog?: (msg: string) => void,
+  policy: PreflightRetryPolicy = NO_RETRY,
 ): Promise<void> {
   for (let i = 0; i < steps.length; i++) {
     const step = steps[i]!;
@@ -162,6 +216,6 @@ export async function executePreflightSteps(
       step.kind === 'auth-login' ? ` "${step.name}"` :
       ''
     }`);
-    await executePreflightStep(session, step);
+    await executePreflightStepWithRetries(session, step, policy, onStepLog);
   }
 }

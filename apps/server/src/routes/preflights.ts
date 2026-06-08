@@ -27,7 +27,9 @@ export async function preflightsRoutes(app: FastifyInstance) {
   app.get('/api/preflights', async () => {
     return getDb()
       .prepare(
-        `SELECT id, name, description, steps_json, created_at, updated_at, deleted_at
+        `SELECT id, name, description, steps_json,
+                retries, retry_wait_before_ms, retry_wait_after_ms, restart_on_failure,
+                created_at, updated_at, deleted_at
          FROM preflights
          WHERE deleted_at IS NULL
          ORDER BY updated_at DESC`,
@@ -51,10 +53,20 @@ export async function preflightsRoutes(app: FastifyInstance) {
     const db = getDb();
     const info = db
       .prepare(
-        `INSERT INTO preflights (name, description, steps_json)
-         VALUES (?, ?, ?)`,
+        `INSERT INTO preflights
+           (name, description, steps_json,
+            retries, retry_wait_before_ms, retry_wait_after_ms, restart_on_failure)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(body.name, body.description ?? '', JSON.stringify(body.steps ?? []));
+      .run(
+        body.name,
+        body.description ?? '',
+        JSON.stringify(body.steps ?? []),
+        Math.max(0, body.retries ?? 0),
+        Math.max(0, body.retry_wait_before_ms ?? 0),
+        Math.max(0, body.retry_wait_after_ms ?? 0),
+        Math.max(0, body.restart_on_failure ?? 0),
+      );
     return reply.code(201).send(
       db.prepare('SELECT * FROM preflights WHERE id = ?').get(info.lastInsertRowid),
     );
@@ -66,7 +78,16 @@ export async function preflightsRoutes(app: FastifyInstance) {
     const existing = db
       .prepare('SELECT * FROM preflights WHERE id = ? AND deleted_at IS NULL')
       .get(Number(req.params.id)) as
-      | { id: number; name: string; description: string; steps_json: string }
+      | {
+          id: number;
+          name: string;
+          description: string;
+          steps_json: string;
+          retries: number;
+          retry_wait_before_ms: number;
+          retry_wait_after_ms: number;
+          restart_on_failure: number;
+        }
       | undefined;
     if (!existing) return reply.code(404).send({ error: 'not_found' });
 
@@ -78,14 +99,22 @@ export async function preflightsRoutes(app: FastifyInstance) {
     }
 
     const nextName = body.name ?? existing.name;
+    const clampOr = (v: number | undefined, fallback: number) =>
+      v == null ? fallback : Math.max(0, v);
     db.prepare(
       `UPDATE preflights
-       SET name = ?, description = ?, steps_json = ?, updated_at = CURRENT_TIMESTAMP
+       SET name = ?, description = ?, steps_json = ?,
+           retries = ?, retry_wait_before_ms = ?, retry_wait_after_ms = ?, restart_on_failure = ?,
+           updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
     ).run(
       nextName,
       body.description ?? existing.description,
       body.steps ? JSON.stringify(body.steps) : existing.steps_json,
+      clampOr(body.retries, existing.retries),
+      clampOr(body.retry_wait_before_ms, existing.retry_wait_before_ms),
+      clampOr(body.retry_wait_after_ms, existing.retry_wait_after_ms),
+      clampOr(body.restart_on_failure, existing.restart_on_failure),
       existing.id,
     );
 
@@ -179,8 +208,21 @@ export async function preflightsRoutes(app: FastifyInstance) {
   // the replay are persisted under the same --session-name on shutdown.
   app.post<{ Params: { id: string } }>('/api/preflights/:id/replay', async (req, reply) => {
     const row = getDb()
-      .prepare('SELECT name, steps_json FROM preflights WHERE id = ? AND deleted_at IS NULL')
-      .get(Number(req.params.id)) as { name: string; steps_json: string } | undefined;
+      .prepare(
+        `SELECT name, steps_json,
+                retries, retry_wait_before_ms, retry_wait_after_ms, restart_on_failure
+         FROM preflights WHERE id = ? AND deleted_at IS NULL`,
+      )
+      .get(Number(req.params.id)) as
+      | {
+          name: string;
+          steps_json: string;
+          retries: number;
+          retry_wait_before_ms: number;
+          retry_wait_after_ms: number;
+          restart_on_failure: number;
+        }
+      | undefined;
     if (!row) return reply.code(404).send({ error: 'not_found' });
 
     let steps: z.infer<typeof PreflightStep>[] = [];
@@ -190,29 +232,43 @@ export async function preflightsRoutes(app: FastifyInstance) {
       return reply.code(500).send({ error: 'bad_steps_json' });
     }
 
-    try {
-      // Stop the recorder daemon first so agent-browser releases its lock on
-      // the state file, then wipe the persisted state so the steps re-run
-      // against a truly blank browser (no leftover cookies, localStorage, or
-      // IndexedDB from a previous record/replay).
-      await closeSession(PREFLIGHT_RECORDER_SESSION).catch(() => undefined);
-      await flushSessionState();
-      clearPersistedSessionState(row.name);
+    const policy = {
+      retries: Math.max(0, row.retries ?? 0),
+      retryWaitBeforeMs: Math.max(0, row.retry_wait_before_ms ?? 0),
+      retryWaitAfterMs: Math.max(0, row.retry_wait_after_ms ?? 0),
+    };
+    const maxRestarts = Math.max(0, row.restart_on_failure ?? 0);
 
-      await ensureSession(PREFLIGHT_RECORDER_SESSION, { sessionName: row.name });
-      for (const step of steps) {
-        await executePreflightStep(PREFLIGHT_RECORDER_SESSION, step);
+    // Whole-run restart loop: each attempt resets to a truly blank browser
+    // (wipe persisted state, fresh daemon) and re-runs every step. Per-step
+    // retries are handled inside executePreflightSteps via `policy`.
+    let lastErr: any = null;
+    for (let attempt = 0; attempt <= maxRestarts; attempt++) {
+      try {
+        // Stop the recorder daemon first so agent-browser releases its lock on
+        // the state file, then wipe the persisted state so the steps re-run
+        // against a truly blank browser (no leftover cookies, localStorage, or
+        // IndexedDB from a previous record/replay).
+        await closeSession(PREFLIGHT_RECORDER_SESSION).catch(() => undefined);
+        await flushSessionState();
+        clearPersistedSessionState(row.name);
+
+        await ensureSession(PREFLIGHT_RECORDER_SESSION, { sessionName: row.name });
+        await executePreflightSteps(PREFLIGHT_RECORDER_SESSION, steps, undefined, policy);
+
+        // Replay completed → persist the freshly-built state to disk. This is
+        // the ONE place (along with the Save preflight handler) that's allowed
+        // to mutate the canonical auth.json: closeSession no longer auto-flushes,
+        // so anything we don't save here is gone the moment the daemon dies.
+        await persistSessionState(PREFLIGHT_RECORDER_SESSION, row.name);
+        return { ok: true };
+      } catch (e: any) {
+        lastErr = e;
+        // Fall through to the next attempt (which resets at the top of the loop).
       }
-
-      // Replay completed → persist the freshly-built state to disk. This is
-      // the ONE place (along with the Save preflight handler) that's allowed
-      // to mutate the canonical auth.json: closeSession no longer auto-flushes,
-      // so anything we don't save here is gone the moment the daemon dies.
-      await persistSessionState(PREFLIGHT_RECORDER_SESSION, row.name);
-
-      return { ok: true };
-    } catch (e: any) {
-      return reply.code(400).send({ ok: false, error: e?.message ?? String(e) });
     }
+    return reply
+      .code(400)
+      .send({ ok: false, error: lastErr?.message ?? String(lastErr ?? 'replay failed') });
   });
 }

@@ -19,9 +19,20 @@ export interface Preflight {
   name: string;
   description: string;
   steps_json: string;
+  retries: number;
+  retry_wait_before_ms: number;
+  retry_wait_after_ms: number;
+  restart_on_failure: number;
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
+}
+
+export interface PreflightRetryPolicy {
+  retries?: number;
+  retry_wait_before_ms?: number;
+  retry_wait_after_ms?: number;
+  restart_on_failure?: number;
 }
 
 export interface SelectorStrategy {
@@ -229,14 +240,16 @@ export const api = {
   ) => req<Scenario>(`/api/scenarios/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
   listPreflights: () => req<Preflight[]>('/api/preflights'),
   getPreflight: (id: number) => req<Preflight>(`/api/preflights/${id}`),
-  createPreflight: (body: { name: string; description?: string; steps?: PreflightStep[] }) =>
+  createPreflight: (
+    body: { name: string; description?: string; steps?: PreflightStep[] } & PreflightRetryPolicy,
+  ) =>
     req<Preflight>('/api/preflights', {
       method: 'POST',
       body: JSON.stringify(body),
     }),
   updatePreflight: (
     id: number,
-    body: { name?: string; description?: string; steps?: PreflightStep[] },
+    body: { name?: string; description?: string; steps?: PreflightStep[] } & PreflightRetryPolicy,
   ) =>
     req<Preflight>(`/api/preflights/${id}`, {
       method: 'PUT',
