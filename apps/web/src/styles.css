@@ -718,6 +718,66 @@ code { background: rgba(255,255,255,0.06); padding: 2px 4px; border-radius: 3px;
 }
 .scenario-meta-cancel:hover { color: var(--text); border-color: var(--text); }
 
+/* Record toggle (scenario editor) */
+.record-toggle { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 14px; }
+.record-toggle input { width: auto; }
+
+/* Recordings page */
+.rec-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: 16px;
+  margin-top: 12px;
+}
+.rec-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.rec-card-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.rec-card-head a { color: var(--accent); text-decoration: none; }
+.rec-card-head a:hover { text-decoration: underline; }
+.rec-card-foot { font-size: 12px; }
+.rec-card-foot a { color: var(--muted); }
+.rec-card-foot a:hover { color: var(--accent); }
+
+/* Mediabunny player */
+.mb-player { display: flex; flex-direction: column; gap: 6px; }
+.mb-canvas-wrap {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  background: #000;
+  border-radius: 6px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.mb-canvas { max-width: 100%; max-height: 100%; display: block; }
+.mb-load {
+  position: absolute;
+  padding: 8px 16px;
+  font-size: 14px;
+}
+.mb-overlay {
+  position: absolute;
+  color: var(--muted);
+  font-size: 13px;
+  padding: 8px 12px;
+  background: rgba(0, 0, 0, 0.5);
+  border-radius: 6px;
+}
+.mb-overlay.mb-error { color: var(--error); max-width: 90%; text-align: center; }
+.mb-controls { display: flex; align-items: center; gap: 8px; }
+.mb-controls button { padding: 2px 10px; }
+.mb-time { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; min-width: 36px; }
+.mb-seek { flex: 1; }
+
 /* Scenario timeline page */
 .timeline-scroll {
   margin-top: 16px;

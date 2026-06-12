@@ -10,6 +10,7 @@ import { migrate } from './db/migrate.js';
 import { scenariosRoutes } from './routes/scenarios.js';
 import { snapshotRoutes } from './routes/snapshot.js';
 import { runsRoutes } from './routes/runs.js';
+import { recordingsRoutes } from './routes/recordings.js';
 import { diffsRoutes } from './routes/diffs.js';
 import { schedulesRoutes } from './routes/schedules.js';
 import { sessionsRoutes } from './routes/sessions.js';
@@ -47,6 +48,7 @@ async function main() {
   await app.register(scenariosRoutes);
   await app.register(snapshotRoutes);
   await app.register(runsRoutes);
+  await app.register(recordingsRoutes);
   await app.register(diffsRoutes);
   await app.register(schedulesRoutes);
   await app.register(sessionsRoutes);

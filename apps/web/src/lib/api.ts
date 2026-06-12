@@ -10,8 +10,22 @@ export interface Scenario {
   retry_wait_after_ms: number;
   restart_on_failure: number;
   preflight_id: number | null;
+  record_enabled: number;
   created_at: string;
   updated_at: string;
+}
+
+export interface Recording {
+  id: number;
+  scenario_id: number | null;
+  run_id: number | null;
+  file_path: string;
+  size_bytes: number | null;
+  created_at: string;
+  // Joined from the scenario by GET /api/recordings.
+  scenario_name?: string | null;
+  brand?: string | null;
+  type?: string | null;
 }
 
 export interface Preflight {
@@ -209,6 +223,10 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ ids }),
     }),
+  listRecordings: () => req<Recording[]>('/api/recordings'),
+  deleteRecording: (id: number) =>
+    req<void>(`/api/recordings/${id}`, { method: 'DELETE' }),
+  recordingVideoUrl: (id: number) => `/api/recordings/${id}/video`,
   listSchedules: () => req<Schedule[]>('/api/schedules'),
   createSchedule: (body: { scenario_id: number; cron_expr: string; enabled: boolean }) =>
     req<Schedule>('/api/schedules', { method: 'POST', body: JSON.stringify(body) }),
@@ -235,6 +253,7 @@ export const api = {
         | 'retry_wait_after_ms'
         | 'restart_on_failure'
         | 'preflight_id'
+        | 'record_enabled'
       >
     >,
   ) => req<Scenario>(`/api/scenarios/${id}`, { method: 'PUT', body: JSON.stringify(body) }),

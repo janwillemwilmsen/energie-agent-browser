@@ -319,11 +319,11 @@ export function Runs() {
                   ) : (
                     '—'
                   )}
-                  <div className="muted run-scenario-id">
+                  <span className="muted run-scenario-id">
                     <Link to={`/scenarios/${r.scenario_id}`} title="Edit scenario">
                       #{r.scenario_id}
                     </Link>
-                  </div>
+                  </span>
                   <div>
                     <Link
                       to={`/screenshots/timeline/${r.scenario_id}`}

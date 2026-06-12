@@ -10,5 +10,6 @@ data/sqlite.db-shm
 data/sqlite.db-wal
 data/screenshots
 data/diffs
+data/recordings
 *.log
 .vite

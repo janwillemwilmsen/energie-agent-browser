@@ -114,7 +114,7 @@ export async function scenariosRoutes(app: FastifyInstance) {
       `UPDATE scenarios
        SET name = ?, url = ?, viewport_preset = ?, brand = ?, type = ?,
            retries = ?, retry_wait_before_ms = ?, retry_wait_after_ms = ?, restart_on_failure = ?,
-           preflight_id = ?,
+           preflight_id = ?, record_enabled = ?,
            updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
     ).run(
@@ -128,6 +128,7 @@ export async function scenariosRoutes(app: FastifyInstance) {
       Math.max(0, Number(next.retry_wait_after_ms ?? 0)),
       Math.max(0, Number(next.restart_on_failure ?? 0)),
       preflightId,
+      next.record_enabled ? 1 : 0,
       Number(req.params.id),
     );
 

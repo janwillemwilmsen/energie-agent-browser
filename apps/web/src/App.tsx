@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { NavLink, Route, Routes } from 'react-router-dom';
 import {
   CalendarClock,
@@ -10,6 +10,7 @@ import {
   PanelLeftOpen,
   Play,
   Settings,
+  Video,
   Workflow,
   type LucideIcon,
 } from 'lucide-react';
@@ -23,6 +24,11 @@ import { Runs } from './pages/Runs.js';
 import { Diffs } from './pages/Diffs.js';
 import { PreflightPage } from './pages/Preflight.js';
 import { Screenshots } from './pages/Screenshots.js';
+// Recordings pulls in Mediabunny (~400 kB) for video decode/playback — lazy-load
+// it so that weight only ships when the user actually opens the page.
+const Recordings = lazy(() =>
+  import('./pages/Recordings.js').then((m) => ({ default: m.Recordings })),
+);
 import { Admin } from './pages/Admin.js';
 import { AdminScenarioSteps } from './pages/AdminScenarioSteps.js';
 import { AdminScenarioIO } from './pages/AdminScenarioIO.js';
@@ -44,6 +50,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/schedules', label: 'Schedules', icon: CalendarClock },
   { to: '/runs', label: 'Runs', icon: Play },
   { to: '/screenshots', label: 'Screenshots', icon: Images },
+  { to: '/recordings', label: 'Recordings', icon: Video },
   { to: '/diffs', label: 'Diffs', icon: GitCompare },
 ];
 
@@ -105,6 +112,7 @@ export function App() {
         </NavLink>
       </nav>
       <main className="main">
+        <Suspense fallback={<p className="muted">Loading…</p>}>
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/scenarios" element={<Scenarios />} />
@@ -119,8 +127,10 @@ export function App() {
           <Route path="/schedules" element={<Schedules />} />
           <Route path="/runs" element={<Runs />} />
           <Route path="/screenshots" element={<Screenshots />} />
+          <Route path="/recordings" element={<Recordings />} />
           <Route path="/diffs" element={<Diffs />} />
         </Routes>
+        </Suspense>
       </main>
     </div>
   );

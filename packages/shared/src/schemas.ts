@@ -94,6 +94,8 @@ export const Scenario = z.object({
   // running with --session-name = the preflight's name, so the browser starts
   // with its cookies/localStorage already restored.
   preflight_id: z.number().int().nullable(),
+  // 0/1: record a .webm of each run via agent-browser record start/stop.
+  record_enabled: z.number().int(),
   created_at: z.string(),
   updated_at: z.string(),
 });
@@ -110,6 +112,7 @@ export const ScenarioCreate = z.object({
   retry_wait_after_ms: z.number().int().min(0).optional(),
   restart_on_failure: z.number().int().min(0).optional(),
   preflight_id: z.number().int().nullable().optional(),
+  record_enabled: z.number().int().min(0).max(1).optional(),
 });
 export type ScenarioCreate = z.infer<typeof ScenarioCreate>;
 

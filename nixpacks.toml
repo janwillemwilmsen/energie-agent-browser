@@ -40,6 +40,16 @@
 # agent-browser itself ships a prebuilt Linux binary inside its npm tarball,
 # so no extra system Chromium or `agent-browser install` is needed — we
 # connect to browserless remotely over wss.
+#
+# ───────────────────────── Runtime: ffmpeg (video recording) ────────────────
+# `ffmpeg` is a RUNTIME dependency, not a build tool. agent-browser's video
+# recording (scenarios with "Record" enabled → record start/stop) pipes CDP
+# screencast frames into a system `ffmpeg` spawned from PATH; without it the
+# binary errors "ffmpeg not found / Install ffmpeg to enable recording" and the
+# run logs a non-fatal warning (no .webm is produced). nixPkgs entries are on
+# PATH at runtime too, so listing it below is all that's needed in the
+# container. Locally, agent-browser inherits the server process's PATH and uses
+# whatever `ffmpeg` is already installed.
 
 providers = ["node"]
 
@@ -52,13 +62,15 @@ NIXPACKS_NODE_VERSION = "22"
 NODE_ENV = "production"
 
 [phases.setup]
-# Toolchain for native modules. nixPkgs are installed before any npm work.
+# Toolchain for native modules + ffmpeg for agent-browser video recording.
+# nixPkgs are installed before any npm work and stay on PATH at runtime.
 nixPkgs = [
   "nodejs_22",
   "python3",
   "gnumake",
   "gcc",
   "pkg-config",
+  "ffmpeg",
 ]
 
 [phases.install]

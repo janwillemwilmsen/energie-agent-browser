@@ -28,6 +28,7 @@ interface ScenarioRow {
   retry_wait_after_ms: number;
   restart_on_failure: number;
   preflight_id: number | null;
+  record_enabled: number;
 }
 
 interface RunContext {
@@ -314,7 +315,7 @@ export async function executeScenario(scenarioId: number): Promise<number> {
     .prepare(
       `SELECT id, name, url, viewport_preset,
               retries, retry_wait_before_ms, retry_wait_after_ms, restart_on_failure,
-              preflight_id
+              preflight_id, record_enabled
        FROM scenarios WHERE id = ?`,
     )
     .get(scenarioId) as ScenarioRow | undefined;
@@ -446,6 +447,26 @@ export async function executeScenario(scenarioId: number): Promise<number> {
     }
   }
 
+  // Optional video recording. Started AFTER any preflight so login / credential
+  // entry isn't captured. Because a whole-run restart resets the browser
+  // connection (which kills the recorder daemon), recording is (re)started at
+  // the top of EACH attempt — overwriting the same file — so the saved webm
+  // reflects the attempt that actually ran. Best-effort: failures log a warning
+  // but never fail the run.
+  let recAbs: string | null = null;
+  let recordingRelPath: string | null = null;
+  if (scenario.record_enabled) {
+    const recDirAbs = path.join(config.dataDir, 'recordings', String(scenarioId));
+    const safeName = (scenario.name || `scenario-${scenarioId}`)
+      .replace(/[^a-z0-9._-]/gi, '_')
+      .slice(0, 60);
+    const recFile = `${runFileStamp}-${safeName}.webm`;
+    recAbs = path.join(recDirAbs, recFile);
+    recordingRelPath = `recordings/${scenarioId}/${recFile}`;
+    try { fs.mkdirSync(recDirAbs, { recursive: true }); } catch { /* ignore */ }
+  }
+  let recordingActive = false;
+
   // Whole-run restart loop. A run that fails (a step exhausted its retries) is
   // retried from the top, after resetting the browser connection — this re-runs
   // all prior steps, so it's safe for stateful flows (unlike reloading mid-run).
@@ -461,6 +482,25 @@ export async function executeScenario(scenarioId: number): Promise<number> {
         appendLog({ runId, log }, 'browser connection reset; re-running scenario from the top');
       } catch (e: any) {
         appendLog({ runId, log }, `connection reset failed: ${e.message}`);
+      }
+    }
+
+    // (Re)start recording for this attempt — a reset above killed any prior one.
+    if (recAbs) {
+      try {
+        const r = await run(['record', 'start', recAbs], { session, timeoutMs: 30_000 });
+        recordingActive = r.exitCode === 0;
+        appendLog(
+          { runId, log },
+          recordingActive
+            ? attempt === 0
+              ? `recording started → ${recordingRelPath}`
+              : 'recording restarted for retry'
+            : `recording start failed (non-fatal): ${r.stderr || r.stdout}`,
+        );
+      } catch (e: any) {
+        recordingActive = false;
+        appendLog({ runId, log }, `recording start error (non-fatal): ${e?.message ?? e}`);
       }
     }
 
@@ -490,6 +530,28 @@ export async function executeScenario(scenarioId: number): Promise<number> {
     }
 
     if (status === 'success') break;
+  }
+
+  // Stop recording and register the saved webm. Only insert a row if the file
+  // actually landed on disk, so a failed recording doesn't leave a dead entry.
+  if (recordingActive && recAbs && recordingRelPath) {
+    try {
+      const r = await run(['record', 'stop'], { session, timeoutMs: 30_000 });
+      if (r.exitCode === 0 && fs.existsSync(recAbs)) {
+        const size = fs.statSync(recAbs).size;
+        db.prepare(
+          `INSERT INTO recordings (scenario_id, run_id, file_path, size_bytes) VALUES (?, ?, ?, ?)`,
+        ).run(scenarioId, runId, recordingRelPath, size);
+        appendLog({ runId, log }, `recording saved (${Math.round(size / 1024)} KB)`);
+      } else {
+        appendLog(
+          { runId, log },
+          `recording stop produced no file (non-fatal): ${r.stderr || r.stdout || 'no output'}`,
+        );
+      }
+    } catch (e: any) {
+      appendLog({ runId, log }, `recording stop error (non-fatal): ${e?.message ?? e}`);
+    }
   }
 
   db.prepare(

@@ -210,6 +210,7 @@ export function ScenarioEditor() {
       retry_wait_before_ms: number;
       retry_wait_after_ms: number;
       restart_on_failure: number;
+      record_enabled: number;
     }>,
   ) {
     try {
@@ -500,6 +501,16 @@ export function ScenarioEditor() {
                 onBlur={(e) => saveRetry({ restart_on_failure: clampInt(e.target.value) })}
               />
               <span>times</span>
+            </label>
+          </div>
+          <div className="retry-policy">
+            <label className="record-toggle" title="Record a .webm video of each run (saved to the Recordings page)">
+              <input
+                type="checkbox"
+                checked={data.record_enabled === 1}
+                onChange={(e) => saveRetry({ record_enabled: e.target.checked ? 1 : 0 })}
+              />
+              <span>🎥 Record this scenario (video of each run)</span>
             </label>
           </div>
           {data.steps.length === 0 ? (
