@@ -36,6 +36,11 @@ export function MediabunnyPlayer({ src }: { src: string }) {
   const [playing, setPlaying] = useState(false);
 
   useEffect(() => {
+    // Reset on (re)mount. React 18 StrictMode runs the cleanup once right after
+    // the first mount on the SAME instance, which would otherwise leave
+    // disposedRef stuck at true and make load() bail after its first await —
+    // freezing the UI on "Decoding…".
+    disposedRef.current = false;
     return () => {
       disposedRef.current = true;
       tokenRef.current++;

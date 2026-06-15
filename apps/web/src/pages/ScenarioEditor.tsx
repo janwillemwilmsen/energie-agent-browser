@@ -210,7 +210,6 @@ export function ScenarioEditor() {
       retry_wait_before_ms: number;
       retry_wait_after_ms: number;
       restart_on_failure: number;
-      record_enabled: number;
     }>,
   ) {
     try {
@@ -503,16 +502,6 @@ export function ScenarioEditor() {
               <span>times</span>
             </label>
           </div>
-          <div className="retry-policy">
-            <label className="record-toggle" title="Record a .webm video of each run (saved to the Recordings page)">
-              <input
-                type="checkbox"
-                checked={data.record_enabled === 1}
-                onChange={(e) => saveRetry({ record_enabled: e.target.checked ? 1 : 0 })}
-              />
-              <span>🎥 Record this scenario (video of each run)</span>
-            </label>
-          </div>
           {data.steps.length === 0 ? (
             <p className="muted">
               No steps yet. Take a snapshot, then click any node to add a step.
@@ -626,6 +615,27 @@ export function ScenarioEditor() {
             >
               + wait (ms)
             </button>
+            <button
+              onClick={() => addStep('record_start', {})}
+              disabled={savingStep}
+              title="Start a video recording from this point in the scenario (drag to position; saved to the Recordings page)"
+            >
+              + ⏺ start recording
+            </button>
+            <button
+              onClick={() => addStep('record_stop', {})}
+              disabled={savingStep}
+              title="Stop the video recording and save it"
+            >
+              + ⏹ stop recording
+            </button>
+            <button
+              onClick={() => addStep('close', {})}
+              disabled={savingStep}
+              title="Close the browser session (agent-browser close) — useful as a final step to end the scenario cleanly"
+            >
+              + ✕ close session
+            </button>
             <button onClick={runNow} disabled={data.steps.length === 0}>
               ▶ Run now
             </button>
@@ -647,7 +657,7 @@ export function ScenarioEditor() {
               title="Reset the browser session, then play the scenario"
             >
               ↻▶ Reset &amp; play
-            </button>
+            </button>{' '}
             {playStatus &&
               (lastRunId != null ? (
                 <Link to={`/runs?run=${lastRunId}`} className="muted" style={{ marginLeft: 8 }}>
@@ -807,6 +817,9 @@ function summarizeStep(kind: string, p: any): string {
     if (p.selector) return `for ${p.selector.role} "${p.selector.name}"`;
     return `${p.ms ?? 0}ms`;
   }
+  if (kind === 'record_start') return '⏺ start video recording';
+  if (kind === 'record_stop') return '⏹ stop video recording';
+  if (kind === 'close') return '✕ close browser session';
   return JSON.stringify(p);
 }
 

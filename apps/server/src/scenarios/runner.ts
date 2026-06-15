@@ -6,9 +6,21 @@ import { run, runJson, closeSession, ensureSession } from '../agentBrowser/drive
 import { parseSnapshotText } from '../agentBrowser/parser.js';
 import { resolveSelector } from './selector.js';
 import { executePreflightSteps } from './preflightExecutor.js';
+import { StreamRecorder } from './streamRecorder.js';
 import type { PreflightStep, SelectorStrategy, ViewportPreset } from '@eab/shared';
 
 const MOBILE_DEVICE = 'iPhone 14';
+
+// Holds the in-flight video recording for a run. Recording is bracketed by
+// `record_start` / `record_stop` steps, so a run may have zero, one, or several
+// recordings; the holder tracks the currently-open one and an index that keeps
+// each clip's filename unique. Shared across viewports and restart attempts.
+interface RecordingHolder {
+  recorder: StreamRecorder | null;
+  absPath: string | null;
+  relPath: string | null;
+  index: number;
+}
 
 interface StepRow {
   id: number;
@@ -28,7 +40,6 @@ interface ScenarioRow {
   retry_wait_after_ms: number;
   restart_on_failure: number;
   preflight_id: number | null;
-  record_enabled: number;
 }
 
 interface RunContext {
@@ -44,6 +55,7 @@ interface RunContext {
   fileStamp: string;
   log: string[];
   screenshots: string[];
+  recording: RecordingHolder;
 }
 
 function nowIso(): string {
@@ -100,10 +112,90 @@ async function applyViewport(ctx: RunContext): Promise<void> {
   }
 }
 
+// Begin a recording at this point in the step sequence. Best-effort: a failure
+// to start logs a warning but never throws, so it can't fail the run. A
+// `record_start` while one is already open is ignored (keeps a single clip
+// across the 'both' viewports and restart re-runs).
+async function startRecordingStep(ctx: RunContext): Promise<void> {
+  if (ctx.recording.recorder) {
+    appendLog(ctx, `record start: already recording — ignoring`);
+    return;
+  }
+  const recDirAbs = path.join(config.dataDir, 'recordings', String(ctx.scenario.id));
+  try { fs.mkdirSync(recDirAbs, { recursive: true }); } catch { /* ignore */ }
+  const safeName = (ctx.scenario.name || `scenario-${ctx.scenario.id}`)
+    .replace(/[^a-z0-9._-]/gi, '_')
+    .slice(0, 60);
+  ctx.recording.index += 1;
+  const suffix = ctx.recording.index > 1 ? `-${ctx.recording.index}` : '';
+  const file = `${ctx.fileStamp}-${safeName}${suffix}.webm`;
+  ctx.recording.absPath = path.join(recDirAbs, file);
+  ctx.recording.relPath = `recordings/${ctx.scenario.id}/${file}`;
+  ctx.recording.recorder = await StreamRecorder.start({
+    session: ctx.session,
+    outPath: ctx.recording.absPath,
+    log: (m) => appendLog(ctx, m),
+  });
+  appendLog(
+    ctx,
+    ctx.recording.recorder
+      ? `recording started (screencast) → ${ctx.recording.relPath}`
+      : `recording start failed (non-fatal)`,
+  );
+}
+
+// Stop the open recording (if any) and register the saved webm. Used by the
+// `record_stop` step and by the run-level finalizer for an unclosed recording.
+async function stopRecordingStep(ctx: {
+  recording: RecordingHolder;
+  scenario: ScenarioRow;
+  runId: number;
+  log: string[];
+}): Promise<void> {
+  const rec = ctx.recording.recorder;
+  if (!rec) return;
+  ctx.recording.recorder = null;
+  const frames = rec.frameCount;
+  const saved = await rec.stop().catch(() => false);
+  const { absPath, relPath } = ctx.recording;
+  ctx.recording.absPath = null;
+  ctx.recording.relPath = null;
+  if (saved && absPath && relPath && fs.existsSync(absPath)) {
+    const size = fs.statSync(absPath).size;
+    getDb()
+      .prepare(
+        `INSERT INTO recordings (scenario_id, run_id, file_path, size_bytes) VALUES (?, ?, ?, ?)`,
+      )
+      .run(ctx.scenario.id, ctx.runId, relPath, size);
+    appendLog(
+      { runId: ctx.runId, log: ctx.log },
+      `recording saved (${Math.round(size / 1024)} KB, ${frames} frames)`,
+    );
+  } else {
+    appendLog({ runId: ctx.runId, log: ctx.log }, `recording produced no file (non-fatal)`);
+  }
+}
+
 async function executeStep(ctx: RunContext, step: StepRow): Promise<void> {
   const payload = JSON.parse(step.payload_json);
 
   switch (step.kind) {
+    case 'record_start':
+      await startRecordingStep(ctx);
+      return;
+    case 'record_stop':
+      await stopRecordingStep(ctx);
+      return;
+    case 'close': {
+      // Tear down the browser session (agent-browser close). A later step that
+      // talks to the browser will re-bootstrap the session on demand via run().
+      appendLog(ctx, 'close browser session');
+      await closeSession(ctx.session).catch((e: any) =>
+        appendLog(ctx, `close failed (non-fatal): ${e?.message ?? e}`),
+      );
+      appendLog(ctx, 'browser session closed');
+      return;
+    }
     case 'navigate': {
       const url = String(payload.url);
       appendLog(ctx, `navigate ${url}`);
@@ -302,10 +394,15 @@ async function executeStepWithRetries(ctx: RunContext, step: StepRow): Promise<v
   }
 }
 
-async function runOnce(ctx: RunContext, steps: StepRow[]): Promise<void> {
+async function runOnce(
+  ctx: RunContext,
+  steps: StepRow[],
+  afterStep?: (step: StepRow) => Promise<void>,
+): Promise<void> {
   await applyViewport(ctx);
   for (const step of steps) {
     await executeStepWithRetries(ctx, step);
+    if (afterStep) await afterStep(step);
   }
 }
 
@@ -315,7 +412,7 @@ export async function executeScenario(scenarioId: number): Promise<number> {
     .prepare(
       `SELECT id, name, url, viewport_preset,
               retries, retry_wait_before_ms, retry_wait_after_ms, restart_on_failure,
-              preflight_id, record_enabled
+              preflight_id
        FROM scenarios WHERE id = ?`,
     )
     .get(scenarioId) as ScenarioRow | undefined;
@@ -392,6 +489,10 @@ export async function executeScenario(scenarioId: number): Promise<number> {
   // from any Terminal/Editor tab and every run + the live preview share it.
   const session = 'default';
   const maxRestarts = Math.max(0, scenario.restart_on_failure ?? 0);
+  // Video recording is opened/closed by `record_start` / `record_stop` steps;
+  // this holder is shared across viewports and restart attempts so a recording
+  // started in one survives into the next.
+  const recording: RecordingHolder = { recorder: null, absPath: null, relPath: null, index: 0 };
 
   // Preflight handling: bind the daemon to the preflight's --session-name (so
   // any state save still lands in the right slot) AND execute the preflight's
@@ -418,6 +519,9 @@ export async function executeScenario(scenarioId: number): Promise<number> {
           await closeSession(session).catch(() => undefined);
         }
         await ensureSession(session, { sessionName: preflightName });
+        // NOTE: recording is deliberately NOT started here. The preflight
+        // navigates (login), and `record start` poisons the next navigation —
+        // so we wait and start recording after the scenario's first navigation.
         if (preflightSteps.length > 0) {
           await executePreflightSteps(
             session,
@@ -447,26 +551,6 @@ export async function executeScenario(scenarioId: number): Promise<number> {
     }
   }
 
-  // Optional video recording. Started AFTER any preflight so login / credential
-  // entry isn't captured. Because a whole-run restart resets the browser
-  // connection (which kills the recorder daemon), recording is (re)started at
-  // the top of EACH attempt — overwriting the same file — so the saved webm
-  // reflects the attempt that actually ran. Best-effort: failures log a warning
-  // but never fail the run.
-  let recAbs: string | null = null;
-  let recordingRelPath: string | null = null;
-  if (scenario.record_enabled) {
-    const recDirAbs = path.join(config.dataDir, 'recordings', String(scenarioId));
-    const safeName = (scenario.name || `scenario-${scenarioId}`)
-      .replace(/[^a-z0-9._-]/gi, '_')
-      .slice(0, 60);
-    const recFile = `${runFileStamp}-${safeName}.webm`;
-    recAbs = path.join(recDirAbs, recFile);
-    recordingRelPath = `recordings/${scenarioId}/${recFile}`;
-    try { fs.mkdirSync(recDirAbs, { recursive: true }); } catch { /* ignore */ }
-  }
-  let recordingActive = false;
-
   // Whole-run restart loop. A run that fails (a step exhausted its retries) is
   // retried from the top, after resetting the browser connection — this re-runs
   // all prior steps, so it's safe for stateful flows (unlike reloading mid-run).
@@ -485,25 +569,6 @@ export async function executeScenario(scenarioId: number): Promise<number> {
       }
     }
 
-    // (Re)start recording for this attempt — a reset above killed any prior one.
-    if (recAbs) {
-      try {
-        const r = await run(['record', 'start', recAbs], { session, timeoutMs: 30_000 });
-        recordingActive = r.exitCode === 0;
-        appendLog(
-          { runId, log },
-          recordingActive
-            ? attempt === 0
-              ? `recording started → ${recordingRelPath}`
-              : 'recording restarted for retry'
-            : `recording start failed (non-fatal): ${r.stderr || r.stdout}`,
-        );
-      } catch (e: any) {
-        recordingActive = false;
-        appendLog({ runId, log }, `recording start error (non-fatal): ${e?.message ?? e}`);
-      }
-    }
-
     // Each attempt starts from a clean screenshot set (filenames are reused).
     screenshots.length = 0;
     status = 'success';
@@ -518,6 +583,7 @@ export async function executeScenario(scenarioId: number): Promise<number> {
         fileStamp: runFileStamp,
         log,
         screenshots,
+        recording,
       };
       appendLog(ctx, `=== viewport: ${viewport} ===`);
       try {
@@ -532,27 +598,10 @@ export async function executeScenario(scenarioId: number): Promise<number> {
     if (status === 'success') break;
   }
 
-  // Stop recording and register the saved webm. Only insert a row if the file
-  // actually landed on disk, so a failed recording doesn't leave a dead entry.
-  if (recordingActive && recAbs && recordingRelPath) {
-    try {
-      const r = await run(['record', 'stop'], { session, timeoutMs: 30_000 });
-      if (r.exitCode === 0 && fs.existsSync(recAbs)) {
-        const size = fs.statSync(recAbs).size;
-        db.prepare(
-          `INSERT INTO recordings (scenario_id, run_id, file_path, size_bytes) VALUES (?, ?, ?, ?)`,
-        ).run(scenarioId, runId, recordingRelPath, size);
-        appendLog({ runId, log }, `recording saved (${Math.round(size / 1024)} KB)`);
-      } else {
-        appendLog(
-          { runId, log },
-          `recording stop produced no file (non-fatal): ${r.stderr || r.stdout || 'no output'}`,
-        );
-      }
-    } catch (e: any) {
-      appendLog({ runId, log }, `recording stop error (non-fatal): ${e?.message ?? e}`);
-    }
-  }
+  // A recording left open (a `record_start` without a matching `record_stop`,
+  // or a run that failed mid-recording) is finalized here so the partial clip
+  // is still saved.
+  await stopRecordingStep({ recording, scenario, runId, log });
 
   db.prepare(
     `UPDATE runs

@@ -44,6 +44,27 @@ export const config = {
   },
   agentBrowserBin: optional('AGENT_BROWSER_BIN', 'agent-browser'),
   sessionIdleTtlMs: Number(optional('SESSION_IDLE_TTL_MS', '300000')),
+  // Scenario video recording is done by tapping agent-browser's live CDP
+  // screencast (the `stream` WebSocket) on the EXISTING stealthed page and
+  // muxing the JPEG frames to a .webm with ffmpeg. This avoids `agent-browser
+  // record`, which spins up a fresh, un-stealthed browser context and gets
+  // blocked by Cloudflare/CloudFront on WAF-protected sites.
+  ffmpegPath: optional('FFMPEG_PATH', 'ffmpeg'),
+  // Constant output frame rate. The screencast only emits frames on visual
+  // change, so we re-emit the latest frame at this cadence to keep wall-clock
+  // duration accurate and fill static stretches. 10 is plenty for a debug clip.
+  recordingFps: Number(optional('RECORDING_FPS', '10')),
+  // Pause after `record start` before running any steps, so ffmpeg + the CDP
+  // screencast are actually capturing before the first action. Without it the
+  // opening steps (navigate, cookie-consent click, …) fall into the recorder's
+  // warm-up gap and the video's first seconds are blank/white. Raise it if early
+  // steps are still missed on a slow host.
+  recordingWarmupMs: Number(optional('RECORDING_WARMUP_MS', '1500')),
+  // When '1', the runner probes and logs the page state (title/url/UA/webdriver)
+  // right after `record start`, into the run log. Lets you see whether recording
+  // reloaded the page into a WAF/CloudFront error — without the AB_DRIVER_DEBUG
+  // flood. Off by default.
+  recordingDebug: optional('RECORDING_DEBUG', '0') === '1',
   stealth: {
     enabled: optional('STEALTH_ENABLED', 'true') !== 'false',
     userAgent: optional('STEALTH_USER_AGENT', DEFAULT_STEALTH_UA),

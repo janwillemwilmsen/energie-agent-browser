@@ -23,6 +23,14 @@ export const StepKind = z.enum([
   'screenshot',
   'wait',
   'evaluate',
+  // Bracket steps that start/stop a video recording of the run. Place them
+  // anywhere in the sequence to record just the slice you care about; the
+  // runner taps the live screencast (see StreamRecorder), so stealth is kept.
+  'record_start',
+  'record_stop',
+  // Tear down the browser session (agent-browser close). Useful as a final step
+  // to end a scenario cleanly; later steps re-bootstrap the session on demand.
+  'close',
 ]);
 export type StepKind = z.infer<typeof StepKind>;
 
@@ -66,6 +74,9 @@ const StepWait = z.object({
   selector: SelectorStrategy.optional(),
 });
 const StepEvaluate = z.object({ kind: z.literal('evaluate'), js: z.string() });
+const StepRecordStart = z.object({ kind: z.literal('record_start') });
+const StepRecordStop = z.object({ kind: z.literal('record_stop') });
+const StepClose = z.object({ kind: z.literal('close') });
 
 export const StepPayload = z.discriminatedUnion('kind', [
   StepNavigate,
@@ -76,6 +87,9 @@ export const StepPayload = z.discriminatedUnion('kind', [
   StepScreenshot,
   StepWait,
   StepEvaluate,
+  StepRecordStart,
+  StepRecordStop,
+  StepClose,
 ]);
 export type StepPayload = z.infer<typeof StepPayload>;
 
