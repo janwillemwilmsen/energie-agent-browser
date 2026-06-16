@@ -55,9 +55,9 @@ export class StreamRecorder {
     this.ff.stderr?.on('data', (d) => {
       this.ffStderrTail = (this.ffStderrTail + d.toString()).slice(-2000);
     });
-    // libvpx VP9, realtime. The scale+pad normalizes any frame size (e.g. a
-    // mid-run mobile-device switch) onto a fixed canvas so the encoder never
-    // chokes on a resolution change. yuv420p for broad player compatibility.
+    // The scale+pad (in start()) normalizes any frame size (e.g. a mid-run
+    // mobile-device switch) onto a fixed canvas so the encoder never chokes on
+    // a resolution change.
     const periodMs = Math.max(1, Math.round(1000 / Math.max(1, config.recordingFps)));
     this.ticker = setInterval(() => {
       if (this.lastFrame && this.ff.stdin?.writable) {
@@ -76,10 +76,19 @@ export class StreamRecorder {
         [
           '-hide_banner', '-loglevel', 'warning',
           '-f', 'mjpeg', '-framerate', String(fps), '-i', 'pipe:0',
+          // The screencast frames are full-range JPEG (yuvj420p); convert to
+          // limited-range yuv420p so colours render correctly and the stream
+          // carries standard color tags.
           '-vf',
-          'scale=1280:720:force_original_aspect_ratio=decrease,' +
+          'scale=1280:720:force_original_aspect_ratio=decrease:in_range=full:out_range=tv,' +
             'pad=1280:720:(ow-iw)/2:(oh-ih)/2,format=yuv420p',
-          '-c:v', 'libvpx-vp9', '-b:v', '0', '-crf', '34',
+          // VP8, NOT VP9. The Recordings page decodes with Mediabunny/WebCodecs,
+          // which for VP9 has to build a full `vp09.PP.LL.DD…` codec string from
+          // the bitstream's profile/level/colour and rejects ours; for VP8 the
+          // codec string is simply `vp8`, which WebCodecs always supports. So
+          // VP8 is what actually plays in-app (download-then-play worked either
+          // way). Matches the old agent-browser/Playwright recordings.
+          '-c:v', 'libvpx', '-b:v', '1M', '-crf', '12',
           '-deadline', 'realtime', '-cpu-used', '5',
           '-an', '-y', opts.outPath,
         ],
