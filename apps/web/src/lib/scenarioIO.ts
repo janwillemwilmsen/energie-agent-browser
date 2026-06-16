@@ -1,3 +1,4 @@
+import { StepKind } from '@eab/shared';
 import { api, type Preflight, type ScenarioDetail } from './api.js';
 
 // Portable, environment-independent representation of a scenario, used to copy
@@ -94,16 +95,10 @@ export function parsePortable(text: string): PortableScenario[] {
   return arr.map((s, i) => validateScenario(s, i));
 }
 
-const KINDS = new Set([
-  'navigate',
-  'click',
-  'type',
-  'fill',
-  'scroll',
-  'screenshot',
-  'wait',
-  'evaluate',
-]);
+// Derived from the shared StepKind enum so new step kinds (record_start,
+// record_stop, close, …) are accepted by the importer automatically instead of
+// drifting out of sync with a second hardcoded list.
+const KINDS = new Set<string>(StepKind.options);
 
 function validateScenario(s: any, idx: number): PortableScenario {
   const where = `scenario[${idx}]`;
