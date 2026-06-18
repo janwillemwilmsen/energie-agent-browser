@@ -64,8 +64,13 @@ NODE_ENV = "production"
 [phases.setup]
 # Toolchain for native modules + ffmpeg for agent-browser video recording.
 # nixPkgs are installed before any npm work and stay on PATH at runtime.
+#
+# NOTE: do NOT list a `nodejs_XX` here. Node is provided by the Nixpacks node
+# provider via NIXPACKS_NODE_VERSION above (it has its own archive of Node
+# versions). The packages below resolve against Nixpacks' default pinned
+# nixpkgs, which does not have a `nodejs_24` attribute — listing it makes the
+# setup phase fail with `nix-env ... exit code: 1`.
 nixPkgs = [
-  "nodejs_24",
   "python3",
   "gnumake",
   "gcc",
