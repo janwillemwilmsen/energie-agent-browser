@@ -54,10 +54,10 @@
 providers = ["node"]
 
 [variables]
-# Pin Node 22 LTS. Matches the @types/node line in apps/server/package.json
-# and is what tsx + better-sqlite3 ship prebuilt binaries for. Bumping to 24
-# usually works but pushes us off prebuilts more often.
-NIXPACKS_NODE_VERSION = "22"
+# Pin Node 24. Note this may push native modules (better-sqlite3, node-pty)
+# off prebuilt binaries more often than an LTS like 22, in which case the
+# python3 + make + gcc toolchain below compiles them from source.
+NIXPACKS_NODE_VERSION = "24"
 # Production env. Skips dev-only behavior in Fastify and Vite.
 NODE_ENV = "production"
 
@@ -65,7 +65,7 @@ NODE_ENV = "production"
 # Toolchain for native modules + ffmpeg for agent-browser video recording.
 # nixPkgs are installed before any npm work and stay on PATH at runtime.
 nixPkgs = [
-  "nodejs_22",
+  "nodejs_24",
   "python3",
   "gnumake",
   "gcc",
