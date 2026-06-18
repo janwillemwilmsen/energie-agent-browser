@@ -54,10 +54,15 @@
 providers = ["node"]
 
 [variables]
-# Pin Node 24. Note this may push native modules (better-sqlite3, node-pty)
-# off prebuilt binaries more often than an LTS like 22, in which case the
-# python3 + make + gcc toolchain below compiles them from source.
-NIXPACKS_NODE_VERSION = "24"
+# Pin Node 22 LTS. Matches the @types/node line in apps/server/package.json
+# and is what tsx + better-sqlite3 ship prebuilt binaries for.
+#
+# NOTE: Node 24 is NOT available here — the Nixpacks version Coolify pins
+# (image ubuntu-1745885067, nixpkgs ffeebf0...) predates Node 24's release, so
+# its archive has no `nodejs_24` attribute. To move to 24, first bump the
+# Nixpacks version in Coolify to a mid-2025-or-later release, then change this
+# value and the nodejs_24 entry in [phases.setup] together.
+NIXPACKS_NODE_VERSION = "22"
 # Production env. Skips dev-only behavior in Fastify and Vite.
 NODE_ENV = "production"
 
@@ -65,12 +70,11 @@ NODE_ENV = "production"
 # Toolchain for native modules + ffmpeg for agent-browser video recording.
 # nixPkgs are installed before any npm work and stay on PATH at runtime.
 #
-# NOTE: do NOT list a `nodejs_XX` here. Node is provided by the Nixpacks node
-# provider via NIXPACKS_NODE_VERSION above (it has its own archive of Node
-# versions). The packages below resolve against Nixpacks' default pinned
-# nixpkgs, which does not have a `nodejs_24` attribute — listing it makes the
-# setup phase fail with `nix-env ... exit code: 1`.
+# `nodejs_22` here is what actually puts node + npm on PATH (it resolves
+# against Nixpacks' pinned nixpkgs, which HAS nodejs_22 but NOT nodejs_24).
+# Keep this version in sync with NIXPACKS_NODE_VERSION above.
 nixPkgs = [
+  "nodejs_22",
   "python3",
   "gnumake",
   "gcc",
