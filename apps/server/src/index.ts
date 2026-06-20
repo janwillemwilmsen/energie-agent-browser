@@ -14,6 +14,7 @@ import { recordingsRoutes } from './routes/recordings.js';
 import { diffsRoutes } from './routes/diffs.js';
 import { schedulesRoutes } from './routes/schedules.js';
 import { sessionsRoutes } from './routes/sessions.js';
+import { sessionStatesRoutes } from './routes/sessionStates.js';
 import { preflightsRoutes } from './routes/preflights.js';
 import { authProfilesRoutes } from './routes/authProfiles.js';
 import { browserlessHealthRoutes } from './routes/browserlessHealth.js';
@@ -52,6 +53,7 @@ async function main() {
   await app.register(diffsRoutes);
   await app.register(schedulesRoutes);
   await app.register(sessionsRoutes);
+  await app.register(sessionStatesRoutes);
   await app.register(preflightsRoutes);
   await app.register(authProfilesRoutes);
   await app.register(browserlessHealthRoutes);

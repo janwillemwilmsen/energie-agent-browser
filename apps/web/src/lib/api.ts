@@ -201,6 +201,14 @@ export interface SnapshotResponse {
   raw: { origin: string; refs: Record<string, { role: string; name: string }>; snapshot: string };
 }
 
+export interface SessionState {
+  name: string;
+  file: string;
+  sizeBytes: number;
+  modifiedAt: string;
+  inUse: boolean;
+}
+
 export const api = {
   listScenarios: () => req<Scenario[]>('/api/scenarios'),
   listScenarioCards: () => req<ScenarioCard[]>('/api/scenarios/cards'),
@@ -381,4 +389,7 @@ export const api = {
       body: JSON.stringify(body),
     }),
   artifactImageUrl: (id: number) => `/api/artifacts/${id}/image`,
+  listSessionStates: () => req<SessionState[]>('/api/session-states'),
+  deleteSessionState: (name: string) =>
+    req<void>(`/api/session-states/${encodeURIComponent(name)}`, { method: 'DELETE' }),
 };

@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { ArrowRightLeft, Braces, Network, Terminal as TerminalIcon } from 'lucide-react';
+import { ArrowRightLeft, Braces, Cookie, Network, Terminal as TerminalIcon } from 'lucide-react';
 
 // Admin landing page. Gathers lower-level / operational tools that don't belong
 // in the main navigation. The Terminal lives here now instead of the top menu.
@@ -36,6 +36,13 @@ export function Admin() {
           <span>
             <strong>Network inspector</strong>
             <span className="muted"> — terminal + buttons to inspect the session's network traffic</span>
+          </span>
+        </Link>
+        <Link to="/admin/session-states" className="admin-link">
+          <Cookie size={18} aria-hidden />
+          <span>
+            <strong>Session state files</strong>
+            <span className="muted"> — list and delete persisted --session-name cookie/state files</span>
           </span>
         </Link>
       </div>
