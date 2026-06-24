@@ -450,8 +450,8 @@ export function PreflightPage() {
         onError={setError}
       />
 
-      <div className="editor-grid">
-        <div>
+      <div className="editor-grid preflight-editor">
+        <div className="pf-steps">
           <h2>Steps</h2>
           <div className="retry-policy">
             <span className="muted">On step failure, retry</span>
@@ -595,7 +595,9 @@ export function PreflightPage() {
               + auth login
             </button>
           </div>
+        </div>
 
+        <div className="pf-snapshot">
           <h3 style={{ marginTop: 24 }}>Snapshot &amp; pick</h3>
           <p className="muted">
             Snapshot the current page state, then click <em>click</em> or <em>type</em> on
@@ -616,13 +618,13 @@ export function PreflightPage() {
           )}
         </div>
 
-        <div>
+        <div className="pf-preview">
           <h2>
             Preview{' '}
+          </h2>
             <button onClick={() => setPreviewActive((v) => !v)}>
               {previewActive ? 'stop' : 'start'}
             </button>
-          </h2>
           <PreviewStream session={RECORDER_SESSION} active={previewActive} />
         </div>
       </div>
@@ -733,7 +735,7 @@ function AuthProfilesPanel({
           credentials in steps.
         </p>
         {profiles.length > 0 && (
-          <table className="table" style={{ marginTop: 0 }}>
+          <table className="table auth-table" style={{ marginTop: 0 }}>
             <thead>
               <tr>
                 <th>Name</th>
@@ -745,10 +747,10 @@ function AuthProfilesPanel({
             <tbody>
               {profiles.map((p) => (
                 <tr key={p.name}>
-                  <td><code>{p.name}</code></td>
-                  <td style={{ wordBreak: 'break-all' }}>{p.url}</td>
-                  <td>{p.username}</td>
-                  <td>
+                  <td data-label="Name"><code>{p.name}</code></td>
+                  <td data-label="URL" style={{ wordBreak: 'break-all' }}>{p.url}</td>
+                  <td data-label="Username">{p.username}</td>
+                  <td className="auth-actions">
                     <button
                       className="btn-danger"
                       onClick={() => del(p.name)}

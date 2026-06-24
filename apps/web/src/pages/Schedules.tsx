@@ -236,7 +236,7 @@ export function Schedules() {
         <button type="submit">Add</button>
       </form>
 
-      <table className="table">
+      <table className="table schedules-table">
         <thead>
           <tr>
             <th>ID</th>
@@ -255,16 +255,16 @@ export function Schedules() {
             try { when = cronstrue.toString(s.cron_expr); } catch {}
             return (
               <tr key={s.id}>
-                <td>{s.id}</td>
-                <td>{scenarios.find((sc) => sc.id === s.scenario_id)?.name ?? s.scenario_id}</td>
-                <td><code>{s.cron_expr}</code></td>
-                <td>{when}</td>
-                <td>
+                <td data-label="ID">{s.id}</td>
+                <td data-label="Scenario">{scenarios.find((sc) => sc.id === s.scenario_id)?.name ?? s.scenario_id}</td>
+                <td data-label="Cron"><code>{s.cron_expr}</code></td>
+                <td data-label="When">{when}</td>
+                <td data-label="Enabled">
                   <button onClick={() => toggle(s)}>{s.enabled ? 'on' : 'off'}</button>
                 </td>
-                <td>{s.last_run_at ?? '—'}</td>
-                <td>{s.last_status ?? '—'}</td>
-                <td>
+                <td data-label="Last run">{s.last_run_at ?? '—'}</td>
+                <td data-label="Last status">{s.last_status ?? '—'}</td>
+                <td className="schedule-actions">
                   <button onClick={() => remove(s.id)}>Delete</button>
                 </td>
               </tr>

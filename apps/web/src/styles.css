@@ -224,6 +224,42 @@ code { background: rgba(255,255,255,0.06); padding: 2px 4px; border-radius: 3px;
 }
 .editor-grid h2 { margin-top: 0; }
 
+/* Preflight editor: a 2-col editor-grid laid out with named areas so the
+   mobile order can differ from the DOM order. Desktop: Steps spans the left
+   column; the right column stacks the live Preview on top with Snapshot & pick
+   beneath it. */
+.preflight-editor {
+  grid-template-areas:
+    "steps preview"
+    "steps snapshot";
+  align-items: start;
+}
+.preflight-editor .pf-steps { grid-area: steps; }
+.preflight-editor .pf-snapshot { grid-area: snapshot; }
+.preflight-editor .pf-preview { grid-area: preview; }
+
+/* Below ~900px the two panels are too cramped side by side: stack to a single
+   column and reorder to Preview → Snapshot & pick → Steps (Auth profiles
+   already sits above the grid, so it stays first). */
+@media (max-width: 900px) {
+  .preflight-editor {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "preview"
+      "snapshot"
+      "steps";
+  }
+}
+
+/* Scenario editor: Steps on the left, Preview + Snapshot stacked on the right
+   (desktop, via the base .editor-grid 2-col layout). Below ~900px the columns
+   are too cramped: stack to a single column and move the Preview + Snapshot
+   block above Steps. */
+@media (max-width: 900px) {
+  .scenario-editor { grid-template-columns: 1fr; }
+  .scenario-editor .se-preview { order: -1; }
+}
+
 .retry-policy {
   display: flex;
   align-items: center;
@@ -320,8 +356,17 @@ code { background: rgba(255,255,255,0.06); padding: 2px 4px; border-radius: 3px;
 }
 .a11y-tree .picker button:hover { background: rgba(255,255,255,0.06); }
 
-.runs-grid { display: grid; grid-template-columns: 1fr 1.4fr; gap: 24px; }
-.run-detail { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px; max-height: 80vh; overflow: auto; }
+/* The table; capped so columns don't stretch absurdly wide on big monitors. */
+.runs-grid { max-width: 1200px; }
+/* The run detail expands inline as a row directly beneath the clicked run.
+   Strip the cell's default padding so the panel uses the full row width. */
+.run-detail-row > td { padding: 4px 0 12px; }
+.run-detail { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+/* Inside the detail panel, lay Log and Screenshots side by side at every width
+   (including mobile). minmax(0,1fr) (not 1fr) lets the columns shrink below
+   their content, so a long log line scrolls inside its box instead of blowing
+   the layout out to content width. */
+.run-detail-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; align-items: start; }
 .run-log { background: rgba(0,0,0,0.3); border-radius: 6px; padding: 8px; font-size: 12px; font-family: Consolas, monospace; max-height: 300px; overflow: auto; }
 .screenshots { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
 .shot img { width: 100%; height: auto; border: 1px solid var(--border); border-radius: 4px; }
@@ -563,8 +608,8 @@ code { background: rgba(255,255,255,0.06); padding: 2px 4px; border-radius: 3px;
 }
 .chip:hover { border-color: var(--accent); color: var(--accent); }
 .chip-on {
-  background: var(--accent);
-  color: var(--bg);
+  /* background: var(--accent); */
+  color: var(--accent);
   border-color: var(--accent);
 }
 .filter-clear {
@@ -725,7 +770,9 @@ code { background: rgba(255,255,255,0.06); padding: 2px 4px; border-radius: 3px;
 /* Recordings page */
 .rec-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  /* Same column template as Home's .card-grid so the cards fit on mobile
+     instead of overflowing. */
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
   gap: 16px;
   margin-top: 12px;
 }
@@ -907,7 +954,7 @@ code { background: rgba(255,255,255,0.06); padding: 2px 4px; border-radius: 3px;
 
 .ss-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: 14px;
 }
 .ss-card {
@@ -941,4 +988,137 @@ code { background: rgba(255,255,255,0.06); padding: 2px 4px; border-radius: 3px;
   margin-top: 6px;
   word-break: break-all;
   font-family: Consolas, monospace;
+}
+
+/* ───────────────────────── Responsive: phones ─────────────────────────────
+   Wide data tables (/scenarios has 7 columns, /schedules has 8) overflow on a
+   phone. Below this breakpoint we turn each row into a stacked "card": the
+   column headers are hidden and each cell becomes a label/value pair driven by
+   its data-label. Scoped to the specific tables so the other .table instances
+   are untouched. */
+@media (max-width: 640px) {
+  .main { padding: 14px; }
+
+  /* Hide the real <thead> but keep it for screen readers. */
+  .scenarios-table thead,
+  .schedules-table thead,
+  .auth-table thead,
+  .runs-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  .scenarios-table,
+  .scenarios-table tbody,
+  .scenarios-table tr,
+  .scenarios-table td,
+  .schedules-table,
+  .schedules-table tbody,
+  .schedules-table tr,
+  .schedules-table td,
+  .auth-table,
+  .auth-table tbody,
+  .auth-table tr,
+  .auth-table td,
+  .runs-table,
+  .runs-table tbody,
+  .runs-table tr,
+  .runs-table td {
+    display: block;
+    width: 100%;
+  }
+
+  /* Each row is a bordered card. */
+  .scenarios-table tr,
+  .schedules-table tr,
+  .auth-table tr,
+  .runs-table tr {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--panel);
+    padding: 4px 12px;
+    margin-bottom: 12px;
+  }
+
+  /* Each cell: "Label    value", label fixed-width, value takes the rest and
+     is allowed to shrink (minmax 0) so long content wraps instead of
+     overflowing. */
+  .scenarios-table td,
+  .schedules-table td,
+  .auth-table td,
+  .runs-table td {
+    display: grid;
+    grid-template-columns: 76px minmax(0, 1fr);
+    align-items: center;
+    gap: 4px 12px;
+    padding: 8px 0;
+  }
+  /* Schedule labels ("Last status", "Last run") need a wider label column. */
+  .schedules-table td {
+    grid-template-columns: 92px minmax(0, 1fr);
+  }
+  /* The runs "Scenario" cell stacks a link, an id, and a Screenshots link, so
+     top-align the label against that multi-line value. */
+  .runs-table td { align-items: start; }
+  .scenarios-table td:not(:last-child),
+  .schedules-table td:not(:last-child),
+  .auth-table td:not(:last-child),
+  .runs-table td:not(:last-child) {
+    border-bottom: 1px solid var(--border);
+  }
+  .scenarios-table td::before,
+  .schedules-table td::before,
+  .auth-table td::before,
+  .runs-table td::before {
+    content: attr(data-label);
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  /* Long URL / cron string wraps within its value column. */
+  .scenario-url { word-break: break-all; overflow-wrap: anywhere; }
+  .schedules-table td code { word-break: break-all; overflow-wrap: anywhere; }
+
+  /* Inline brand/type editors fill the value column. */
+  .scenarios-table .inline-tag-input { width: 100%; box-sizing: border-box; }
+
+  /* Actions row: drop the label, let the buttons wrap and share the width. */
+  .scenarios-table td.scenario-actions,
+  .schedules-table td.schedule-actions,
+  .auth-table td.auth-actions {
+    display: flex;
+    flex-wrap: wrap;
+    white-space: normal;
+    gap: 8px;
+    padding-top: 12px;
+  }
+  .scenarios-table td.scenario-actions::before,
+  .schedules-table td.schedule-actions::before,
+  .auth-table td.auth-actions::before { content: none; }
+  .scenarios-table td.scenario-actions > *,
+  .schedules-table td.schedule-actions > *,
+  .auth-table td.auth-actions > * {
+    flex: 1 1 auto;
+    text-align: center;
+  }
+
+  /* Runs delete cell: drop the label, left-align the small × button. */
+  .runs-table td.run-actions { display: flex; white-space: normal; padding-top: 12px; }
+  .runs-table td.run-actions::before { content: none; }
+
+  /* The inline detail row is not a data row: keep it a plain full-width block
+     beneath its run card, not a bordered card with a label grid. */
+  .runs-table tr.run-detail-row {
+    border: none;
+    background: none;
+    padding: 0;
+    margin: 0 0 12px;
+  }
+  .runs-table td.run-detail-cell { display: block; padding: 0; }
+  .runs-table td.run-detail-cell::before { content: none; }
 }

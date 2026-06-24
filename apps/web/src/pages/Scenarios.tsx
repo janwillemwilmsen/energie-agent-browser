@@ -140,7 +140,7 @@ export function Scenarios() {
         </form>
       </details>
 
-      <table className="table">
+      <table className="table scenarios-table">
         <thead>
           <tr>
             <th>Name</th>
@@ -155,12 +155,12 @@ export function Scenarios() {
         <tbody>
           {items.map((s) => (
             <tr key={s.id}>
-              <td>
+              <td data-label="Name">
                 <Link to={`/scenarios/${s.id}`}>{s.name}</Link>
               </td>
-              <td>{s.url}</td>
-              <td>{s.viewport_preset}</td>
-              <td>
+              <td data-label="URL" className="scenario-url">{s.url}</td>
+              <td data-label="Viewport">{s.viewport_preset}</td>
+              <td data-label="Brand">
                 <input
                   className="inline-tag-input"
                   defaultValue={s.brand ?? ''}
@@ -168,7 +168,7 @@ export function Scenarios() {
                   onBlur={(e) => updateTag(s, 'brand', e.target.value)}
                 />
               </td>
-              <td>
+              <td data-label="Type">
                 <input
                   className="inline-tag-input"
                   defaultValue={s.type ?? ''}
@@ -176,7 +176,7 @@ export function Scenarios() {
                   onBlur={(e) => updateTag(s, 'type', e.target.value)}
                 />
               </td>
-              <td>{s.updated_at}</td>
+              <td data-label="Updated">{s.updated_at}</td>
               <td className="scenario-actions">
                 <button
                   onClick={() => runScenario(s)}

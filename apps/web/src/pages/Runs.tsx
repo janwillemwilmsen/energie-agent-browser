@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { api, type Run } from '../lib/api.js';
 
@@ -263,7 +263,7 @@ export function Runs() {
       </div>
 
       <div className="runs-grid">
-        <table className="table">
+        <table className="table runs-table">
           <thead>
             <tr>
               <th>
@@ -288,8 +288,8 @@ export function Runs() {
           </thead>
           <tbody>
             {visibleRuns.map((r, idx) => (
+              <Fragment key={r.id}>
               <tr
-                key={r.id}
                 onClick={() => setSelected(r)}
                 style={{
                   cursor: 'pointer',
@@ -300,7 +300,7 @@ export function Runs() {
                       : undefined,
                 }}
               >
-                <td onClick={(e) => e.stopPropagation()}>
+                <td data-label="Select" onClick={(e) => e.stopPropagation()}>
                   <input
                     type="checkbox"
                     checked={isSelected(r.id)}
@@ -310,8 +310,8 @@ export function Runs() {
                     title="Select run (shift-click for a range)"
                   />
                 </td>
-                <td>{r.id}</td>
-                <td onClick={(e) => e.stopPropagation()} className="run-scenario-cell">
+                <td data-label="ID">{r.id}</td>
+                <td data-label="Scenario" onClick={(e) => e.stopPropagation()} className="run-scenario-cell">
                   {r.scenario_name != null ? (
                     <Link to={`/scenarios/${r.scenario_id}`} title="Edit scenario">
                       {r.scenario_name}
@@ -333,7 +333,7 @@ export function Runs() {
                     </Link>
                   </div>
                 </td>
-                <td>
+                <td data-label="Tags">
                   {r.brand || r.type ? (
                     <span className="run-tags">
                       {r.brand && <span className="run-tag">{r.brand}</span>}
@@ -343,12 +343,12 @@ export function Runs() {
                     '—'
                   )}
                 </td>
-                <td>
+                <td data-label="Status">
                   <span className={`status status-${r.status}`}>{r.status}</span>
                 </td>
-                <td>{r.started_at}</td>
-                <td>{r.finished_at ?? '—'}</td>
-                <td>
+                <td data-label="Started">{r.started_at}</td>
+                <td data-label="Finished">{r.finished_at ?? '—'}</td>
+                <td className="run-actions">
                   <button
                     className="step-del"
                     title="Delete run"
@@ -361,6 +361,19 @@ export function Runs() {
                   </button>
                 </td>
               </tr>
+              {liveSelected?.id === r.id && (
+                <tr className="run-detail-row">
+                  <td className="run-detail-cell" colSpan={8}>
+                    <RunDetail
+                      run={liveSelected}
+                      live={watching}
+                      onDelete={removeOne}
+                      onClose={() => setSelected(null)}
+                    />
+                  </td>
+                </tr>
+              )}
+              </Fragment>
             ))}
             {runs.length > 0 && visibleRuns.length === 0 && (
               <tr>
@@ -371,10 +384,6 @@ export function Runs() {
             )}
           </tbody>
         </table>
-
-        {liveSelected && (
-          <RunDetail run={liveSelected} live={watching} onDelete={removeOne} />
-        )}
       </div>
     </section>
   );
@@ -384,10 +393,12 @@ function RunDetail({
   run,
   live,
   onDelete,
+  onClose,
 }: {
   run: Run;
   live: boolean;
   onDelete: (id: number) => void;
+  onClose: () => void;
 }) {
   let screenshots: string[] = [];
   try { screenshots = JSON.parse(run.screenshot_paths_json); } catch {}
@@ -408,23 +419,32 @@ function RunDetail({
         Run #{run.id}{' '}
         <button onClick={() => onDelete(run.id)} style={{ marginLeft: 8, fontSize: 13 }}>
           Delete
+        </button>{' '}
+        <button onClick={onClose} className="diff-tray-clear" style={{ fontSize: 13 }}>
+          Close
         </button>
       </h2>
       <p className="muted">{run.started_at} → {run.finished_at ?? 'in progress'}</p>
-      <h3>
-        Log <span className="muted" style={{ fontSize: 12, fontWeight: 400 }}>
-          (newest first{live ? ' · live' : ''})
-        </span>
-      </h3>
-      <pre className="run-log">{reversedLog || '(no log yet)'}</pre>
-      <h3>Screenshots ({screenshots.length})</h3>
-      <div className="screenshots">
-        {screenshots.map((name) => (
-          <div key={name} className="shot">
-            <img src={`/api/runs/${run.id}/screenshots/${name}`} alt={name} />
-            <div className="muted">{name}</div>
+      <div className="run-detail-cols">
+        <div>
+          <h3>
+            Log <span className="muted" style={{ fontSize: 12, fontWeight: 400 }}>
+              (newest first{live ? ' · live' : ''})
+            </span>
+          </h3>
+          <pre className="run-log">{reversedLog || '(no log yet)'}</pre>
+        </div>
+        <div>
+          <h3>Screenshots ({screenshots.length})</h3>
+          <div className="screenshots">
+            {screenshots.map((name) => (
+              <div key={name} className="shot">
+                <img src={`/api/runs/${run.id}/screenshots/${name}`} alt={name} />
+                <div className="muted">{name}</div>
+              </div>
+            ))}
           </div>
-        ))}
+        </div>
       </div>
     </div>
   );

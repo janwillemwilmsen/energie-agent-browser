@@ -455,7 +455,7 @@ export function ScenarioEditor() {
       </form>
       {err && <p className="error">{err}</p>}
 
-      <div className="editor-grid">
+      <div className="editor-grid scenario-editor">
         <div>
           <h2>Steps</h2>
           <div className="retry-policy">
@@ -642,7 +642,7 @@ export function ScenarioEditor() {
           </div>
         </div>
 
-        <div>
+        <div className="se-preview">
           <h2>
             Preview{' '}
             <button onClick={() => setPreviewActive((v) => !v)}>
