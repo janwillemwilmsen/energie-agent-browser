@@ -3,7 +3,7 @@ import * as pty from 'node-pty';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { config, browserlessCdpUrl } from '../config.js';
+import { config, browserlessCdpUrl, localBrowserArgs } from '../config.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -49,12 +49,22 @@ function ptyEnv(): NodeJS.ProcessEnv {
     ...process.env,
     PATH: `${binDirs.join(pathSep)}${pathSep}${currentPath}`,
     AGENT_BROWSER_SESSION: 'default',
-    BROWSERLESS_CDP_URL: browserlessCdpUrl(),
-    BROWSERLESS_API_URL: config.browserless.url
-      .replace(/^wss:\/\//, 'https://')
-      .replace(/^ws:\/\//, 'http://'),
-    BROWSERLESS_API_KEY: config.browserless.token,
   };
+  if (config.browser.mode === 'local') {
+    // Match the driver's local-mode wiring so agent-browser commands typed in
+    // the terminal launch the same locally-installed browser (no BROWSERLESS_*;
+    // args + UA via env). browserlessCdpUrl() would throw on the empty URL here.
+    env.AGENT_BROWSER_ARGS = localBrowserArgs();
+    if (config.browser.executablePath) {
+      env.AGENT_BROWSER_EXECUTABLE_PATH = config.browser.executablePath;
+    }
+  } else {
+    env.BROWSERLESS_CDP_URL = browserlessCdpUrl();
+    env.BROWSERLESS_API_URL = config.browserless.url
+      .replace(/^wss:\/\//, 'https://')
+      .replace(/^ws:\/\//, 'http://');
+    env.BROWSERLESS_API_KEY = config.browserless.token;
+  }
   if (config.stealth.enabled) {
     if (config.stealth.userAgent) env.AGENT_BROWSER_USER_AGENT = config.stealth.userAgent;
     if (config.stealth.initScript) env.AGENT_BROWSER_INIT_SCRIPTS = config.stealth.initScript;

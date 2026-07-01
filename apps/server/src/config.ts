@@ -33,14 +33,30 @@ const DEFAULT_STEALTH_IGNORE = '--enable-automation';
 
 const stealthInitPath = path.resolve(__dirname, '..', 'stealth', 'init.js');
 
+// 'browserless' → the session daemon connects to a remote CDP over wss (the
+//   original behaviour; requires BROWSERLESS_URL/TOKEN).
+// 'local'       → the session daemon launches agent-browser's locally-installed
+//   browser (`agent-browser install [--with-deps]`). No browserless needed, and
+//   BROWSERLESS_URL/TOKEN become optional.
+const BROWSER_MODE: 'browserless' | 'local' =
+  optional('BROWSER_MODE', 'browserless') === 'local' ? 'local' : 'browserless';
+
 export const config = {
   port: Number(optional('PORT', '3001')),
   webOrigin: optional('WEB_ORIGIN', 'http://localhost:5173'),
   dataDir: path.resolve(repoRoot, optional('DATA_DIR', './data')),
   migrationsDir: path.resolve(repoRoot, optional('MIGRATIONS_DIR', './migrations')),
+  browser: {
+    mode: BROWSER_MODE,
+    // Explicit browser executable for local mode. agent-browser also honours
+    // AGENT_BROWSER_EXECUTABLE_PATH directly; empty means "let it auto-detect"
+    // (system Chrome, or the copy fetched by `agent-browser install`).
+    executablePath: optional('AGENT_BROWSER_EXECUTABLE_PATH', ''),
+  },
   browserless: {
-    url: required('BROWSERLESS_URL'),
-    token: required('BROWSERLESS_TOKEN'),
+    // Only required in browserless mode; unused (and optional) when mode=local.
+    url: BROWSER_MODE === 'local' ? optional('BROWSERLESS_URL', '') : required('BROWSERLESS_URL'),
+    token: BROWSER_MODE === 'local' ? optional('BROWSERLESS_TOKEN', '') : required('BROWSERLESS_TOKEN'),
   },
   agentBrowserBin: optional('AGENT_BROWSER_BIN', 'agent-browser'),
   sessionIdleTtlMs: Number(optional('SESSION_IDLE_TTL_MS', '300000')),
@@ -101,4 +117,21 @@ export function browserlessCdpUrl(): string {
   }
 
   return u.toString();
+}
+
+// Chromium launch args for local mode, comma-joined for AGENT_BROWSER_ARGS
+// (agent-browser accepts comma- or newline-separated). Starts from the same
+// stealth args that browserless mode folds into the wss `launch` query, then
+// appends the two flags Chromium needs to run inside a container: it can't use
+// its sandbox as root, and the default /dev/shm is too small so shared memory
+// must go to /tmp. Both are harmless on a dev box, so we add them in every
+// local-mode environment rather than gating on "is this a container".
+export function localBrowserArgs(): string {
+  const args = config.stealth.enabled
+    ? config.stealth.launchArgs.split(/\s+/).map((s) => s.trim()).filter(Boolean)
+    : [];
+  for (const req of ['--no-sandbox', '--disable-dev-shm-usage']) {
+    if (!args.includes(req)) args.push(req);
+  }
+  return args.join(',');
 }

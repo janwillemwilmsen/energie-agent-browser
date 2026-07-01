@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as pty from 'node-pty';
-import { browserlessCdpUrl, config } from '../config.js';
+import { browserlessCdpUrl, config, localBrowserArgs } from '../config.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -101,6 +101,23 @@ function killProcessTree(pid: number): void {
 const DEBUG = process.env.AB_DRIVER_DEBUG === '1';
 
 function childEnv(): NodeJS.ProcessEnv {
+  if (config.browser.mode === 'local') {
+    // Local mode: agent-browser launches its own installed browser, so there is
+    // no wss `launch` query to fold the Chromium args into — they travel via
+    // AGENT_BROWSER_ARGS instead. No BROWSERLESS_* wiring (setting it would make
+    // agent-browser try to auto-connect to a remote it shouldn't touch here).
+    const env: NodeJS.ProcessEnv = { ...process.env };
+    env.AGENT_BROWSER_ARGS = localBrowserArgs();
+    if (config.browser.executablePath) {
+      env.AGENT_BROWSER_EXECUTABLE_PATH = config.browser.executablePath;
+    }
+    if (config.stealth.enabled) {
+      if (config.stealth.userAgent) env.AGENT_BROWSER_USER_AGENT = config.stealth.userAgent;
+      if (config.stealth.initScript) env.AGENT_BROWSER_INIT_SCRIPTS = config.stealth.initScript;
+    }
+    return env;
+  }
+
   // Make BROWSERLESS_API_KEY available so spawned commands never trigger an
   // auto-launch error, but do NOT set AGENT_BROWSER_PROVIDER — the self-hosted
   // browserless lacks the REST API the provider mode expects. We always go
@@ -316,7 +333,6 @@ function killStaleDaemons(): void {
 
 function spawnConnectDetached(session: string, sessionName?: string | null): void {
   killStaleDaemons();
-  const cdp = browserlessCdpUrl();
   const logDir = path.join(config.dataDir, 'agent-browser-logs');
   fs.mkdirSync(logDir, { recursive: true });
   const logPath = path.join(logDir, `${session}.log`);
@@ -328,7 +344,15 @@ function spawnConnectDetached(session: string, sessionName?: string | null): voi
   // a previous preflight populated the state, and now this daemon picks it up.
   const cliArgs = ['--session', session];
   if (sessionName) cliArgs.push('--session-name', sessionName);
-  cliArgs.push('connect', cdp);
+  if (config.browser.mode === 'local') {
+    // Boot agent-browser's locally-installed browser and keep the session
+    // daemon alive. There's no remote to `connect` to; opening a cheap,
+    // side-effect-free page is what spawns the daemon + launches the browser.
+    // The recorder's first real navigation replaces about:blank.
+    cliArgs.push('open', 'about:blank');
+  } else {
+    cliArgs.push('connect', browserlessCdpUrl());
+  }
 
   // Spawn the agent-browser daemon through node-pty (conpty on Windows).
   // The native exe needs a real console to start its CDP client; conpty
