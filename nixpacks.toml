@@ -85,6 +85,12 @@ NODE_ENV = "production"
 # than connecting to browserless over wss. Override to "browserless" in Coolify
 # if you switch back to a remote CDP. See the "Browser" note above.
 BROWSER_MODE = "local"
+# Point agent-browser at the Nix chromium explicitly. Without this it falls back
+# to the FHS-linked Chrome it downloads under ~/.agent-browser, which dies in
+# this slim container ("libglib-2.0.so.0: cannot open shared object file").
+# /root/.nix-profile/bin/chromium is the stable per-build symlink to the Nix
+# package pinned in nixPkgs above (root is $HOME in this container).
+AGENT_BROWSER_EXECUTABLE_PATH = "/root/.nix-profile/bin/chromium"
 
 [phases.setup]
 # Toolchain for native modules + ffmpeg for agent-browser video recording.
@@ -134,11 +140,7 @@ cmds = [
 # --session-name state to disk before exit, so Coolify-initiated restarts
 # don't strand auth tokens in browser memory.
 #
-# AGENT_BROWSER_EXECUTABLE_PATH is resolved to the Nix `chromium` on PATH at
-# start-up (its store path isn't known until build). This forces agent-browser
-# to use the self-contained Nix build — which carries its own libglib/nss/etc —
-# instead of the FHS-linked Chrome it downloads under ~/.agent-browser, which
-# fails in this slim container with "libglib-2.0.so.0: cannot open shared
-# object file". Set AGENT_BROWSER_EXECUTABLE_PATH explicitly in Coolify to
-# override. Only relevant for BROWSER_MODE=local.
-cmd = 'AGENT_BROWSER_EXECUTABLE_PATH="$(command -v chromium)" npm --workspace apps/server start'
+# The browser executable is selected via AGENT_BROWSER_EXECUTABLE_PATH in
+# [variables] above (Nixpacks runs this cmd without a substitution-capable
+# shell, so resolving it here with $(...) does not work).
+cmd = "npm --workspace apps/server start"
