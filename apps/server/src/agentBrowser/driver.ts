@@ -342,8 +342,22 @@ function spawnConnectDetached(session: string, sessionName?: string | null): voi
   // ~/.agent-browser/sessions/<sessionName> for this daemon's lifetime.
   // That's the mechanism that gives scenarios "already logged in" semantics —
   // a previous preflight populated the state, and now this daemon picks it up.
+  //
+  // The sessions/ dir must exist BEFORE the daemon starts: with --session-name,
+  // agent-browser uses a persistent profile/state under it instead of the
+  // ephemeral /tmp profile it uses without a name. On a fresh host (empty
+  // ~/.agent-browser volume) that dir doesn't exist yet — the driver otherwise
+  // only creates it lazily on `state save`, which can't run until the daemon is
+  // up. That chicken-and-egg makes the very first `--session-name` bootstrap
+  // fail with "Could not configure browser … No such file or directory
+  // (os error 2)". Pre-create it so binding a brand-new preflight works.
   const cliArgs = ['--session', session];
-  if (sessionName) cliArgs.push('--session-name', sessionName);
+  if (sessionName) {
+    try {
+      fs.mkdirSync(path.join(os.homedir(), '.agent-browser', 'sessions'), { recursive: true });
+    } catch { /* best-effort; agent-browser may still create it itself */ }
+    cliArgs.push('--session-name', sessionName);
+  }
   if (config.browser.mode === 'local') {
     // Boot agent-browser's locally-installed browser and keep the session
     // daemon alive. There's no remote to `connect` to; opening a cheap,
