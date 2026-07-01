@@ -133,4 +133,12 @@ cmds = [
 # graceful-shutdown handler (SIGTERM) flushes any active agent-browser
 # --session-name state to disk before exit, so Coolify-initiated restarts
 # don't strand auth tokens in browser memory.
-cmd = "npm --workspace apps/server start"
+#
+# AGENT_BROWSER_EXECUTABLE_PATH is resolved to the Nix `chromium` on PATH at
+# start-up (its store path isn't known until build). This forces agent-browser
+# to use the self-contained Nix build — which carries its own libglib/nss/etc —
+# instead of the FHS-linked Chrome it downloads under ~/.agent-browser, which
+# fails in this slim container with "libglib-2.0.so.0: cannot open shared
+# object file". Set AGENT_BROWSER_EXECUTABLE_PATH explicitly in Coolify to
+# override. Only relevant for BROWSER_MODE=local.
+cmd = 'AGENT_BROWSER_EXECUTABLE_PATH="$(command -v chromium)" npm --workspace apps/server start'
