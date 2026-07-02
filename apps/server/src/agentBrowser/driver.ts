@@ -322,11 +322,19 @@ function killStaleDaemons(): void {
       /* ignore */
     }
   }
-  // Also wipe stale per-session marker files so isSessionAlive doesn't trust them.
+  // Also wipe stale per-session marker files so a fresh daemon isn't confused
+  // by leftovers from a dead one. This MUST include `.sock` (the daemon's Unix
+  // domain socket): ~/.agent-browser is a persistent volume in production, so
+  // after a container restart the daemon is gone but its socket file survives.
+  // agent-browser then tries to attach to that dead socket and fails with
+  // "Could not configure browser: Failed to connect: No such file or directory
+  // (os error 2)". pkill above removes the process but never the on-disk socket,
+  // so we clear it here along with the other runtime markers.
   try {
     const dir = path.join(os.homedir(), '.agent-browser');
+    const STALE_EXTS = ['.pid', '.port', '.stream', '.sock', '.engine', '.version'];
     for (const f of fs.readdirSync(dir)) {
-      if (f.endsWith('.pid') || f.endsWith('.port') || f.endsWith('.stream')) {
+      if (STALE_EXTS.some((ext) => f.endsWith(ext))) {
         try { fs.unlinkSync(path.join(dir, f)); } catch { /* ignore */ }
       }
     }
@@ -667,7 +675,10 @@ export async function closeSession(session: string): Promise<void> {
     /* no pid file */
   }
   const dir = path.join(os.homedir(), '.agent-browser');
-  for (const ext of ['pid', 'port', 'stream', 'engine']) {
+  // Include `sock` and `version`: on a persistent ~/.agent-browser volume a
+  // stranded socket file makes the NEXT bootstrap fail with "Failed to connect:
+  // No such file or directory". Clear every runtime marker for this session.
+  for (const ext of ['pid', 'port', 'stream', 'engine', 'sock', 'version']) {
     try { fs.unlinkSync(path.join(dir, `${session}.${ext}`)); } catch { /* ignore */ }
   }
   writeSessionName(session, null);
