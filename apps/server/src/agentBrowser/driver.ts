@@ -295,11 +295,16 @@ function isSessionAlive(session: string): boolean {
 
 const LAUNCH_HELPER = path.join(__dirname, 'launchConnect.cjs');
 
-function killStaleDaemons(): void {
+async function killStaleDaemons(): Promise<void> {
   // Zombie agent-browser daemons left over from prior failed bootstraps
-  // correlate with 10060 errors on fresh connects. Use spawnSync so the
-  // kill completes before we return — fire-and-forget races pty.spawn
-  // below and lets the new daemon come up alongside the zombies.
+  // correlate with 10060 errors on fresh connects. We must not just signal the
+  // kill — we must WAIT until the processes are actually gone before deleting
+  // the socket and spawning the replacement. pkill/taskkill return as soon as
+  // they've signalled, not when the target dies; the preflight path tears down
+  // a live daemon and respawns immediately, so a still-dying daemon keeps (or
+  // recreates) ~/.agent-browser/<session>.sock and the new daemon can't bind it
+  // → "Daemon failed to start (socket …)". SIGKILL + a reap-wait removes that
+  // race (the no-preflight path never hit it because there was no live daemon).
   if (process.platform === 'win32') {
     try {
       spawnSync('taskkill', ['/F', '/IM', 'agent-browser-win32-x64.exe'], {
@@ -313,13 +318,24 @@ function killStaleDaemons(): void {
     }
   } else {
     try {
-      spawnSync('pkill', ['-f', 'agent-browser-'], {
+      spawnSync('pkill', ['-9', '-f', 'agent-browser-'], {
         shell: false,
         stdio: 'ignore',
         timeout: 5_000,
       });
     } catch {
       /* ignore */
+    }
+    // Wait for the kernel to reap them (SIGKILL is prompt, but not instant).
+    // pgrep exits non-zero once nothing matches — that's our "all clear".
+    for (let i = 0; i < 30; i++) {
+      const r = spawnSync('pgrep', ['-f', 'agent-browser-'], {
+        shell: false,
+        stdio: 'ignore',
+        timeout: 2_000,
+      });
+      if (r.status !== 0) break;
+      await new Promise((res) => setTimeout(res, 100));
     }
   }
   // Also wipe stale per-session marker files so a fresh daemon isn't confused
@@ -343,8 +359,8 @@ function killStaleDaemons(): void {
   }
 }
 
-function spawnConnectDetached(session: string, sessionName?: string | null): void {
-  killStaleDaemons();
+async function spawnConnectDetached(session: string, sessionName?: string | null): Promise<void> {
+  await killStaleDaemons();
   const logDir = path.join(config.dataDir, 'agent-browser-logs');
   fs.mkdirSync(logDir, { recursive: true });
   const logPath = path.join(logDir, `${session}.log`);
@@ -447,7 +463,7 @@ async function loadPersistedStateIntoDaemon(session: string, sessionName: string
 }
 
 async function connectSession(session: string, sessionName: string | null): Promise<void> {
-  spawnConnectDetached(session, sessionName);
+  await spawnConnectDetached(session, sessionName);
 
   const logPath = path.join(config.dataDir, 'agent-browser-logs', `${session}.log`);
   const start = Date.now();
