@@ -475,7 +475,11 @@ async function loadPersistedStateIntoDaemon(session: string, sessionName: string
   }
 }
 
-async function connectSession(session: string, sessionName: string | null): Promise<void> {
+async function connectSession(
+  session: string,
+  sessionName: string | null,
+  skipStateLoad = false,
+): Promise<void> {
   await spawnConnectDetached(session, sessionName);
 
   const logPath = path.join(config.dataDir, 'agent-browser-logs', `${session}.log`);
@@ -497,7 +501,9 @@ async function connectSession(session: string, sessionName: string | null): Prom
       // Inject any persisted state for this --session-name into the live
       // browser. Without this step the daemon starts with an empty cookie
       // jar even though `--session-name=X` was in the spawn args.
-      if (sessionName) {
+      // skipStateLoad callers (scenario runs) want the opposite: a genuinely
+      // clean browser so the preflight steps re-run from scratch.
+      if (sessionName && !skipStateLoad) {
         await loadPersistedStateIntoDaemon(session, sessionName);
       }
       return;
@@ -526,6 +532,16 @@ export interface EnsureSessionOptions {
    * omitted, an already-running daemon is reused regardless of its name.
    */
   sessionName?: string | null;
+  /**
+   * When true, bind the session-name but do NOT inject its persisted
+   * cookie/localStorage state into the browser. Scenario runs use this: they
+   * re-execute the preflight's steps from scratch and must do so in a genuinely
+   * clean browser — loading the saved state would restore e.g. a cookie-consent
+   * cookie, so the consent step then can't find its banner and the run fails.
+   * Saving is unaffected (scenario runs don't save); the recorder and Save/Replay
+   * paths omit this so they still get "already logged in" semantics.
+   */
+  skipStateLoad?: boolean;
 }
 
 export async function ensureSession(
@@ -539,6 +555,7 @@ export async function ensureSession(
   }
 
   const wantName = opts.sessionName ?? null;
+  const skipStateLoad = opts.skipStateLoad ?? false;
   const alive = isSessionAlive(session);
   if (alive) {
     // No specific name requested → reuse whatever's up.
@@ -550,15 +567,17 @@ export async function ensureSession(
       // probes, intra-scenario navigations), and selecting a preflight on a
       // scenario implies "I want this preflight's state to be active right
       // now", not "I'll trust whatever's already in the browser". Cheap and
-      // idempotent when state matches.
-      if (wantName) await loadPersistedStateIntoDaemon(session, wantName);
+      // idempotent when state matches. skipStateLoad opts out (clean run).
+      if (wantName && !skipStateLoad) await loadPersistedStateIntoDaemon(session, wantName);
       return;
     }
     // Mismatch — close and re-bootstrap with the desired name.
     await closeSession(session);
   }
 
-  const p = connectSession(session, wantName).finally(() => sessionsConnecting.delete(session));
+  const p = connectSession(session, wantName, skipStateLoad).finally(() =>
+    sessionsConnecting.delete(session),
+  );
   sessionsConnecting.set(session, p);
   await p;
 }

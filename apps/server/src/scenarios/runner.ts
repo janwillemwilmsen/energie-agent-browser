@@ -518,7 +518,13 @@ export async function executeScenario(scenarioId: number): Promise<number> {
           );
           await closeSession(session).catch(() => undefined);
         }
-        await ensureSession(session, { sessionName: preflightName });
+        // skipStateLoad: run the preflight in a genuinely CLEAN browser. We
+        // re-execute its steps from scratch (login, cookie-consent, …), so
+        // loading the preflight's saved cookies would be counter-productive —
+        // e.g. a restored consent cookie means the consent banner never appears
+        // and the "click consent" step fails. Binding the name (without loading)
+        // keeps any future save landing in the right slot.
+        await ensureSession(session, { sessionName: preflightName, skipStateLoad: true });
         // NOTE: recording is deliberately NOT started here. The preflight
         // navigates (login), and `record start` poisons the next navigation —
         // so we wait and start recording after the scenario's first navigation.
