@@ -384,7 +384,20 @@ async function spawnConnectDetached(session: string, sessionName?: string | null
     try {
       fs.mkdirSync(path.join(os.homedir(), '.agent-browser', 'sessions'), { recursive: true });
     } catch { /* best-effort; agent-browser may still create it itself */ }
-    cliArgs.push('--session-name', sessionName);
+    // Only wss/browserless mode passes --session-name to the CLI. In LOCAL mode
+    // we deliberately do NOT: --session-name turns on agent-browser's own
+    // auto-save/auto-restore of session state, which is a no-op over wss but
+    // fully active against the local on-disk store. That auto behavior re-seeds
+    // cookies (e.g. a cookie-consent cookie) THROUGH a "clean" Replay: on
+    // shutdown the daemon's graceful SIGTERM handler auto-saves the current
+    // state, which races clearPersistedSessionState and recreates the state
+    // file AFTER we wiped it — so the next daemon auto-loads consent again and
+    // no banner shows. The driver already manages state deterministically and
+    // explicitly (loadPersistedStateIntoDaemon on connect, persistSessionState
+    // on Save/Replay), so a wiped state file must mean a truly empty browser.
+    // writeSessionName still records the binding for reuse detection, so this
+    // only disables the redundant, racy auto path — not "already logged in".
+    if (config.browser.mode !== 'local') cliArgs.push('--session-name', sessionName);
   }
   if (config.browser.mode === 'local') {
     // Boot agent-browser's locally-installed browser and keep the session
