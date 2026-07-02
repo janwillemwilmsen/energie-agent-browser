@@ -36,6 +36,10 @@ const NATIVE_BIN = getNativeBin();
 const READY_TIMEOUT_MS = 40_000;
 const READY_POLL_MS = 500;
 const CMD_TIMEOUT_MS = 60_000;
+// Grace after a `✗` first appears in the daemon log before we treat it as a
+// terminal bootstrap failure. Covers the transient connect-retry a local
+// browser launch emits before it becomes ready (see connectSession).
+const FAIL_GRACE_MS = 10_000;
 
 const sessionsConnecting = new Map<string, Promise<void>>();
 
@@ -439,6 +443,17 @@ async function connectSession(session: string, sessionName: string | null): Prom
 
   const logPath = path.join(config.dataDir, 'agent-browser-logs', `${session}.log`);
   const start = Date.now();
+  // First time we saw a `✗ …` line in the daemon log. We do NOT abort on it
+  // immediately: in local-launch mode agent-browser prints a transient
+  // "✗ Could not configure browser: Failed to connect: No such file or
+  // directory" while it retries the CDP connect against a browser that's still
+  // starting, then recovers and writes its pid file. That ✗ stays in the raw
+  // log (it's only visually overwritten by the ✓ via carriage returns), so it
+  // would otherwise trip the fast-fail on every poll even though the daemon
+  // comes up fine. The pid file (isSessionAlive) is the authoritative ready
+  // signal; only treat a ✗ as terminal if the daemon still hasn't come up
+  // FAIL_GRACE_MS after we first saw it.
+  let firstFailAt: number | null = null;
   while (Date.now() - start < READY_TIMEOUT_MS) {
     if (isSessionAlive(session)) {
       writeSessionName(session, sessionName ?? null);
@@ -451,7 +466,14 @@ async function connectSession(session: string, sessionName: string | null): Prom
       return;
     }
     const fail = detectBootstrapFailure(logPath);
-    if (fail) throw new Error(`agent-browser bootstrap failed: ${fail}`);
+    if (fail) {
+      if (firstFailAt === null) firstFailAt = Date.now();
+      else if (Date.now() - firstFailAt >= FAIL_GRACE_MS) {
+        throw new Error(`agent-browser bootstrap failed: ${fail}`);
+      }
+      // else: still within the grace window — keep polling; the local
+      // launcher may yet recover and write its pid file.
+    }
     await new Promise((r) => setTimeout(r, READY_POLL_MS));
   }
   throw new Error(
