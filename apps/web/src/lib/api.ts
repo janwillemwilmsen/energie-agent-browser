@@ -68,6 +68,9 @@ export interface AuthProfile {
   name: string;
   url: string;
   username: string;
+  usernameSelector?: string;
+  passwordSelector?: string;
+  submitSelector?: string;
 }
 
 export interface ScenarioCard extends Scenario {

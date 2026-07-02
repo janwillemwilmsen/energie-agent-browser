@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Fastify from 'fastify';
+import { ZodError } from 'zod';
 import cors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
 import websocket from '@fastify/websocket';
@@ -43,6 +44,28 @@ async function main() {
 
   await app.register(cors, { origin: config.webOrigin, credentials: true });
   await app.register(websocket);
+
+  // A failed `Schema.parse(req.body)` throws a ZodError. Fastify's default
+  // handler renders any uncaught error as a 500, so bad input (e.g. an invalid
+  // auth-profile URL) looked like a server crash. Turn validation errors into a
+  // clean 400 with the offending fields, and keep real failures as 500.
+  app.setErrorHandler((error, req, reply) => {
+    if (error instanceof ZodError) {
+      return reply.code(400).send({
+        error: 'validation_error',
+        message: error.issues
+          .map((i) => `${i.path.join('.') || '(body)'}: ${i.message}`)
+          .join('; '),
+        issues: error.issues.map((i) => ({ path: i.path.join('.'), message: i.message })),
+      });
+    }
+    const status = (error as { statusCode?: number }).statusCode ?? 500;
+    if (status < 500) {
+      return reply.code(status).send({ error: error.name, message: error.message });
+    }
+    req.log.error(error);
+    return reply.code(500).send({ error: 'internal_error', message: error.message });
+  });
 
   app.get('/health', async () => ({ ok: true, ts: new Date().toISOString() }));
 

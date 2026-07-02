@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { AuthProfileCreate } from '@eab/shared';
 import { run, runWithStdin, PREFLIGHT_RECORDER_SESSION } from '../agentBrowser/driver.js';
+import { getAuthSelectors, setAuthSelectors, deleteAuthSelectors } from '../authSelectors.js';
 
 const RUN_OPTS = { session: PREFLIGHT_RECORDER_SESSION, timeoutMs: 8_000 };
 
@@ -9,7 +10,6 @@ const RUN_OPTS = { session: PREFLIGHT_RECORDER_SESSION, timeoutMs: 8_000 };
 // alive, that bootstrap fails (os error 10060) — so we route every auth CRUD
 // call through the live `default` daemon. ensureSession (inside `run`) brings
 // the daemon up if it isn't, and reuses it if it is.
-const AUTH_TIMEOUT_MS = 8_000;
 
 // agent-browser owns the storage and encryption — auth profiles live under
 // ~/.agent-browser/auth/<name>.json, AES-GCM encrypted with the key in
@@ -62,7 +62,10 @@ export async function authProfilesRoutes(app: FastifyInstance) {
     if (r.exitCode !== 0) {
       throw new Error(`auth list failed: ${r.stderr || r.stdout}`);
     }
-    return parseListOutput(r.stdout);
+    // Merge in the selector overrides we persist ourselves (agent-browser's
+    // vault doesn't store them), so the UI can display which selectors a
+    // profile uses.
+    return parseListOutput(r.stdout).map((p) => ({ ...p, ...getAuthSelectors(p.name) }));
   });
 
   app.get<{ Params: { name: string } }>('/api/auth-profiles/:name', async (req, reply) => {
@@ -72,7 +75,7 @@ export async function authProfilesRoutes(app: FastifyInstance) {
     }
     const parsed = parseShowOutput(r.stdout);
     if (!parsed) return reply.code(404).send({ error: 'not_found' });
-    return parsed;
+    return { ...parsed, ...getAuthSelectors(req.params.name) };
   });
 
   app.post('/api/auth-profiles', async (req, reply) => {
@@ -80,21 +83,32 @@ export async function authProfilesRoutes(app: FastifyInstance) {
     // Pass the password via --password-stdin so it never sits in a process
     // argv (which would be visible in `ps`/Task Manager and any audit logs).
     // agent-browser reads exactly one line from stdin.
+    // NOTE: `auth save` accepts only name/url/username/password — the selector
+    // flags are valid only on `auth login`. So we do NOT pass them here; we
+    // persist them ourselves (below) and re-apply them when an auth-login step
+    // runs (see preflightExecutor).
     const args = [
       'auth', 'save', body.name,
       '--url', body.url,
       '--username', body.username,
       '--password-stdin',
     ];
-    if (body.usernameSelector) args.push('--username-selector', body.usernameSelector);
-    if (body.passwordSelector) args.push('--password-selector', body.passwordSelector);
-    if (body.submitSelector) args.push('--submit-selector', body.submitSelector);
 
     const r = await runWithStdin(args, body.password, RUN_OPTS);
     if (r.exitCode !== 0) {
       return reply.code(400).send({ error: 'save_failed', detail: r.stderr || r.stdout });
     }
-    return reply.code(201).send({ name: body.name, url: body.url, username: body.username });
+    setAuthSelectors(body.name, {
+      usernameSelector: body.usernameSelector,
+      passwordSelector: body.passwordSelector,
+      submitSelector: body.submitSelector,
+    });
+    return reply.code(201).send({
+      name: body.name,
+      url: body.url,
+      username: body.username,
+      ...getAuthSelectors(body.name),
+    });
   });
 
   app.delete<{ Params: { name: string } }>('/api/auth-profiles/:name', async (req, reply) => {
@@ -102,6 +116,7 @@ export async function authProfilesRoutes(app: FastifyInstance) {
     if (r.exitCode !== 0) {
       return reply.code(404).send({ error: 'delete_failed', detail: r.stderr || r.stdout });
     }
+    deleteAuthSelectors(req.params.name);
     return reply.code(204).send();
   });
 }

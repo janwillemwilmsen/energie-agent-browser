@@ -741,15 +741,35 @@ function AuthProfilesPanel({
                 <th>Name</th>
                 <th>URL</th>
                 <th>Username</th>
+                <th>Selectors</th>
                 <th></th>
               </tr>
             </thead>
             <tbody>
-              {profiles.map((p) => (
+              {profiles.map((p) => {
+                const selectors = [
+                  p.usernameSelector && { label: 'user', value: p.usernameSelector },
+                  p.passwordSelector && { label: 'pass', value: p.passwordSelector },
+                  p.submitSelector && { label: 'submit', value: p.submitSelector },
+                ].filter(Boolean) as Array<{ label: string; value: string }>;
+                return (
                 <tr key={p.name}>
                   <td data-label="Name"><code>{p.name}</code></td>
                   <td data-label="URL" style={{ wordBreak: 'break-all' }}>{p.url}</td>
                   <td data-label="Username">{p.username}</td>
+                  <td data-label="Selectors" style={{ wordBreak: 'break-all' }}>
+                    {selectors.length === 0 ? (
+                      <span className="muted">—</span>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                        {selectors.map((s) => (
+                          <span key={s.label} style={{ fontSize: 12 }}>
+                            <span className="muted">{s.label}:</span> <code>{s.value}</code>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </td>
                   <td className="auth-actions">
                     <button
                       className="btn-danger"
@@ -760,7 +780,8 @@ function AuthProfilesPanel({
                     </button>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         )}

@@ -1,6 +1,7 @@
 import { run, runJson } from '../agentBrowser/driver.js';
 import { parseSnapshotText } from '../agentBrowser/parser.js';
 import { resolveSelector } from './selector.js';
+import { getAuthSelectors } from '../authSelectors.js';
 import type { A11yNode, A11yTree, PreflightStep, SelectorStrategy } from '@eab/shared';
 
 // Shared step executor for preflights. Called from:
@@ -156,7 +157,16 @@ export async function executePreflightStep(session: string, step: PreflightStep)
     // Vault. The encrypted profile under ~/.agent-browser/auth/<name>.json
     // holds the URL + username + password; the command navigates to the URL,
     // waits for the form fields, types the creds, and submits.
-    const r = await run(['auth', 'login', step.name], { session, timeoutMs: 60_000 });
+    //
+    // The vault can't store CSS selectors, so we keep any per-profile overrides
+    // ourselves and pass them here (the one place `auth login` accepts them) —
+    // needed when agent-browser's field-detection heuristics miss the form.
+    const args = ['auth', 'login', step.name];
+    const sel = getAuthSelectors(step.name);
+    if (sel.usernameSelector) args.push('--username-selector', sel.usernameSelector);
+    if (sel.passwordSelector) args.push('--password-selector', sel.passwordSelector);
+    if (sel.submitSelector) args.push('--submit-selector', sel.submitSelector);
+    const r = await run(args, { session, timeoutMs: 60_000 });
     if (r.exitCode !== 0) throw new Error(`auth login "${step.name}" failed: ${r.stderr || r.stdout}`);
     return;
   }

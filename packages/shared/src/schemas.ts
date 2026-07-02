@@ -171,12 +171,29 @@ export const AuthProfile = z.object({
   name: z.string(),
   url: z.string(),
   username: z.string(),
+  // Optional CSS selector overrides applied at `auth login` time. Persisted by
+  // this app (agent-browser's `auth save` doesn't store them), so they're
+  // returned here for display and re-use.
+  usernameSelector: z.string().optional(),
+  passwordSelector: z.string().optional(),
+  submitSelector: z.string().optional(),
 });
 export type AuthProfile = z.infer<typeof AuthProfile>;
 
+// Accept a bare host ("mijn.essent.nl") by defaulting to https://, trim
+// surrounding whitespace, then validate as a real URL. Without this, omitting
+// the scheme (the most common mistake) fails z.string().url() with "Invalid
+// url" — which previously surfaced as an opaque 500.
+const NormalizedUrl = z.preprocess((v) => {
+  if (typeof v !== 'string') return v;
+  const s = v.trim();
+  if (!s) return s;
+  return /^[a-z][a-z0-9+.-]*:\/\//i.test(s) ? s : `https://${s}`;
+}, z.string().url());
+
 export const AuthProfileCreate = z.object({
   name: AuthProfileName,
-  url: z.string().url(),
+  url: NormalizedUrl,
   username: z.string().min(1),
   password: z.string().min(1),
   // Optional CSS selector overrides — agent-browser's heuristics handle most
