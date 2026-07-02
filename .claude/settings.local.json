@@ -32,7 +32,9 @@
       "Bash(npm --workspace apps/web run build)",
       "Bash(node -e \"const Database = require\\('better-sqlite3'\\); const db = new Database\\('data/sqlite.db', {readonly:true}\\); const rows = db.prepare\\('SELECT id, scenario_id, status, screenshot_paths_json FROM runs WHERE id IN \\(168, 169\\)'\\).all\\(\\); for \\(const r of rows\\) { console.log\\('run', r.id, 'scenario', r.scenario_id, 'status', r.status\\); try { const arr = JSON.parse\\(r.screenshot_paths_json\\); console.log\\('  slots:', arr\\); } catch\\(e\\) { console.log\\('  bad json', r.screenshot_paths_json\\); } }\")",
       "Bash(npm --workspace apps/server run build)",
-      "Bash(npm --workspace apps/server test)"
+      "Bash(npm --workspace apps/server test)",
+      "Bash(grep -E 'BROWSER_MODE|BROWSERLESS_URL|BROWSERLESS_TOKEN' .env)",
+      "Bash(grep -E 'BROWSER_MODE|BROWSERLESS_URL' apps/server/.env)"
     ]
   }
 }
