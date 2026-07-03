@@ -44,6 +44,7 @@ interface MetaDraft {
   brand: string;
   type: string;
   preflight_id: number | null;
+  preflight_mode: 'steps' | 'cookies';
 }
 
 function emptyDraft(): MetaDraft {
@@ -54,6 +55,7 @@ function emptyDraft(): MetaDraft {
     brand: '',
     type: '',
     preflight_id: null,
+    preflight_mode: 'steps',
   };
 }
 
@@ -65,6 +67,7 @@ function draftFrom(d: ScenarioDetail): MetaDraft {
     brand: d.brand ?? '',
     type: d.type ?? '',
     preflight_id: d.preflight_id ?? null,
+    preflight_mode: d.preflight_mode ?? 'steps',
   };
 }
 
@@ -75,7 +78,8 @@ function draftsEqual(a: MetaDraft, b: MetaDraft): boolean {
     a.viewport_preset === b.viewport_preset &&
     a.brand === b.brand &&
     a.type === b.type &&
-    a.preflight_id === b.preflight_id
+    a.preflight_id === b.preflight_id &&
+    a.preflight_mode === b.preflight_mode
   );
 }
 
@@ -345,6 +349,7 @@ export function ScenarioEditor() {
         brand: draft.brand.trim() || null,
         type: draft.type.trim() || null,
         preflight_id: draft.preflight_id,
+        preflight_mode: draft.preflight_mode,
       });
       const next = { ...data, ...updated };
       setData(next);
@@ -434,6 +439,24 @@ export function ScenarioEditor() {
               ))}
             </select>
           </label>
+          {draft.preflight_id != null && (
+            <label>
+              <span>Preflight mode</span>
+              <select
+                value={draft.preflight_mode}
+                onChange={(e) =>
+                  setDraft({ ...draft, preflight_mode: e.target.value as MetaDraft['preflight_mode'] })
+                }
+                title={
+                  'Run all steps: re-run the preflight (login/consent) in a clean browser every run.\n' +
+                  'Use saved cookies: skip the steps and load the preflight’s saved cookies/login (faster; needs a saved state).'
+                }
+              >
+                <option value="steps">Run all preflight steps (clean browser)</option>
+                <option value="cookies">Use saved cookies only (skip steps)</option>
+              </select>
+            </label>
+          )}
         </div>
         <div className="scenario-meta-actions">
           <button type="submit" disabled={!dirty || savingMeta}>

@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { z } from 'zod';
 import { AuthProfileCreate } from '@eab/shared';
 import { run, runWithStdin, PREFLIGHT_RECORDER_SESSION } from '../agentBrowser/driver.js';
 import { getAuthSelectors, setAuthSelectors, deleteAuthSelectors } from '../authSelectors.js';
@@ -109,6 +110,25 @@ export async function authProfilesRoutes(app: FastifyInstance) {
       username: body.username,
       ...getAuthSelectors(body.name),
     });
+  });
+
+  // Update just the CSS selector overrides for an existing profile. These live
+  // in our sidecar (agent-browser's vault can't store them), so this is a pure
+  // file write — no daemon needed. Empty/blank fields clear that selector, so a
+  // profile with all three blank falls back to agent-browser's auto-detection.
+  const SelectorsBody = z.object({
+    usernameSelector: z.string().optional(),
+    passwordSelector: z.string().optional(),
+    submitSelector: z.string().optional(),
+  });
+  app.put<{ Params: { name: string } }>('/api/auth-profiles/:name/selectors', async (req) => {
+    const body = SelectorsBody.parse(req.body);
+    setAuthSelectors(req.params.name, {
+      usernameSelector: body.usernameSelector?.trim() || undefined,
+      passwordSelector: body.passwordSelector?.trim() || undefined,
+      submitSelector: body.submitSelector?.trim() || undefined,
+    });
+    return { name: req.params.name, ...getAuthSelectors(req.params.name) };
   });
 
   app.delete<{ Params: { name: string } }>('/api/auth-profiles/:name', async (req, reply) => {

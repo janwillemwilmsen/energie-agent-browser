@@ -1,4 +1,21 @@
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import {
   api,
   type A11yTree,
@@ -59,6 +76,44 @@ function summarize(step: PreflightStep): string {
   return '';
 }
 
+// One draggable row in the preflight step list. Mirrors the /scenarios editor
+// (drag handle + delete); reordering is handled by the parent's onStepDragEnd.
+function SortablePreflightStep({
+  id,
+  step,
+  onDelete,
+}: {
+  id: number;
+  step: PreflightStep;
+  onDelete: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
+  return (
+    <li ref={setNodeRef} style={style}>
+      <button
+        className="step-drag"
+        title="Drag to reorder"
+        aria-label="Drag to reorder"
+        {...attributes}
+        {...listeners}
+      >
+        ⠿
+      </button>
+      <span className="step-body">
+        <code>{step.kind}</code> {summarize(step)}
+      </span>
+      <button className="step-del" title="Remove step" onClick={onDelete}>
+        ×
+      </button>
+    </li>
+  );
+}
+
 export function PreflightPage() {
   const [preflights, setPreflights] = useState<Preflight[]>([]);
   const [draft, setDraft] = useState<Draft>(emptyDraft());
@@ -77,6 +132,11 @@ export function PreflightPage() {
   const [replaying, setReplaying] = useState(false);
   const [authProfiles, setAuthProfiles] = useState<AuthProfile[]>([]);
   const [showAuthForm, setShowAuthForm] = useState(false);
+  const sensors = useSensors(
+    // Small drag threshold so a click on the handle still registers as a click.
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
 
   async function reloadAuthProfiles() {
     try {
@@ -286,6 +346,17 @@ export function PreflightPage() {
 
   function removeStep(idx: number) {
     setDraft((d) => ({ ...d, steps: d.steps.filter((_, i) => i !== idx) }));
+  }
+
+  // Preflight steps are a plain array saved as JSON on "Save preflight" (no
+  // per-step API like scenarios), so reordering is a local array move.
+  function onStepDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const from = Number(active.id);
+    const to = Number(over.id);
+    if (Number.isNaN(from) || Number.isNaN(to)) return;
+    setDraft((d) => ({ ...d, steps: arrayMove(d.steps, from, to) }));
   }
 
   async function takeSnapshot() {
@@ -515,22 +586,27 @@ export function PreflightPage() {
               accumulate as you go.
             </p>
           ) : (
-            <ol className="step-list">
-              {draft.steps.map((s, idx) => (
-                <li key={idx}>
-                  <span className="step-body">
-                    <code>{s.kind}</code> {summarize(s)}
-                  </span>
-                  <button
-                    className="step-del"
-                    title="Remove step"
-                    onClick={() => removeStep(idx)}
-                  >
-                    ×
-                  </button>
-                </li>
-              ))}
-            </ol>
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragEnd={onStepDragEnd}
+            >
+              <SortableContext
+                items={draft.steps.map((_, idx) => idx)}
+                strategy={verticalListSortingStrategy}
+              >
+                <ol className="step-list">
+                  {draft.steps.map((s, idx) => (
+                    <SortablePreflightStep
+                      key={idx}
+                      id={idx}
+                      step={s}
+                      onDelete={() => removeStep(idx)}
+                    />
+                  ))}
+                </ol>
+              </SortableContext>
+            </DndContext>
           )}
 
           <div className="actions">
@@ -662,6 +738,38 @@ function AuthProfilesPanel({
   const [submitSelector, setSubmitSelector] = useState('');
   const [busy, setBusy] = useState(false);
 
+  // Inline "edit selectors" state for an existing profile row.
+  const [editing, setEditing] = useState<string | null>(null);
+  const [editUser, setEditUser] = useState('');
+  const [editPass, setEditPass] = useState('');
+  const [editSubmit, setEditSubmit] = useState('');
+  const [savingSelectors, setSavingSelectors] = useState(false);
+
+  function startEditSelectors(p: AuthProfile) {
+    setEditing(p.name);
+    setEditUser(p.usernameSelector ?? '');
+    setEditPass(p.passwordSelector ?? '');
+    setEditSubmit(p.submitSelector ?? '');
+  }
+
+  async function saveSelectors(profileName: string) {
+    setSavingSelectors(true);
+    onError(null);
+    try {
+      await api.updateAuthSelectors(profileName, {
+        usernameSelector: editUser.trim() || undefined,
+        passwordSelector: editPass.trim() || undefined,
+        submitSelector: editSubmit.trim() || undefined,
+      });
+      setEditing(null);
+      await onDeleted(); // reuse: just reloads the profile list
+    } catch (e: any) {
+      onError(e?.message ?? String(e));
+    } finally {
+      setSavingSelectors(false);
+    }
+  }
+
   function reset() {
     setName('');
     setUrl('https://');
@@ -753,7 +861,8 @@ function AuthProfilesPanel({
                   p.submitSelector && { label: 'submit', value: p.submitSelector },
                 ].filter(Boolean) as Array<{ label: string; value: string }>;
                 return (
-                <tr key={p.name}>
+                <Fragment key={p.name}>
+                <tr>
                   <td data-label="Name"><code>{p.name}</code></td>
                   <td data-label="URL" style={{ wordBreak: 'break-all' }}>{p.url}</td>
                   <td data-label="Username">{p.username}</td>
@@ -772,6 +881,13 @@ function AuthProfilesPanel({
                   </td>
                   <td className="auth-actions">
                     <button
+                      onClick={() => (editing === p.name ? setEditing(null) : startEditSelectors(p))}
+                      style={{ padding: '4px 10px', fontSize: 12, marginRight: 6 }}
+                      title="Edit or clear the CSS selectors used when logging in with this profile"
+                    >
+                      {editing === p.name ? 'Close' : 'Edit selectors'}
+                    </button>
+                    <button
                       className="btn-danger"
                       onClick={() => del(p.name)}
                       style={{ padding: '4px 10px', fontSize: 12 }}
@@ -780,6 +896,67 @@ function AuthProfilesPanel({
                     </button>
                   </td>
                 </tr>
+                {editing === p.name && (
+                  <tr key={`${p.name}-edit`}>
+                    <td colSpan={5}>
+                      <div
+                        style={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 8,
+                          padding: '8px 4px',
+                          background: 'var(--panel, rgba(127,127,127,0.06))',
+                          borderRadius: 6,
+                        }}
+                      >
+                        <span className="muted" style={{ fontSize: 12 }}>
+                          CSS selectors used at login. Leave all three blank to fall back to
+                          agent-browser's automatic field detection.
+                        </span>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+                          <input
+                            placeholder='username selector (e.g. input[name="email"])'
+                            value={editUser}
+                            onChange={(e) => setEditUser(e.target.value)}
+                          />
+                          <input
+                            placeholder='password selector (e.g. input[name="password"])'
+                            value={editPass}
+                            onChange={(e) => setEditPass(e.target.value)}
+                          />
+                          <input
+                            placeholder='submit selector (e.g. button[type="submit"])'
+                            value={editSubmit}
+                            onChange={(e) => setEditSubmit(e.target.value)}
+                          />
+                        </div>
+                        <div style={{ display: 'flex', gap: 8 }}>
+                          <button
+                            onClick={() => void saveSelectors(p.name)}
+                            disabled={savingSelectors}
+                          >
+                            {savingSelectors ? 'Saving…' : '💾 Save selectors'}
+                          </button>
+                          <button
+                            onClick={() => {
+                              setEditUser('');
+                              setEditPass('');
+                              setEditSubmit('');
+                            }}
+                            disabled={savingSelectors}
+                            title="Clear all three fields (then Save to fall back to auto-detection)"
+                          >
+                            Clear all
+                          </button>
+                          <button onClick={() => setEditing(null)} disabled={savingSelectors}>
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+                </Fragment>
                 );
               })}
             </tbody>

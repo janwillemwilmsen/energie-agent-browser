@@ -336,3 +336,17 @@ agent-browser -p browserless open https://example.com
 agent-browser -p browserless open https://www.whatsmyip.org/
 
 agent-browser -p browserless snapshot  
+
+
+
+
+Call closeAllActiveSessions() (i.e. agent-browser close --all) on server startup, so every dev restart begins with a fresh, version-matched daemon. I proposed this when you asked "Why does 'Daemon 
+  version mismatch detected, restarting…' happen locally?" — the local daemon is detached and survives tsx watch reloads, so after an agent-browser version change the old daemon lingers and triggers 
+  that warning. Closing on startup makes it never appear locally (prod already gets this for free since each deploy is a fresh container).
+
+  The other still-open offers from after the browserless→local switch, in case it was one of these:
+
+  - Make "Save" surface a state save failure instead of swallowing it silently (so a missing session .json is never invisible again).
+  - Auth-login fallback to auto-detection if a custom selector times out — but you explicitly excluded this ("only b"), so I've left it.
+
+  Which one did you mean? If it's the startup-cleanup one, I'll wire closeAllActiveSessions() into index.ts's boot (it's already imported there for graceful shutdown, so it's a small addition). Or if  I've misremembered and it was something else, tell me the rough context and I'll pin it down.

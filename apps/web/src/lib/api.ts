@@ -10,6 +10,7 @@ export interface Scenario {
   retry_wait_after_ms: number;
   restart_on_failure: number;
   preflight_id: number | null;
+  preflight_mode: 'steps' | 'cookies';
   record_enabled: number;
   created_at: string;
   updated_at: string;
@@ -264,6 +265,7 @@ export const api = {
         | 'retry_wait_after_ms'
         | 'restart_on_failure'
         | 'preflight_id'
+        | 'preflight_mode'
         | 'record_enabled'
       >
     >,
@@ -319,6 +321,14 @@ export const api = {
   }) =>
     req<AuthProfile>('/api/auth-profiles', {
       method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  updateAuthSelectors: (
+    name: string,
+    body: { usernameSelector?: string; passwordSelector?: string; submitSelector?: string },
+  ) =>
+    req<AuthProfile>(`/api/auth-profiles/${encodeURIComponent(name)}/selectors`, {
+      method: 'PUT',
       body: JSON.stringify(body),
     }),
   deleteAuthProfile: (name: string) =>

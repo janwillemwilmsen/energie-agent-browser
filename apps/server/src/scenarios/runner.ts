@@ -40,6 +40,7 @@ interface ScenarioRow {
   retry_wait_after_ms: number;
   restart_on_failure: number;
   preflight_id: number | null;
+  preflight_mode: string;
 }
 
 interface RunContext {
@@ -412,7 +413,7 @@ export async function executeScenario(scenarioId: number): Promise<number> {
     .prepare(
       `SELECT id, name, url, viewport_preset,
               retries, retry_wait_before_ms, retry_wait_after_ms, restart_on_failure,
-              preflight_id
+              preflight_id, preflight_mode
        FROM scenarios WHERE id = ?`,
     )
     .get(scenarioId) as ScenarioRow | undefined;
@@ -500,9 +501,16 @@ export async function executeScenario(scenarioId: number): Promise<number> {
   // login flow in the preflight, this is the line that re-runs it on every
   // scenario run, sidestepping the Auth0/IdP session-cookie TTL problem.
   if (preflightName) {
+    // 'cookies' mode: skip the steps and just load the preflight's saved
+    // cookies/localStorage — fast, but requires a saved state file (from Save
+    // preflight / Replay). 'steps' mode (default): re-run the steps in a clean
+    // browser so login/consent happen fresh every run.
+    const useCookiesOnly = scenario.preflight_mode === 'cookies';
     appendLog(
       { runId, log },
-      `preflight "${preflightName}": binding daemon + executing ${preflightSteps.length} step(s)`,
+      useCookiesOnly
+        ? `preflight "${preflightName}": loading saved cookies (mode=cookies, steps skipped)`
+        : `preflight "${preflightName}": binding daemon + executing ${preflightSteps.length} step(s)`,
     );
     // Whole-preflight restart loop. Unlike Replay, a scenario run does NOT wipe
     // persisted state between attempts — the preflight re-runs its login flow
@@ -518,24 +526,31 @@ export async function executeScenario(scenarioId: number): Promise<number> {
           );
           await closeSession(session).catch(() => undefined);
         }
-        // skipStateLoad: run the preflight in a genuinely CLEAN browser. We
-        // re-execute its steps from scratch (login, cookie-consent, …), so
-        // loading the preflight's saved cookies would be counter-productive —
-        // e.g. a restored consent cookie means the consent banner never appears
-        // and the "click consent" step fails. Binding the name (without loading)
-        // keeps any future save landing in the right slot.
-        await ensureSession(session, { sessionName: preflightName, skipStateLoad: true });
-        // NOTE: recording is deliberately NOT started here. The preflight
-        // navigates (login), and `record start` poisons the next navigation —
-        // so we wait and start recording after the scenario's first navigation.
-        if (preflightSteps.length > 0) {
-          await executePreflightSteps(
-            session,
-            preflightSteps,
-            (msg) => appendLog({ runId, log }, '  ' + msg),
-            preflightPolicy,
-          );
-          appendLog({ runId, log }, `preflight "${preflightName}": ok`);
+        if (useCookiesOnly) {
+          // Load the persisted state (default ensureSession behavior) and do
+          // NOT run the steps.
+          await ensureSession(session, { sessionName: preflightName });
+          appendLog({ runId, log }, `preflight "${preflightName}": cookies loaded`);
+        } else {
+          // skipStateLoad: run the preflight in a genuinely CLEAN browser. We
+          // re-execute its steps from scratch (login, cookie-consent, …), so
+          // loading the preflight's saved cookies would be counter-productive —
+          // e.g. a restored consent cookie means the consent banner never
+          // appears and the "click consent" step fails. Binding the name
+          // (without loading) keeps any future save landing in the right slot.
+          await ensureSession(session, { sessionName: preflightName, skipStateLoad: true });
+          // NOTE: recording is deliberately NOT started here. The preflight
+          // navigates (login), and `record start` poisons the next navigation —
+          // so we wait and start recording after the scenario's first navigation.
+          if (preflightSteps.length > 0) {
+            await executePreflightSteps(
+              session,
+              preflightSteps,
+              (msg) => appendLog({ runId, log }, '  ' + msg),
+              preflightPolicy,
+            );
+            appendLog({ runId, log }, `preflight "${preflightName}": ok`);
+          }
         }
         preflightErr = null;
         break;

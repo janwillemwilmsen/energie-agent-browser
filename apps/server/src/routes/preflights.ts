@@ -67,6 +67,25 @@ export async function preflightsRoutes(app: FastifyInstance) {
         Math.max(0, body.retry_wait_after_ms ?? 0),
         Math.max(0, body.restart_on_failure ?? 0),
       );
+    // Persist the live browser's cookies/localStorage into this preflight's
+    // state file when the recorder daemon is currently bound to it — same gate
+    // as "Save changes" (PUT). Without this, a brand-new preflight had no saved
+    // state, so a scenario in "cookies" mode had nothing to load. Best-effort.
+    try {
+      const markerPath = path.join(
+        os.homedir(),
+        '.agent-browser',
+        `${PREFLIGHT_RECORDER_SESSION}.session-name`,
+      );
+      const activeName = fs.existsSync(markerPath)
+        ? fs.readFileSync(markerPath, 'utf-8').trim()
+        : '';
+      if (activeName && activeName === body.name) {
+        await persistSessionState(PREFLIGHT_RECORDER_SESSION, body.name);
+      }
+    } catch {
+      /* best-effort — the DB row is already created */
+    }
     return reply.code(201).send(
       db.prepare('SELECT * FROM preflights WHERE id = ?').get(info.lastInsertRowid),
     );

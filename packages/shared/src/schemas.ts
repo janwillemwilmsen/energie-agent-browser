@@ -93,6 +93,13 @@ export const StepPayload = z.discriminatedUnion('kind', [
 ]);
 export type StepPayload = z.infer<typeof StepPayload>;
 
+// How an attached preflight is applied per scenario run:
+//   'steps'   → re-run the preflight's steps in a clean browser (fresh login/
+//               consent). Default.
+//   'cookies' → skip the steps; just load the preflight's saved state.
+export const PreflightMode = z.enum(['steps', 'cookies']);
+export type PreflightMode = z.infer<typeof PreflightMode>;
+
 export const Scenario = z.object({
   id: z.number().int(),
   name: z.string().min(1),
@@ -108,6 +115,8 @@ export const Scenario = z.object({
   // running with --session-name = the preflight's name, so the browser starts
   // with its cookies/localStorage already restored.
   preflight_id: z.number().int().nullable(),
+  // How the attached preflight is applied per run — see PreflightMode.
+  preflight_mode: PreflightMode,
   // 0/1: record a .webm of each run via agent-browser record start/stop.
   record_enabled: z.number().int(),
   created_at: z.string(),
@@ -126,6 +135,7 @@ export const ScenarioCreate = z.object({
   retry_wait_after_ms: z.number().int().min(0).optional(),
   restart_on_failure: z.number().int().min(0).optional(),
   preflight_id: z.number().int().nullable().optional(),
+  preflight_mode: PreflightMode.optional(),
   record_enabled: z.number().int().min(0).max(1).optional(),
 });
 export type ScenarioCreate = z.infer<typeof ScenarioCreate>;

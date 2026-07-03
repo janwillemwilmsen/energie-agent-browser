@@ -110,11 +110,12 @@ export async function scenariosRoutes(app: FastifyInstance) {
     const next = { ...(existing as any), ...body };
     const preflightId =
       next.preflight_id == null ? null : Number(next.preflight_id);
+    const preflightMode = next.preflight_mode === 'cookies' ? 'cookies' : 'steps';
     db.prepare(
       `UPDATE scenarios
        SET name = ?, url = ?, viewport_preset = ?, brand = ?, type = ?,
            retries = ?, retry_wait_before_ms = ?, retry_wait_after_ms = ?, restart_on_failure = ?,
-           preflight_id = ?, record_enabled = ?,
+           preflight_id = ?, preflight_mode = ?, record_enabled = ?,
            updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
     ).run(
@@ -128,6 +129,7 @@ export async function scenariosRoutes(app: FastifyInstance) {
       Math.max(0, Number(next.retry_wait_after_ms ?? 0)),
       Math.max(0, Number(next.restart_on_failure ?? 0)),
       preflightId,
+      preflightMode,
       next.record_enabled ? 1 : 0,
       Number(req.params.id),
     );
