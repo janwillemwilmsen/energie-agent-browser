@@ -7,6 +7,7 @@ import { parseSnapshotText } from '../agentBrowser/parser.js';
 import { resolveSelector } from './selector.js';
 import { executePreflightSteps } from './preflightExecutor.js';
 import { StreamRecorder } from './streamRecorder.js';
+import { notifyScenarioFailure } from '../push.js';
 import type { PreflightStep, SelectorStrategy, ViewportPreset } from '@eab/shared';
 
 const MOBILE_DEVICE = 'iPhone 14';
@@ -568,6 +569,7 @@ export async function executeScenario(scenarioId: number): Promise<number> {
         `UPDATE runs SET status = 'failed', finished_at = CURRENT_TIMESTAMP,
                          log_text = ?, screenshot_paths_json = ? WHERE id = ?`,
       ).run(log.join('\n'), screenshotPathsJson, runId);
+      void notifyScenarioFailure({ id: scenario.id, name: scenario.name }, runId);
       return runId;
     }
   }
@@ -630,5 +632,8 @@ export async function executeScenario(scenarioId: number): Promise<number> {
      WHERE id = ?`,
   ).run(status, log.join('\n'), JSON.stringify(screenshots), runId);
 
+  if (status === 'failed') {
+    void notifyScenarioFailure({ id: scenario.id, name: scenario.name }, runId);
+  }
   return runId;
 }

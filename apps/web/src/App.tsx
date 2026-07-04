@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { NavLink, Route, Routes } from 'react-router-dom';
 import {
+  Bell,
   CalendarClock,
   GitCompare,
   House,
@@ -21,6 +22,7 @@ import { ScenarioTimeline } from './pages/ScenarioTimeline.js';
 import { Terminal } from './pages/Terminal.js';
 import { Schedules } from './pages/Schedules.js';
 import { Runs } from './pages/Runs.js';
+import { Notifications } from './pages/Notifications.js';
 import { Diffs } from './pages/Diffs.js';
 import { PreflightPage } from './pages/Preflight.js';
 import { Screenshots } from './pages/Screenshots.js';
@@ -50,6 +52,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/preflight', label: 'Preflights', icon: KeyRound },
   { to: '/schedules', label: 'Schedules', icon: CalendarClock },
   { to: '/runs', label: 'Runs', icon: Play },
+  { to: '/notifications', label: 'Notifications', icon: Bell },
   { to: '/screenshots', label: 'Screenshots', icon: Images },
   { to: '/recordings', label: 'Recordings', icon: Video },
   { to: '/diffs', label: 'Diffs', icon: GitCompare },
@@ -128,6 +131,7 @@ export function App() {
           <Route path="/preflight" element={<PreflightPage />} />
           <Route path="/schedules" element={<Schedules />} />
           <Route path="/runs" element={<Runs />} />
+          <Route path="/notifications" element={<Notifications />} />
           <Route path="/screenshots" element={<Screenshots />} />
           <Route path="/recordings" element={<Recordings />} />
           <Route path="/diffs" element={<Diffs />} />

@@ -323,6 +323,23 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  pushVapidKey: () => req<{ publicKey: string }>('/api/push/vapid-public-key'),
+  pushSubscribe: (body: {
+    subscription: { endpoint: string; keys: { p256dh: string; auth: string } };
+    scenarioIds: number[];
+  }) => req<{ ok: true }>('/api/push/subscribe', { method: 'POST', body: JSON.stringify(body) }),
+  pushStatus: (endpoint: string) =>
+    req<{ subscribed: boolean; scenarioIds: number[] }>('/api/push/status', {
+      method: 'POST',
+      body: JSON.stringify({ endpoint }),
+    }),
+  pushUnsubscribe: (endpoint: string) =>
+    req<{ ok: true }>('/api/push/unsubscribe', {
+      method: 'POST',
+      body: JSON.stringify({ endpoint }),
+    }),
+  pushTest: (endpoint: string) =>
+    req<{ ok: true }>('/api/push/test', { method: 'POST', body: JSON.stringify({ endpoint }) }),
   updateAuthSelectors: (
     name: string,
     body: { usernameSelector?: string; passwordSelector?: string; submitSelector?: string },

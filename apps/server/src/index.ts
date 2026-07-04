@@ -18,6 +18,8 @@ import { sessionsRoutes } from './routes/sessions.js';
 import { sessionStatesRoutes } from './routes/sessionStates.js';
 import { preflightsRoutes } from './routes/preflights.js';
 import { authProfilesRoutes } from './routes/authProfiles.js';
+import { pushRoutes } from './routes/push.js';
+import { ensurePushConfigured } from './push.js';
 import { browserlessHealthRoutes } from './routes/browserlessHealth.js';
 import { terminalWsRoute } from './ws/terminal.js';
 import { screencastWsRoute } from './ws/screencast.js';
@@ -79,6 +81,7 @@ async function main() {
   await app.register(sessionStatesRoutes);
   await app.register(preflightsRoutes);
   await app.register(authProfilesRoutes);
+  await app.register(pushRoutes);
   await app.register(browserlessHealthRoutes);
   await app.register(terminalWsRoute);
   await app.register(screencastWsRoute);
@@ -110,6 +113,10 @@ async function main() {
   } else {
     app.log.info('SPA: apps/web/dist not built — only the API is exposed on this port');
   }
+
+  // Set up VAPID (generates/persists keys on first boot) so the first push
+  // request doesn't pay that cost mid-request.
+  try { ensurePushConfigured(); } catch (e) { app.log.warn({ err: e }, 'push: VAPID setup failed'); }
 
   startScheduler();
 
