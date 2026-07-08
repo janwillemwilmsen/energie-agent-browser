@@ -7,6 +7,7 @@ import {
   House,
   Images,
   KeyRound,
+  LogOut,
   PanelLeftClose,
   PanelLeftOpen,
   Play,
@@ -23,7 +24,9 @@ import { Terminal } from './pages/Terminal.js';
 import { Schedules } from './pages/Schedules.js';
 import { Runs } from './pages/Runs.js';
 import { Notifications } from './pages/Notifications.js';
+import { Login } from './pages/Login.js';
 import { Diffs } from './pages/Diffs.js';
+import { api } from './lib/api.js';
 import { PreflightPage } from './pages/Preflight.js';
 import { Screenshots } from './pages/Screenshots.js';
 // Recordings pulls in Mediabunny (~400 kB) for video decode/playback — lazy-load
@@ -78,6 +81,35 @@ export function App() {
     }
   }, [collapsed]);
 
+  // Login gate. `null` = still checking; the app only renders once we know the
+  // session is valid (or the gate is disabled server-side).
+  const [authed, setAuthed] = useState<boolean | null>(null);
+  const checkAuth = () =>
+    api
+      .authMe()
+      .then((r) => setAuthed(r.authenticated || !r.enabled))
+      // If /api/auth/me itself fails (server down), don't hard-lock the UI.
+      .catch(() => setAuthed(false));
+  useEffect(() => {
+    void checkAuth();
+  }, []);
+
+  async function logout() {
+    try {
+      await api.authLogout();
+    } catch {
+      /* ignore */
+    }
+    setAuthed(false);
+  }
+
+  if (authed === null) {
+    return <div className="app"><p className="muted" style={{ padding: 24 }}>Loading…</p></div>;
+  }
+  if (!authed) {
+    return <Login onSuccess={() => setAuthed(true)} />;
+  }
+
   return (
     <div className={`app${collapsed ? ' app-collapsed' : ''}`}>
       <nav className={`nav${collapsed ? ' nav-collapsed' : ''}`}>
@@ -114,6 +146,16 @@ export function App() {
           <Settings size={18} className="nav-icon" aria-hidden />
           {!collapsed && <span className="nav-label">Admin</span>}
         </NavLink>
+        <button
+          type="button"
+          className="nav-admin"
+          onClick={() => void logout()}
+          title={collapsed ? 'Sign out' : undefined}
+          style={{ background: 'none', border: 'none', cursor: 'pointer', font: 'inherit', color: 'inherit' }}
+        >
+          <LogOut size={18} className="nav-icon" aria-hidden />
+          {!collapsed && <span className="nav-label">Sign out</span>}
+        </button>
       </nav>
       <main className="main">
         <Suspense fallback={<p className="muted">Loading…</p>}>

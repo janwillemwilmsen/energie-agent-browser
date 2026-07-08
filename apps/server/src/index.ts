@@ -18,6 +18,8 @@ import { sessionsRoutes } from './routes/sessions.js';
 import { sessionStatesRoutes } from './routes/sessionStates.js';
 import { preflightsRoutes } from './routes/preflights.js';
 import { authProfilesRoutes } from './routes/authProfiles.js';
+import { authRoutes } from './routes/auth.js';
+import { isAuthenticated } from './auth.js';
 import { pushRoutes } from './routes/push.js';
 import { ensurePushConfigured } from './push.js';
 import { browserlessHealthRoutes } from './routes/browserlessHealth.js';
@@ -69,8 +71,22 @@ async function main() {
     return reply.code(500).send({ error: 'internal_error', message: error.message });
   });
 
+  // Login gate: everything under /api/* and /ws/* requires a valid session,
+  // EXCEPT the auth endpoints themselves and the health check. Static assets and
+  // the SPA (any non-API/WS path) are served freely so the login page can load;
+  // the API returning 401 is what actually keeps data protected.
+  app.addHook('onRequest', async (req, reply) => {
+    const url = req.raw.url ?? '';
+    if (url.startsWith('/api/auth/') || url === '/health') return;
+    const gated = url.startsWith('/api/') || url.startsWith('/ws/');
+    if (gated && !isAuthenticated(req)) {
+      return reply.code(401).send({ error: 'unauthenticated' });
+    }
+  });
+
   app.get('/health', async () => ({ ok: true, ts: new Date().toISOString() }));
 
+  await app.register(authRoutes);
   await app.register(scenariosRoutes);
   await app.register(snapshotRoutes);
   await app.register(runsRoutes);

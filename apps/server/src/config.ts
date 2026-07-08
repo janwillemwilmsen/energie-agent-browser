@@ -58,6 +58,16 @@ export const config = {
     url: BROWSER_MODE === 'local' ? optional('BROWSERLESS_URL', '') : required('BROWSERLESS_URL'),
     token: BROWSER_MODE === 'local' ? optional('BROWSERLESS_TOKEN', '') : required('BROWSERLESS_TOKEN'),
   },
+  auth: {
+    // Single shared login gate in front of the whole app. Set APP_AUTH_ENABLED
+    // to "false" to turn it off. Credentials + signing secret come from env.
+    enabled: optional('APP_AUTH_ENABLED', 'true') !== 'false',
+    user: optional('APP_AUTH_USER', 'jw@ikkoop.nl'),
+    pass: optional('APP_AUTH_PASS', 'jw@ikkoop.nl'),
+    // Optional explicit signing secret; when empty a random one is generated and
+    // persisted to DATA_DIR/auth-secret so sessions survive restarts.
+    secret: optional('APP_AUTH_SECRET', ''),
+  },
   agentBrowserBin: optional('AGENT_BROWSER_BIN', 'agent-browser'),
   sessionIdleTtlMs: Number(optional('SESSION_IDLE_TTL_MS', '300000')),
   // Scenario video recording is done by tapping agent-browser's live CDP

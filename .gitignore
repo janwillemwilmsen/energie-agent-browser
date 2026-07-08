@@ -14,5 +14,6 @@ data/recordings
 data/agent-browser-logs
 data/auth-selectors.json
 data/vapid.json
+data/auth-secret
 *.log
 .vite

@@ -323,6 +323,13 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  authMe: () => req<{ authenticated: boolean; enabled: boolean }>('/api/auth/me'),
+  authLogin: (username: string, password: string) =>
+    req<{ ok: true }>('/api/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ username, password }),
+    }),
+  authLogout: () => req<{ ok: true }>('/api/auth/logout', { method: 'POST' }),
   pushVapidKey: () => req<{ publicKey: string }>('/api/push/vapid-public-key'),
   pushSubscribe: (body: {
     subscription: { endpoint: string; keys: { p256dh: string; auth: string } };
