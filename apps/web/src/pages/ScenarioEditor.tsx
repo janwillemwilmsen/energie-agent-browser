@@ -94,6 +94,7 @@ export function ScenarioEditor() {
   const [previewActive, setPreviewActive] = useState(false);
   const [bootstrapping, setBootstrapping] = useState(false);
   const [resetting, setResetting] = useState(false);
+  const [aiModalOpen, setAiModalOpen] = useState(false);
   const [sessionAlive, setSessionAlive] = useState<boolean | null>(null);
   const [playStatus, setPlayStatus] = useState<string | null>(null);
   const [lastRunId, setLastRunId] = useState<number | null>(null);
@@ -662,8 +663,30 @@ export function ScenarioEditor() {
             <button onClick={runNow} disabled={data.steps.length === 0}>
               ▶ Run now
             </button>
+            <button
+              onClick={() => setAiModalOpen(true)}
+              title="Describe a task in plain language — an AI drives the browser and each action it takes is appended to this scenario as a replayable step"
+            >
+              ✨ AI task
+            </button>
           </div>
         </div>
+
+        {aiModalOpen && (
+          <AiTaskModal
+            scenarioId={scenarioId}
+            onClose={() => {
+              setAiModalOpen(false);
+              // The modal's live stream kicked this page's preview (server
+              // allows one viewer). Bounce it so it reconnects if it was on.
+              if (previewActive) {
+                setPreviewActive(false);
+                window.setTimeout(() => setPreviewActive(true), 400);
+              }
+            }}
+            onStepsAdded={() => void reload()}
+          />
+        )}
 
         <div className="se-preview">
           <h2>
@@ -922,5 +945,241 @@ function TreeView({
         );
       })}
     </ul>
+  );
+}
+
+// Modal for the "✨ AI task" button: the user describes a task, the server's
+// agent loop drives the browser (visible in the live preview) and appends each
+// successful action to this scenario as an ordinary replayable step. Closing
+// the modal does NOT stop a running job — it keeps building server-side.
+function AiTaskModal({
+  scenarioId,
+  onClose,
+  onStepsAdded,
+}: {
+  scenarioId: number;
+  onClose: () => void;
+  onStepsAdded: () => void;
+}) {
+  const [prompt, setPrompt] = useState('');
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [status, setStatus] = useState<'idle' | 'running' | 'done' | 'failed'>('idle');
+  const [log, setLog] = useState<string[]>([]);
+  const [summary, setSummary] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [available, setAvailable] = useState<boolean | null>(null);
+  const [history, setHistory] = useState<
+    Array<{ id: number; prompt: string; status: string; steps_added: number; created_at: string }>
+  >([]);
+  // Live preview inside the modal. Off until the job reports the freshly-reset
+  // browser is up — the screencast WS rejects (and doesn't retry) when it
+  // connects while no daemon pid exists, so we key it off the log marker.
+  const [previewOn, setPreviewOn] = useState(false);
+  const stepsSeen = useRef(0);
+
+  useEffect(() => {
+    api
+      .agentAvailability()
+      .then((a) => setAvailable(a.available && !a.busy))
+      .catch(() => setAvailable(false));
+    // Saved prompts for this scenario — prefill the most recent one so a bad
+    // result can be re-run (delete the wrong steps, tweak the text, go again).
+    api
+      .listAgentPrompts(scenarioId)
+      .then((rows) => {
+        setHistory(rows);
+        if (rows[0]) setPrompt((p) => p || rows[0]!.prompt);
+      })
+      .catch(() => undefined);
+  }, [scenarioId]);
+
+  // Poll the job while it runs; refresh the step list whenever new steps landed.
+  useEffect(() => {
+    if (!jobId || status !== 'running') return;
+    const t = setInterval(async () => {
+      try {
+        const j = await api.getAgentTask(jobId);
+        setLog(j.log);
+        setSummary(j.summary);
+        setError(j.error);
+        if (j.log.some((l) => l.startsWith('browser ready'))) setPreviewOn(true);
+        if (j.stepsAdded !== stepsSeen.current) {
+          stepsSeen.current = j.stepsAdded;
+          onStepsAdded();
+        }
+        if (j.status !== 'running') {
+          setStatus(j.status);
+          onStepsAdded();
+        }
+      } catch {
+        /* transient poll failure — keep trying */
+      }
+    }, 1500);
+    return () => clearInterval(t);
+  }, [jobId, status]);
+
+  async function start() {
+    const p = prompt.trim();
+    if (!p) return;
+    setError(null);
+    setSummary(null);
+    setLog([]);
+    stepsSeen.current = 0;
+    // The job restarts the browser session; the old preview socket dies with
+    // the old daemon, so re-arm and wait for the fresh "browser ready" marker.
+    setPreviewOn(false);
+    try {
+      const r = await api.startAgentTask(scenarioId, p);
+      setJobId(r.jobId);
+      setStatus('running');
+    } catch (e: any) {
+      setError(e?.message ?? String(e));
+    }
+  }
+
+  async function deletePrompt(id: number) {
+    try {
+      await api.deleteAgentPrompt(id);
+      setHistory((h) => h.filter((x) => x.id !== id));
+    } catch (e: any) {
+      setError(e?.message ?? String(e));
+    }
+  }
+
+  async function clearHistory() {
+    if (!confirm('Delete all saved prompts for this scenario?')) return;
+    try {
+      await api.clearAgentPrompts(scenarioId);
+      setHistory([]);
+    } catch (e: any) {
+      setError(e?.message ?? String(e));
+    }
+  }
+
+  return (
+    <div
+      style={{
+        position: 'fixed', inset: 0, zIndex: 1000,
+        background: 'rgba(0,0,0,0.55)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+      }}
+      onClick={(e) => { if (e.target === e.currentTarget && status !== 'running') onClose(); }}
+    >
+      <div
+        style={{
+          width: '100%', maxWidth: 640, maxHeight: '85vh', overflow: 'auto',
+          background: 'var(--bg, #1b1b1f)', border: '1px solid var(--border, rgba(127,127,127,0.35))',
+          borderRadius: 12, padding: 20, display: 'flex', flexDirection: 'column', gap: 12,
+        }}
+      >
+        <h2 style={{ margin: 0, fontSize: 18 }}>✨ AI task</h2>
+        <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+          Describe what the browser should do. The AI performs it live (watch the preview) and each
+          action becomes a step in this scenario — replayable with <strong>Play</strong> and
+          schedulable on the <strong>Schedules</strong> page.
+        </p>
+        {available === false && (
+          <p className="error" style={{ margin: 0 }}>
+            AI tasks unavailable — either AI_GATEWAY_API_KEY is not configured on the server, or
+            another AI task is currently running.
+          </p>
+        )}
+        <textarea
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          rows={3}
+          placeholder='e.g. "Accept the cookie banner, open the vacancies page and take a screenshot of the list"'
+          disabled={status === 'running'}
+          style={{ resize: 'vertical', width: '100%' }}
+        />
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={() => void start()} disabled={!prompt.trim() || status === 'running' || available === false}>
+            {status === 'running' ? 'Running…' : '▶ Run AI task'}
+          </button>
+          <button
+            onClick={() => setPrompt('')}
+            disabled={status === 'running' || !prompt}
+            title="Empty the textarea to write a new prompt from scratch"
+          >
+            ✕ Clear
+          </button>
+          <button onClick={onClose} disabled={false} title={status === 'running' ? 'The task keeps running server-side' : undefined}>
+            Close
+          </button>
+        </div>
+        {previewOn && (
+          <div>
+            <p className="muted" style={{ margin: '0 0 6px', fontSize: 12 }}>
+              Live browser — watching the agent work:
+            </p>
+            <PreviewStream session={SESSION} active={previewOn} />
+          </div>
+        )}
+        {history.length > 0 && (
+          <details>
+            <summary style={{ cursor: 'pointer', fontSize: 12, color: 'var(--muted)' }}>
+              Previous prompts for this scenario ({history.length}){' '}
+              <button
+                onClick={(e) => { e.preventDefault(); void clearHistory(); }}
+                disabled={status === 'running'}
+                style={{ fontSize: 11, padding: '2px 8px', marginLeft: 8 }}
+                title="Delete all saved prompts for this scenario"
+              >
+                Clear all
+              </button>
+            </summary>
+            <ul style={{ margin: '8px 0 0', padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {history.map((h) => (
+                <li key={h.id} style={{ display: 'flex', gap: 6, alignItems: 'stretch' }}>
+                  <button
+                    onClick={() => setPrompt(h.prompt)}
+                    disabled={status === 'running'}
+                    title="Load this prompt into the textarea"
+                    style={{
+                      flex: 1, textAlign: 'left', fontSize: 12, padding: '6px 10px',
+                      whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                    }}
+                  >
+                    {h.prompt.length > 160 ? h.prompt.slice(0, 160) + '…' : h.prompt}
+                    <span className="muted">
+                      {' '}— {h.created_at} · {h.status} · {h.steps_added} step{h.steps_added === 1 ? '' : 's'}
+                    </span>
+                  </button>
+                  <button
+                    className="btn-danger"
+                    onClick={() => void deletePrompt(h.id)}
+                    disabled={status === 'running'}
+                    title="Delete this saved prompt"
+                    style={{ fontSize: 12, padding: '0 10px' }}
+                  >
+                    ×
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </details>
+        )}
+        {(log.length > 0 || status !== 'idle') && (
+          <pre
+            style={{
+              margin: 0, padding: 12, fontSize: 12, lineHeight: 1.5,
+              background: 'rgba(127,127,127,0.08)', borderRadius: 8,
+              whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 280, overflow: 'auto',
+            }}
+          >
+            {log.join('\n') || '(starting…)'}
+          </pre>
+        )}
+        {status === 'done' && (
+          <p style={{ margin: 0, color: '#4ade80', fontWeight: 600 }}>
+            ✓ {summary ?? 'Task complete.'} Steps were appended to this scenario.
+          </p>
+        )}
+        {status === 'failed' && (
+          <p className="error" style={{ margin: 0 }}>✗ {error ?? 'Task failed.'}</p>
+        )}
+        {error && status === 'idle' && <p className="error" style={{ margin: 0 }}>{error}</p>}
+      </div>
+    </div>
   );
 }

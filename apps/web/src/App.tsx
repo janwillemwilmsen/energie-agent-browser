@@ -39,6 +39,7 @@ import { AdminScenarioSteps } from './pages/AdminScenarioSteps.js';
 import { AdminScenarioIO } from './pages/AdminScenarioIO.js';
 import { AdminNetwork } from './pages/AdminNetwork.js';
 import { AdminSessionStates } from './pages/AdminSessionStates.js';
+import { AdminAi } from './pages/AdminAi.js';
 
 interface NavItem {
   to: string;
@@ -170,6 +171,7 @@ export function App() {
           <Route path="/admin/scenarios-io" element={<AdminScenarioIO />} />
           <Route path="/admin/network" element={<AdminNetwork />} />
           <Route path="/admin/session-states" element={<AdminSessionStates />} />
+          <Route path="/admin/ai" element={<AdminAi />} />
           <Route path="/preflight" element={<PreflightPage />} />
           <Route path="/schedules" element={<Schedules />} />
           <Route path="/runs" element={<Runs />} />

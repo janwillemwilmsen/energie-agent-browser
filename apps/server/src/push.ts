@@ -65,35 +65,60 @@ interface SubRow {
   p256dh: string;
   auth: string;
   scenario_ids_json: string;
+  success_scenario_ids_json: string;
 }
 
-export function upsertSubscription(sub: PushSubscriptionInput, scenarioIds: number[]): void {
+export function upsertSubscription(
+  sub: PushSubscriptionInput,
+  scenarioIds: number[],
+  successScenarioIds: number[],
+): void {
   getDb()
     .prepare(
-      `INSERT INTO push_subscriptions (endpoint, p256dh, auth, scenario_ids_json, updated_at)
-       VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+      `INSERT INTO push_subscriptions (endpoint, p256dh, auth, scenario_ids_json, success_scenario_ids_json, updated_at)
+       VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
        ON CONFLICT(endpoint) DO UPDATE SET
          p256dh = excluded.p256dh,
          auth = excluded.auth,
          scenario_ids_json = excluded.scenario_ids_json,
+         success_scenario_ids_json = excluded.success_scenario_ids_json,
          updated_at = CURRENT_TIMESTAMP`,
     )
-    .run(sub.endpoint, sub.keys.p256dh, sub.keys.auth, JSON.stringify(scenarioIds));
+    .run(
+      sub.endpoint,
+      sub.keys.p256dh,
+      sub.keys.auth,
+      JSON.stringify(scenarioIds),
+      JSON.stringify(successScenarioIds),
+    );
 }
 
 export function deleteSubscription(endpoint: string): void {
   getDb().prepare('DELETE FROM push_subscriptions WHERE endpoint = ?').run(endpoint);
 }
 
-// Returns the scenario ids this endpoint is subscribed to, or null if the
-// endpoint isn't registered at all.
-export function getSubscriptionScenarioIds(endpoint: string): number[] | null {
+// Returns the scenario ids this endpoint is subscribed to (failure + success),
+// or null if the endpoint isn't registered at all.
+export function getSubscriptionScenarioIds(
+  endpoint: string,
+): { scenarioIds: number[]; successScenarioIds: number[] } | null {
   const row = getDb()
-    .prepare('SELECT scenario_ids_json FROM push_subscriptions WHERE endpoint = ?')
-    .get(endpoint) as { scenario_ids_json: string } | undefined;
+    .prepare(
+      'SELECT scenario_ids_json, success_scenario_ids_json FROM push_subscriptions WHERE endpoint = ?',
+    )
+    .get(endpoint) as
+    | { scenario_ids_json: string; success_scenario_ids_json: string }
+    | undefined;
   if (!row) return null;
+  return {
+    scenarioIds: parseIds(row.scenario_ids_json),
+    successScenarioIds: parseIds(row.success_scenario_ids_json),
+  };
+}
+
+function parseIds(json: string): number[] {
   try {
-    return JSON.parse(row.scenario_ids_json) as number[];
+    return JSON.parse(json) as number[];
   } catch {
     return [];
   }
@@ -122,38 +147,57 @@ export async function sendTestToEndpoint(endpoint: string): Promise<boolean> {
   if (!row) return false;
   await sendToRow(row, {
     title: 'Test notification',
-    body: 'Scenario failure alerts are working ✅',
+    body: 'Scenario run alerts are working ✅',
     url: '/runs',
   });
   return true;
 }
 
-// Called by the runner when a scenario run finishes as 'failed'. Fire-and-forget
-// (never let a push error affect the run). Only browsers that opted in for this
-// scenario id are notified.
-export async function notifyScenarioFailure(
+// Called by the runner when a scenario run finishes. Fire-and-forget (never
+// let a push error affect the run). Only browsers that opted in for this
+// scenario id + outcome are notified.
+async function notifyScenarioResult(
   scenario: { id: number; name: string },
   runId: number,
+  outcome: 'failed' | 'success',
 ): Promise<void> {
   try {
+    const column = outcome === 'failed' ? 'scenario_ids_json' : 'success_scenario_ids_json';
     const rows = getDb().prepare('SELECT * FROM push_subscriptions').all() as SubRow[];
-    const targets = rows.filter((r) => {
-      try {
-        return (JSON.parse(r.scenario_ids_json) as number[]).includes(scenario.id);
-      } catch {
-        return false;
-      }
-    });
+    const targets = rows.filter((r) => parseIds(r[column]).includes(scenario.id));
     if (targets.length === 0) return;
-    const payload = {
-      title: `Scenario failed: ${scenario.name}`,
-      body: `Run #${runId} failed — tap to view.`,
-      url: '/runs',
-      scenarioId: scenario.id,
-      runId,
-    };
+    const payload =
+      outcome === 'failed'
+        ? {
+            title: `Scenario failed: ${scenario.name}`,
+            body: `Run #${runId} failed — tap to view.`,
+            url: '/runs',
+            scenarioId: scenario.id,
+            runId,
+          }
+        : {
+            title: `Scenario succeeded: ${scenario.name}`,
+            body: `Run #${runId} completed successfully ✅`,
+            url: '/runs',
+            scenarioId: scenario.id,
+            runId,
+          };
     await Promise.all(targets.map((r) => sendToRow(r, payload)));
   } catch {
     /* never throw into the run */
   }
+}
+
+export async function notifyScenarioFailure(
+  scenario: { id: number; name: string },
+  runId: number,
+): Promise<void> {
+  return notifyScenarioResult(scenario, runId, 'failed');
+}
+
+export async function notifyScenarioSuccess(
+  scenario: { id: number; name: string },
+  runId: number,
+): Promise<void> {
+  return notifyScenarioResult(scenario, runId, 'success');
 }

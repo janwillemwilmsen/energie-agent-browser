@@ -21,6 +21,7 @@ import { authProfilesRoutes } from './routes/authProfiles.js';
 import { authRoutes } from './routes/auth.js';
 import { isAuthenticated } from './auth.js';
 import { pushRoutes } from './routes/push.js';
+import { agentTasksRoutes } from './routes/agentTasks.js';
 import { ensurePushConfigured } from './push.js';
 import { browserlessHealthRoutes } from './routes/browserlessHealth.js';
 import { terminalWsRoute } from './ws/terminal.js';
@@ -98,6 +99,7 @@ async function main() {
   await app.register(preflightsRoutes);
   await app.register(authProfilesRoutes);
   await app.register(pushRoutes);
+  await app.register(agentTasksRoutes);
   await app.register(browserlessHealthRoutes);
   await app.register(terminalWsRoute);
   await app.register(screencastWsRoute);

@@ -3,7 +3,6 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import * as pty from 'node-pty';
 import { browserlessCdpUrl, config, localBrowserArgs } from '../config.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -409,32 +408,32 @@ async function spawnConnectDetached(session: string, sessionName?: string | null
     cliArgs.push('connect', browserlessCdpUrl());
   }
 
-  // Spawn the agent-browser daemon through node-pty (conpty on Windows).
-  // The native exe needs a real console to start its CDP client; conpty
-  // provides one without creating a visible window. Drain output to the
-  // log file. The pty handle is intentionally leaked — the daemon lives
-  // for the session lifetime; we don't kill the pty until session close.
+  // Spawn the daemon via a PLAIN child spawn. Up to agent-browser 0.28 the
+  // Windows exe needed a pty (conpty) to start its CDP client, but 0.29+
+  // self-daemonizes cleanly from a normal spawn — and 0.31 made the pty
+  // actively harmful: the daemon records the "configuration" it was started
+  // under, a pty-started daemon registers a different config than piped CLI
+  // commands, and every follow-up command then errors with "started
+  // concurrently with different daemon configuration" and force-restarts the
+  // daemon. Plain spawn = same config as all other commands. Output goes to
+  // the log file so detectBootstrapFailure can still read ✗ lines.
   try {
-    const ptyProc = pty.spawn(
-      NATIVE_BIN,
-      cliArgs,
-      {
-        name: 'xterm-color',
-        cols: 120,
-        rows: 30,
-        cwd: process.cwd(),
-        env: childEnv() as { [key: string]: string },
-      },
-    );
-    const out = fs.createWriteStream(logPath, { flags: 'a' });
-    ptyProc.onData((d) => out.write(d));
-    ptyProc.onExit(() => out.end());
+    const fd = fs.openSync(logPath, 'a');
+    const proc = spawn(NATIVE_BIN, cliArgs, {
+      shell: false,
+      windowsHide: true,
+      detached: process.platform !== 'win32',
+      stdio: ['ignore', fd, fd],
+      env: childEnv(),
+    });
+    proc.unref();
+    proc.on('exit', () => { try { fs.closeSync(fd); } catch { /* already closed */ } });
     if (DEBUG) console.log(
-      `[ab] pty-daemon spawn session=${session}${sessionName ? ` session-name=${sessionName}` : ''} pid=${ptyProc.pid}`,
+      `[ab] daemon spawn session=${session}${sessionName ? ` session-name=${sessionName}` : ''} pid=${proc.pid}`,
     );
   } catch (e: any) {
-    if (DEBUG) console.log(`[ab] pty-daemon spawn failed: ${e?.message ?? e}`);
-    fs.appendFileSync(logPath, `\n[server] pty.spawn failed: ${e?.message ?? e}\n`);
+    if (DEBUG) console.log(`[ab] daemon spawn failed: ${e?.message ?? e}`);
+    fs.appendFileSync(logPath, `\n[server] daemon spawn failed: ${e?.message ?? e}\n`);
   }
 }
 

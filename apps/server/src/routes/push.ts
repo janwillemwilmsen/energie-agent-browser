@@ -14,6 +14,7 @@ const SubscribeBody = z.object({
     keys: z.object({ p256dh: z.string(), auth: z.string() }),
   }),
   scenarioIds: z.array(z.number().int()).default([]),
+  successScenarioIds: z.array(z.number().int()).default([]),
 });
 const EndpointBody = z.object({ endpoint: z.string().min(1) });
 
@@ -24,7 +25,7 @@ export async function pushRoutes(app: FastifyInstance) {
   // Register (or update) a browser's subscription + the scenarios it wants.
   app.post('/api/push/subscribe', async (req) => {
     const body = SubscribeBody.parse(req.body);
-    upsertSubscription(body.subscription, body.scenarioIds);
+    upsertSubscription(body.subscription, body.scenarioIds, body.successScenarioIds);
     return { ok: true };
   });
 
@@ -32,8 +33,12 @@ export async function pushRoutes(app: FastifyInstance) {
   // so the UI can render the checkboxes to match this browser's state.
   app.post('/api/push/status', async (req) => {
     const { endpoint } = EndpointBody.parse(req.body);
-    const ids = getSubscriptionScenarioIds(endpoint);
-    return { subscribed: ids !== null, scenarioIds: ids ?? [] };
+    const status = getSubscriptionScenarioIds(endpoint);
+    return {
+      subscribed: status !== null,
+      scenarioIds: status?.scenarioIds ?? [],
+      successScenarioIds: status?.successScenarioIds ?? [],
+    };
   });
 
   app.post('/api/push/unsubscribe', async (req) => {

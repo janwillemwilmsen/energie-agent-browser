@@ -43,7 +43,10 @@ export async function getExistingSubscription(): Promise<PushSubscription | null
 // Subscribe this browser (creating the SW registration + push subscription if
 // needed) and register it server-side with the chosen scenario ids. Returns the
 // subscription's endpoint so the caller can query/report status.
-export async function enablePush(scenarioIds: number[]): Promise<string> {
+export async function enablePush(
+  scenarioIds: number[],
+  successScenarioIds: number[],
+): Promise<string> {
   if (!pushSupported()) throw new Error('This browser does not support push notifications.');
   const permission = await Notification.requestPermission();
   if (permission !== 'granted') {
@@ -65,16 +68,20 @@ export async function enablePush(scenarioIds: number[]): Promise<string> {
       keys: { p256dh: json.keys?.p256dh ?? '', auth: json.keys?.auth ?? '' },
     },
     scenarioIds,
+    successScenarioIds,
   });
   return sub.endpoint;
 }
 
 // Update the selected scenarios for the already-subscribed browser.
-export async function saveScenarioSelection(scenarioIds: number[]): Promise<void> {
+export async function saveScenarioSelection(
+  scenarioIds: number[],
+  successScenarioIds: number[],
+): Promise<void> {
   const sub = await getExistingSubscription();
   if (!sub) {
     // Not subscribed yet — treat as a fresh enable.
-    await enablePush(scenarioIds);
+    await enablePush(scenarioIds, successScenarioIds);
     return;
   }
   const json = sub.toJSON();
@@ -84,6 +91,7 @@ export async function saveScenarioSelection(scenarioIds: number[]): Promise<void
       keys: { p256dh: json.keys?.p256dh ?? '', auth: json.keys?.auth ?? '' },
     },
     scenarioIds,
+    successScenarioIds,
   });
 }
 

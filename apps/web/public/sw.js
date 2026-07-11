@@ -1,4 +1,4 @@
-/* Service worker for scenario-failure Web Push notifications. */
+/* Service worker for scenario run (failure/success) Web Push notifications. */
 
 self.addEventListener('push', (event) => {
   let data = {};

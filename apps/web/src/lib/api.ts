@@ -330,13 +330,58 @@ export const api = {
       body: JSON.stringify({ username, password }),
     }),
   authLogout: () => req<{ ok: true }>('/api/auth/logout', { method: 'POST' }),
+  agentAvailability: () =>
+    req<{ available: boolean; busy: boolean }>('/api/agent-tasks/availability'),
+  startAgentTask: (scenarioId: number, prompt: string) =>
+    req<{ jobId: string }>(`/api/scenarios/${scenarioId}/agent-task`, {
+      method: 'POST',
+      body: JSON.stringify({ prompt }),
+    }),
+  getAgentTask: (jobId: string) =>
+    req<{
+      id: string;
+      scenarioId: number;
+      status: 'running' | 'done' | 'failed';
+      log: string[];
+      stepsAdded: number;
+      summary: string | null;
+      error: string | null;
+    }>(`/api/agent-tasks/${jobId}`),
+  listAgentPrompts: (scenarioId: number) =>
+    req<Array<{
+      id: number;
+      prompt: string;
+      model: string;
+      status: 'running' | 'done' | 'failed';
+      steps_added: number;
+      created_at: string;
+    }>>(`/api/scenarios/${scenarioId}/agent-prompts`),
+  deleteAgentPrompt: (promptId: number) =>
+    req<void>(`/api/agent-prompts/${promptId}`, { method: 'DELETE' }),
+  clearAgentPrompts: (scenarioId: number) =>
+    req<{ deleted: number }>(`/api/scenarios/${scenarioId}/agent-prompts`, { method: 'DELETE' }),
+  getAiSettings: () =>
+    req<{
+      model: string;
+      source: 'setting' | 'env' | 'default';
+      defaultModel: string;
+      envModel: string | null;
+      available: boolean;
+    }>('/api/admin/ai-settings'),
+  saveAiSettings: (model: string) =>
+    req<{ model: string; source: string }>('/api/admin/ai-settings', {
+      method: 'PUT',
+      body: JSON.stringify({ model }),
+    }),
+  listAiModels: () => req<{ models: string[] }>('/api/admin/ai-models'),
   pushVapidKey: () => req<{ publicKey: string }>('/api/push/vapid-public-key'),
   pushSubscribe: (body: {
     subscription: { endpoint: string; keys: { p256dh: string; auth: string } };
     scenarioIds: number[];
+    successScenarioIds: number[];
   }) => req<{ ok: true }>('/api/push/subscribe', { method: 'POST', body: JSON.stringify(body) }),
   pushStatus: (endpoint: string) =>
-    req<{ subscribed: boolean; scenarioIds: number[] }>('/api/push/status', {
+    req<{ subscribed: boolean; scenarioIds: number[]; successScenarioIds: number[] }>('/api/push/status', {
       method: 'POST',
       body: JSON.stringify({ endpoint }),
     }),
