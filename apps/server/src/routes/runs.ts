@@ -1,41 +1,25 @@
 import path from 'node:path';
 import fs from 'node:fs';
-import os from 'node:os';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { config } from '../config.js';
 import { getDb } from '../db/index.js';
 import { executeScenario } from '../scenarios/runner.js';
 
-function defaultSessionAlive(): boolean {
-  try {
-    const pid = Number(
-      fs.readFileSync(path.join(os.homedir(), '.agent-browser', 'default.pid'), 'utf-8').trim(),
-    );
-    if (!pid) return false;
-    try { process.kill(pid, 0); return true; } catch { return false; }
-  } catch {
-    return false;
-  }
-}
+const RunBody = z.object({ reset: z.boolean().default(false) });
 
 export async function runsRoutes(app: FastifyInstance) {
   app.post<{ Params: { id: string } }>('/api/scenarios/:id/run', async (req, reply) => {
     const scenarioId = Number(req.params.id);
+    const { reset } = RunBody.parse(req.body ?? {});
     const db = getDb();
     const scenario = db.prepare('SELECT id FROM scenarios WHERE id = ?').get(scenarioId);
     if (!scenario) return reply.code(404).send({ error: 'not_found' });
 
-    if (!defaultSessionAlive()) {
-      return reply.code(409).send({
-        error: 'session_not_ready',
-        message:
-          'The "default" agent-browser session is not running. Use the embedded terminal on this page and click "Bootstrap default session" first.',
-      });
-    }
-
+    // No session gate here: the runner (via ensureSession) starts the browser
+    // session itself when it isn't running.
     // Fire-and-forget; the runner inserts the row and updates it on completion.
-    const promise = executeScenario(scenarioId).catch((e) => {
+    const promise = executeScenario(scenarioId, { freshSession: reset }).catch((e) => {
       app.log.error({ err: e }, `Scenario ${scenarioId} execution failed`);
     });
     // Wait a tick so the runs row is created before responding (better-sqlite3 is sync).

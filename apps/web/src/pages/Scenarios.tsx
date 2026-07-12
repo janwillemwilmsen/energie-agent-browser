@@ -2,8 +2,6 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, type Scenario } from '../lib/api.js';
 
-const SESSION = 'default';
-
 export function Scenarios() {
   const [items, setItems] = useState<Scenario[]>([]);
   const [name, setName] = useState('');
@@ -60,23 +58,16 @@ export function Scenarios() {
     await load();
   }
 
-  // Reset the browser session (close + bootstrap a fresh one) so the run starts
-  // clean, then kick off the run.
+  // Kick off a run with a fresh browser session. The server does the reset
+  // (close + bootstrap) as part of the run itself, so it can't race with the
+  // preview stream or other run triggers.
   async function runScenario(s: Scenario) {
     if (runningId != null) return;
     setErr(null);
     setRunningId(s.id);
-    setRunStatus(`Resetting browser for "${s.name}"…`);
+    setRunStatus(`Starting run for "${s.name}" (fresh browser)…`);
     try {
-      await api.closeSession(SESSION).catch(() => undefined);
-      const boot = await api.bootstrapSession(SESSION);
-      if (!boot.alive) {
-        setErr('Browser session did not come up after reset. Try again.');
-        setRunStatus(null);
-        return;
-      }
-      setRunStatus(`Starting run for "${s.name}"…`);
-      const run = await api.startRun(s.id);
+      const run = await api.startRun(s.id, { reset: true });
       setLastRunId(run.id);
       setRunStatus(`Run #${run.id} started for "${s.name}".`);
     } catch (e: any) {

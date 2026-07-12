@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { config } from '../config.js';
-import { run } from '../agentBrowser/driver.js';
+import { ensureSession, run } from '../agentBrowser/driver.js';
 
 function sessionPidAlive(session: string): boolean {
   try {
@@ -37,26 +37,13 @@ export async function screencastWsRoute(app: FastifyInstance) {
         try { activeClient.close(); } catch { /* ignore */ }
       }
 
-      if (!sessionPidAlive(session)) {
-        socket.send(
-          JSON.stringify({
-            type: 'help',
-            message:
-              `Session "${session}" is not running. Open the Terminal tab and run:\n` +
-              `  agent-browser --session ${session} connect "%BROWSERLESS_CDP_URL%"\n` +
-              `Then come back and start the preview.`,
-          }),
-        );
-        socket.close(1011, 'session_not_ready');
-        return;
-      }
-
       const tmpDir = path.join(config.dataDir, 'preview');
       fs.mkdirSync(tmpDir, { recursive: true });
       const framePath = path.join(tmpDir, `${session}.jpg`);
 
       let cancelled = false;
       let inflight = false;
+      let interval: NodeJS.Timeout | null = null;
 
       const sendFrame = async () => {
         if (cancelled || socket.readyState !== socket.OPEN) return;
@@ -88,13 +75,10 @@ export async function screencastWsRoute(app: FastifyInstance) {
         }
       };
 
-      const interval = setInterval(sendFrame, FRAME_INTERVAL_MS);
-      void sendFrame(); // emit one frame immediately
-
       const close = () => {
         if (cancelled) return;
         cancelled = true;
-        clearInterval(interval);
+        if (interval) clearInterval(interval);
         try { socket.close(); } catch { /* ignore */ }
         if (activeClient && activeClient.session === session) activeClient = null;
       };
@@ -106,6 +90,35 @@ export async function screencastWsRoute(app: FastifyInstance) {
       socket.on('message', () => {
         // No protocol input expected yet.
       });
+
+      // Start the session ourselves when it's down (local mode launches its
+      // own browser; there's nothing for the user to run by hand), then begin
+      // streaming frames. ensureSession dedupes concurrent bootstraps, so a
+      // preview opening mid-bootstrap just awaits the in-flight connect.
+      void (async () => {
+        if (!sessionPidAlive(session)) {
+          try {
+            socket.send(
+              JSON.stringify({ type: 'status', message: 'Starting browser session…' }),
+            );
+            await ensureSession(session);
+          } catch (e: any) {
+            if (socket.readyState === socket.OPEN) {
+              socket.send(
+                JSON.stringify({
+                  type: 'error',
+                  message: `Could not start session "${session}": ${e?.message ?? e}`,
+                }),
+              );
+            }
+            close();
+            return;
+          }
+        }
+        if (cancelled) return;
+        interval = setInterval(sendFrame, FRAME_INTERVAL_MS);
+        void sendFrame(); // emit one frame immediately
+      })();
     },
   );
 }

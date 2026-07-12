@@ -408,7 +408,21 @@ async function runOnce(
   }
 }
 
-export async function executeScenario(scenarioId: number): Promise<number> {
+export interface ExecuteScenarioOptions {
+  /**
+   * Restart the browser session before the run so it starts with an empty
+   * cookie jar / storage ("Reset & play"). Steps-mode preflights already get
+   * this unconditionally; the flag extends the guarantee to scenarios without
+   * a preflight (e.g. a cookie-consent step inside the scenario itself) and
+   * to cookies-mode preflights.
+   */
+  freshSession?: boolean;
+}
+
+export async function executeScenario(
+  scenarioId: number,
+  opts: ExecuteScenarioOptions = {},
+): Promise<number> {
   const db = getDb();
   const scenario = db
     .prepare(
@@ -496,6 +510,14 @@ export async function executeScenario(scenarioId: number): Promise<number> {
   // started in one survives into the next.
   const recording: RecordingHolder = { recorder: null, absPath: null, relPath: null, index: 0 };
 
+  // "Reset & play": restart the daemon up front so the run starts with an
+  // empty cookie jar regardless of preflight mode. (Steps-mode preflights
+  // restart below anyway; this covers no-preflight and cookies-mode runs.)
+  if (opts.freshSession) {
+    appendLog({ runId, log }, 'fresh session requested — restarting browser');
+    await closeSession(session).catch(() => undefined);
+  }
+
   // Preflight handling: bind the daemon to the preflight's --session-name (so
   // any state save still lands in the right slot) AND execute the preflight's
   // step list fresh. The freshness is the whole point — if you've recorded a
@@ -533,6 +555,14 @@ export async function executeScenario(scenarioId: number): Promise<number> {
           await ensureSession(session, { sessionName: preflightName });
           appendLog({ runId, log }, `preflight "${preflightName}": cookies loaded`);
         } else {
+          // Fresh-browser guarantee: a daemon reused from a previous run still
+          // holds that run's in-memory cookies — ensureSession reuses on a
+          // session-name match, and skipStateLoad only skips the on-disk state
+          // load, not the live jar. A leftover consent cookie would hide the
+          // banner and fail the "click consent" step, so always restart the
+          // daemon before a steps-mode preflight. (attempt > 0 already closed
+          // above; the extra close is then a cheap no-op.)
+          if (attempt === 0) await closeSession(session).catch(() => undefined);
           // skipStateLoad: run the preflight in a genuinely CLEAN browser. We
           // re-execute its steps from scratch (login, cookie-consent, …), so
           // loading the preflight's saved cookies would be counter-productive —

@@ -221,10 +221,10 @@ export const api = {
   getScenario: (id: number) => req<ScenarioDetail>(`/api/scenarios/${id}`),
   snapshot: (body: { url?: string; session?: string; compact?: boolean; interactiveOnly?: boolean }) =>
     req<SnapshotResponse>('/api/snapshot', { method: 'POST', body: JSON.stringify(body) }),
-  startRun: (scenarioId: number) =>
+  startRun: (scenarioId: number, opts: { reset?: boolean } = {}) =>
     req<Run>(`/api/scenarios/${scenarioId}/run`, {
       method: 'POST',
-      body: JSON.stringify({}),
+      body: JSON.stringify({ reset: opts.reset ?? false }),
     }),
   listRuns: () => req<Run[]>('/api/runs'),
   getRun: (id: number) => req<Run>(`/api/runs/${id}`),

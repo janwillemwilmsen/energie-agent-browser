@@ -256,42 +256,13 @@ export function ScenarioEditor() {
     setPlayStatus(null);
     setLastRunId(null);
     if (!previewActive) setPreviewActive(true);
-    if (opts.reset) {
-      setPlayStatus('Resetting session…');
-      setSessionAlive(false);
-      try {
-        await api.closeSession(SESSION).catch(() => undefined);
-        const r = await api.bootstrapSession(SESSION);
-        setSessionAlive(r.alive);
-        if (!r.alive) {
-          setPlayStatus(null);
-          setErr('Reset finished but the session did not come back up.');
-          return;
-        }
-      } catch (e: any) {
-        setPlayStatus(null);
-        setErr(e.message ?? String(e));
-        return;
-      }
-    } else if (!sessionAlive) {
-      setPlayStatus('Bootstrapping session…');
-      try {
-        const r = await api.bootstrapSession(SESSION);
-        setSessionAlive(r.alive);
-        if (!r.alive) {
-          setPlayStatus(null);
-          setErr('Session not ready.');
-          return;
-        }
-      } catch (e: any) {
-        setPlayStatus(null);
-        setErr(e.message ?? String(e));
-        return;
-      }
-    }
+    // The server owns session lifecycle now: the runner starts the session if
+    // it's down, and `reset: true` restarts it before the run (fresh cookie
+    // jar). No client-side close/bootstrap orchestration — that raced with the
+    // preview stream and other run triggers.
     try {
-      setPlayStatus('Starting run…');
-      const run = await api.startRun(scenarioId);
+      setPlayStatus(opts.reset ? 'Starting run (fresh browser)…' : 'Starting run…');
+      const run = await api.startRun(scenarioId, { reset: opts.reset });
       setLastRunId(run.id);
       setPlayStatus(`Run #${run.id} ${run.status}`);
       // Poll the run row until it reaches a terminal state.

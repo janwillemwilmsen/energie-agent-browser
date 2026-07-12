@@ -9,6 +9,7 @@ export function Terminal() {
   const [health, setHealth] = useState<BrowserlessHealth | null>(null);
   const [checking, setChecking] = useState(false);
   const [healthErr, setHealthErr] = useState<string | null>(null);
+  const [openUrl, setOpenUrl] = useState('https://example.com');
 
   async function refreshHealth() {
     setChecking(true);
@@ -57,6 +58,35 @@ export function Terminal() {
         </button>
         <button onClick={() => termRef.current?.send('agent-browser --session default get url')}>
           get url
+        </button>
+        <button onClick={() => termRef.current?.send('agent-browser quit --all')}>
+          quit --all
+        </button>
+        <button onClick={() => termRef.current?.send('agent-browser doctor')}>
+          doctor
+        </button>
+        <button onClick={() => termRef.current?.send('agent-browser install --with-deps')}>
+          install --with-deps
+        </button>
+        <button onClick={() => termRef.current?.send('agent-browser --session default close')}>
+          close
+        </button>
+      </div>
+      <div className="actions">
+        <input
+          type="text"
+          value={openUrl}
+          onChange={(e) => setOpenUrl(e.target.value)}
+          placeholder="https://…"
+          style={{ minWidth: 280 }}
+        />
+        <button
+          disabled={!openUrl.trim()}
+          onClick={() =>
+            termRef.current?.send(`agent-browser --session default open "${openUrl.trim()}"`)
+          }
+        >
+          open
         </button>
       </div>
       <TerminalShell ref={termRef} />

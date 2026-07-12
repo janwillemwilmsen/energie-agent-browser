@@ -13,6 +13,7 @@ export function PreviewStream({
   );
   const [hasFrame, setHasFrame] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
 
   useEffect(() => {
     if (!active) {
@@ -23,6 +24,7 @@ export function PreviewStream({
     setStatus('connecting');
     setHasFrame(false);
     setError(null);
+    setInfo(null);
 
     const url =
       (window.location.protocol === 'https:' ? 'wss://' : 'ws://') +
@@ -37,7 +39,11 @@ export function PreviewStream({
         if (msg.type === 'frame' && imgRef.current) {
           imgRef.current.src = `data:image/jpeg;base64,${msg.data}`;
           setHasFrame(true);
+          setInfo(null);
           setStatus('live');
+        } else if (msg.type === 'status') {
+          // Server-side progress (e.g. "Starting browser session…") — not an error.
+          setInfo(msg.message);
         } else if (msg.type === 'error') {
           setError(msg.message);
           setStatus('error');
@@ -77,7 +83,9 @@ export function PreviewStream({
       />
       {!hasFrame && !error && (
         <div className="preview-frame preview-frame-empty">
-          {status === 'connecting' ? 'Connecting to preview…' : 'Preview is off — click start.'}
+          {status === 'connecting'
+            ? info ?? 'Connecting to preview…'
+            : 'Preview is off — click start.'}
         </div>
       )}
     </div>
