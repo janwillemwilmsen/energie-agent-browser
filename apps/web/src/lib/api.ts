@@ -1,3 +1,11 @@
+export interface EmailRecipient {
+  id: number;
+  email: string;
+  scenarioIds: number[];
+  successScenarioIds: number[];
+  dailyDigest: boolean;
+}
+
 export interface Scenario {
   id: number;
   name: string;
@@ -392,6 +400,30 @@ export const api = {
     }),
   pushTest: (endpoint: string) =>
     req<{ ok: true }>('/api/push/test', { method: 'POST', body: JSON.stringify({ endpoint }) }),
+  emailStatus: () => req<{ enabled: boolean; from: string }>('/api/email/status'),
+  listEmailRecipients: () => req<EmailRecipient[]>('/api/email/recipients'),
+  addEmailRecipient: (email: string) =>
+    req<EmailRecipient>('/api/email/recipients', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    }),
+  updateEmailRecipient: (
+    id: number,
+    body: { scenarioIds: number[]; successScenarioIds: number[]; dailyDigest: boolean },
+  ) =>
+    req<EmailRecipient>(`/api/email/recipients/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+  deleteEmailRecipient: (id: number) =>
+    req<void>(`/api/email/recipients/${id}`, { method: 'DELETE' }),
+  sendEmailTest: (id: number) =>
+    req<{ ok: true }>(`/api/email/recipients/${id}/test`, { method: 'POST' }),
+  sendEmailDigest: () =>
+    req<{ ok: true; sent: number; runCount: number; errors: string[] }>(
+      '/api/email/digest/send',
+      { method: 'POST' },
+    ),
   updateAuthSelectors: (
     name: string,
     body: { usernameSelector?: string; passwordSelector?: string; submitSelector?: string },

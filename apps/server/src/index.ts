@@ -21,8 +21,10 @@ import { authProfilesRoutes } from './routes/authProfiles.js';
 import { authRoutes } from './routes/auth.js';
 import { isAuthenticated } from './auth.js';
 import { pushRoutes } from './routes/push.js';
+import { emailRoutes } from './routes/email.js';
 import { agentTasksRoutes } from './routes/agentTasks.js';
 import { ensurePushConfigured } from './push.js';
+import { startEmailDigestSchedule } from './email.js';
 import { browserlessHealthRoutes } from './routes/browserlessHealth.js';
 import { terminalWsRoute } from './ws/terminal.js';
 import { screencastWsRoute } from './ws/screencast.js';
@@ -99,6 +101,7 @@ async function main() {
   await app.register(preflightsRoutes);
   await app.register(authProfilesRoutes);
   await app.register(pushRoutes);
+  await app.register(emailRoutes);
   await app.register(agentTasksRoutes);
   await app.register(browserlessHealthRoutes);
   await app.register(terminalWsRoute);
@@ -137,6 +140,7 @@ async function main() {
   try { ensurePushConfigured(); } catch (e) { app.log.warn({ err: e }, 'push: VAPID setup failed'); }
 
   startScheduler();
+  startEmailDigestSchedule();
 
   // Graceful shutdown: flush every daemon's --session-name state to disk
   // before exit. Without this, Ctrl+C kills the daemon with taskkill /F and

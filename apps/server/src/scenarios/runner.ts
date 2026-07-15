@@ -8,6 +8,7 @@ import { resolveSelector } from './selector.js';
 import { executePreflightSteps } from './preflightExecutor.js';
 import { StreamRecorder } from './streamRecorder.js';
 import { notifyScenarioFailure, notifyScenarioSuccess } from '../push.js';
+import { notifyRunResultEmail } from '../email.js';
 import type { PreflightStep, SelectorStrategy, ViewportPreset } from '@eab/shared';
 
 const MOBILE_DEVICE = 'iPhone 14';
@@ -600,6 +601,7 @@ export async function executeScenario(
                          log_text = ?, screenshot_paths_json = ? WHERE id = ?`,
       ).run(log.join('\n'), screenshotPathsJson, runId);
       void notifyScenarioFailure({ id: scenario.id, name: scenario.name }, runId);
+      void notifyRunResultEmail({ id: scenario.id, name: scenario.name }, runId, 'failed');
       return runId;
     }
   }
@@ -667,5 +669,6 @@ export async function executeScenario(
   } else {
     void notifyScenarioSuccess({ id: scenario.id, name: scenario.name }, runId);
   }
+  void notifyRunResultEmail({ id: scenario.id, name: scenario.name }, runId, status);
   return runId;
 }

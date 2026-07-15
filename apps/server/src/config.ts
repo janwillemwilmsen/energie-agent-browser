@@ -98,6 +98,16 @@ export const config = {
     ignoreDefaultArgs: optional('STEALTH_IGNORE_DEFAULT_ARGS', DEFAULT_STEALTH_IGNORE),
     initScript: optional('STEALTH_INIT_SCRIPT', stealthInitPath),
   },
+  email: {
+    // Resend API key (https://resend.com/api-keys). Empty → email notifications
+    // are disabled; the UI shows how to enable them.
+    resendApiKey: optional('RESEND_API_KEY', ''),
+    // Sender. The domain must be verified in Resend — the onboarding@resend.dev
+    // sandbox only delivers to the Resend account owner's own address.
+    from: optional('EMAIL_FROM', 'Energie Agent <onboarding@resend.dev>'),
+    // Base URL used for links in emails (to the /runs page).
+    appBaseUrl: optional('APP_BASE_URL', ''),
+  },
 } as const;
 
 export function browserlessCdpUrl(): string {
