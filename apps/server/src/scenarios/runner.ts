@@ -5,6 +5,7 @@ import { getDb } from '../db/index.js';
 import { run, runJson, closeSession, ensureSession } from '../agentBrowser/driver.js';
 import { parseSnapshotText } from '../agentBrowser/parser.js';
 import { resolveSelector } from './selector.js';
+import { isOptionSelector, execSelectOptionFallback } from './selectFallback.js';
 import { executePreflightSteps } from './preflightExecutor.js';
 import { StreamRecorder } from './streamRecorder.js';
 import { notifyScenarioFailure, notifyScenarioSuccess } from '../push.js';
@@ -208,13 +209,24 @@ async function executeStep(ctx: RunContext, step: StepRow): Promise<void> {
     }
     case 'click':
     case 'type':
-    case 'fill': {
+    case 'fill':
+    case 'select': {
       const selector = payload.selector as SelectorStrategy;
       const tree = await snapshotTree(ctx.session);
       const ref = resolveSelector(selector, tree);
+      // A select step whose selector targets the OPTION (not the dropdown)
+      // means the a11y tree had no ref-addressable combobox (e.g. Chromium's
+      // MenuListPopup shape) — set the parent <select> via the JS fallback.
+      if (step.kind === 'select' && isOptionSelector(selector)) {
+        appendLog(ctx, `select (option fallback) ${JSON.stringify(String(payload.value ?? ''))}`);
+        await execSelectOptionFallback(ctx.session, selector, String(payload.value ?? ''));
+        return;
+      }
       const args = [step.kind, ref];
       if (step.kind === 'type') args.push(String(payload.text ?? ''));
-      if (step.kind === 'fill') args.push(String(payload.value ?? ''));
+      // 'select' picks an option in a native <select> by label/value — the
+      // selector targets the combobox itself (options have no box model).
+      if (step.kind === 'fill' || step.kind === 'select') args.push(String(payload.value ?? ''));
       appendLog(ctx, `${step.kind} ${ref}`);
       const r = await run(args, { session: ctx.session, timeoutMs: 30_000 });
       if (r.exitCode !== 0) throw new Error(`${step.kind} failed: ${r.stderr || r.stdout}`);
@@ -519,22 +531,28 @@ export async function executeScenario(
     await closeSession(session).catch(() => undefined);
   }
 
-  // Preflight handling: bind the daemon to the preflight's --session-name (so
-  // any state save still lands in the right slot) AND execute the preflight's
-  // step list fresh. The freshness is the whole point — if you've recorded a
-  // login flow in the preflight, this is the line that re-runs it on every
+  // Preflight application: bind the daemon to the preflight's --session-name
+  // (so any state save still lands in the right slot) AND execute the
+  // preflight's step list fresh. The freshness is the whole point — if you've
+  // recorded a login flow in the preflight, this is what re-runs it on every
   // scenario run, sidestepping the Auth0/IdP session-cookie TTL problem.
-  if (preflightName) {
-    // 'cookies' mode: skip the steps and just load the preflight's saved
-    // cookies/localStorage — fast, but requires a saved state file (from Save
-    // preflight / Replay). 'steps' mode (default): re-run the steps in a clean
-    // browser so login/consent happen fresh every run.
-    const useCookiesOnly = scenario.preflight_mode === 'cookies';
+  //
+  // 'cookies' mode: skip the steps and just load the preflight's saved
+  // cookies/localStorage — fast, but requires a saved state file (from Save
+  // preflight / Replay). 'steps' mode (default): re-run the steps in a clean
+  // browser so login/consent happen fresh every run.
+  //
+  // Called before the first attempt AND on every whole-run restart: the
+  // restart closes the session, which throws away the preflight's in-memory
+  // cookies (login, consent, …), so without re-applying, a restarted attempt
+  // would run logged-out. Throws when every internal attempt failed.
+  const useCookiesOnly = scenario.preflight_mode === 'cookies';
+  async function applyPreflight(name: string): Promise<void> {
     appendLog(
       { runId, log },
       useCookiesOnly
-        ? `preflight "${preflightName}": loading saved cookies (mode=cookies, steps skipped)`
-        : `preflight "${preflightName}": binding daemon + executing ${preflightSteps.length} step(s)`,
+        ? `preflight "${name}": loading saved cookies (mode=cookies, steps skipped)`
+        : `preflight "${name}": binding daemon + executing ${preflightSteps.length} step(s)`,
     );
     // Whole-preflight restart loop. Unlike Replay, a scenario run does NOT wipe
     // persisted state between attempts — the preflight re-runs its login flow
@@ -546,15 +564,15 @@ export async function executeScenario(
         if (attempt > 0) {
           appendLog(
             { runId, log },
-            `preflight "${preflightName}" failed — resetting browser and restarting (restart ${attempt}/${preflightRestarts})`,
+            `preflight "${name}" failed — resetting browser and restarting (restart ${attempt}/${preflightRestarts})`,
           );
           await closeSession(session).catch(() => undefined);
         }
         if (useCookiesOnly) {
           // Load the persisted state (default ensureSession behavior) and do
           // NOT run the steps.
-          await ensureSession(session, { sessionName: preflightName });
-          appendLog({ runId, log }, `preflight "${preflightName}": cookies loaded`);
+          await ensureSession(session, { sessionName: name });
+          appendLog({ runId, log }, `preflight "${name}": cookies loaded`);
         } else {
           // Fresh-browser guarantee: a daemon reused from a previous run still
           // holds that run's in-memory cookies — ensureSession reuses on a
@@ -570,7 +588,7 @@ export async function executeScenario(
           // e.g. a restored consent cookie means the consent banner never
           // appears and the "click consent" step fails. Binding the name
           // (without loading) keeps any future save landing in the right slot.
-          await ensureSession(session, { sessionName: preflightName, skipStateLoad: true });
+          await ensureSession(session, { sessionName: name, skipStateLoad: true });
           // NOTE: recording is deliberately NOT started here. The preflight
           // navigates (login), and `record start` poisons the next navigation —
           // so we wait and start recording after the scenario's first navigation.
@@ -581,20 +599,25 @@ export async function executeScenario(
               (msg) => appendLog({ runId, log }, '  ' + msg),
               preflightPolicy,
             );
-            appendLog({ runId, log }, `preflight "${preflightName}": ok`);
+            appendLog({ runId, log }, `preflight "${name}": ok`);
           }
         }
-        preflightErr = null;
-        break;
+        return;
       } catch (e: any) {
         preflightErr = e;
       }
     }
-    if (preflightErr) {
+    throw preflightErr;
+  }
+
+  if (preflightName) {
+    try {
+      await applyPreflight(preflightName);
+    } catch (e: any) {
       // Hard-fail the run: scenarios that depend on the preflight (e.g. a
       // logged-in scenario) can't usefully run without it. Better to surface
       // the preflight error in the run log than silently hit the login page.
-      appendLog({ runId, log }, `preflight "${preflightName}" failed: ${preflightErr.message}`);
+      appendLog({ runId, log }, `preflight "${preflightName}" failed: ${e.message}`);
       const screenshotPathsJson = JSON.stringify([]);
       db.prepare(
         `UPDATE runs SET status = 'failed', finished_at = CURRENT_TIMESTAMP,
@@ -617,10 +640,22 @@ export async function executeScenario(
       );
       try {
         await closeSession(session).catch(() => undefined);
-        await ensureSession(session);
+        // The close above threw away everything the preflight established in
+        // the browser (login cookies, consent, …), so re-apply it — otherwise
+        // the restarted attempt runs logged-out and fails for a different
+        // reason than the original failure.
+        if (preflightName) {
+          await applyPreflight(preflightName);
+        } else {
+          await ensureSession(session);
+        }
         appendLog({ runId, log }, 'browser connection reset; re-running scenario from the top');
       } catch (e: any) {
-        appendLog({ runId, log }, `connection reset failed: ${e.message}`);
+        // Preflight/connection reset failed — this attempt can't usefully run
+        // the scenario steps, so skip straight to the next restart (if any).
+        appendLog({ runId, log }, `restart reset failed: ${e.message}`);
+        status = 'failed';
+        continue;
       }
     }
 

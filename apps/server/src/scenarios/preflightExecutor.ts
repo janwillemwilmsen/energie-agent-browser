@@ -1,6 +1,7 @@
 import { run, runJson } from '../agentBrowser/driver.js';
 import { parseSnapshotText } from '../agentBrowser/parser.js';
 import { resolveSelector } from './selector.js';
+import { isOptionSelector, execSelectOptionFallback } from './selectFallback.js';
 import { getAuthSelectors } from '../authSelectors.js';
 import type { A11yNode, A11yTree, PreflightStep, SelectorStrategy } from '@eab/shared';
 
@@ -170,11 +171,21 @@ export async function executePreflightStep(session: string, step: PreflightStep)
     if (r.exitCode !== 0) throw new Error(`auth login "${step.name}" failed: ${r.stderr || r.stdout}`);
     return;
   }
-  // click / type — selector-resolved with implicit wait.
+  // click / type / select — selector-resolved with implicit wait. For
+  // 'select' the selector normally targets the <select> element itself
+  // (combobox); its options have no box model, so they can't be clicked
+  // directly. When the selector targets an OPTION instead (pages where the
+  // a11y tree exposes no ref-addressable combobox), the JS fallback sets the
+  // parent <select> directly.
   const selector = step.selector as SelectorStrategy;
   const ref = await resolveSelectorWithWait(session, selector);
+  if (step.kind === 'select' && isOptionSelector(selector)) {
+    await execSelectOptionFallback(session, selector, step.value);
+    return;
+  }
   const args: string[] = [step.kind, ref];
   if (step.kind === 'type') args.push(step.text);
+  if (step.kind === 'select') args.push(step.value);
   const r = await run(args, { session, timeoutMs: 30_000 });
   if (r.exitCode !== 0) throw new Error(`${step.kind} failed: ${r.stderr || r.stdout}`);
 }

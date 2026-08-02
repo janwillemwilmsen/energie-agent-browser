@@ -71,6 +71,7 @@ export type PreflightStep =
   | { kind: 'wait'; ms: number }
   | { kind: 'click'; selector: SelectorStrategy }
   | { kind: 'type'; selector: SelectorStrategy; text: string }
+  | { kind: 'select'; selector: SelectorStrategy; value: string }
   | { kind: 'auth-login'; name: string };
 
 export interface AuthProfile {

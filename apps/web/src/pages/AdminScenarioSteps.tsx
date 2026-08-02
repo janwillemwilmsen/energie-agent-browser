@@ -17,10 +17,14 @@ const STEP_KINDS = [
   'click',
   'type',
   'fill',
+  'select',
   'scroll',
   'screenshot',
   'wait',
   'evaluate',
+  'record_start',
+  'record_stop',
+  'close',
 ] as const;
 
 interface EditRow {

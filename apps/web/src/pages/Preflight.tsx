@@ -72,6 +72,8 @@ function summarize(step: PreflightStep): string {
   if (step.kind === 'click') return `${step.selector.role} "${step.selector.name}"`;
   if (step.kind === 'type')
     return `${step.selector.role} "${step.selector.name}" ${JSON.stringify(step.text)}`;
+  if (step.kind === 'select')
+    return `${step.selector.role} "${step.selector.name}" → ${JSON.stringify(step.value)}`;
   if (step.kind === 'auth-login') return `🔐 auth profile "${step.name}"`;
   return '';
 }
@@ -399,6 +401,13 @@ export function PreflightPage() {
     if (text == null) return;
     void addStep({ kind: 'type', selector: sel, text });
   }
+  function onPickSelect(sel: SelectorStrategy, value?: string) {
+    // A pick from an option row arrives with the value pre-filled; a pick from
+    // the combobox row itself asks for the label.
+    const v = value ?? prompt('Select which option? (option label, e.g. "1 persoon")');
+    if (v == null || !v.trim()) return;
+    void addStep({ kind: 'select', selector: sel, value: v.trim() });
+  }
 
   const haveName = draft.name.trim().length > 0;
   const stepActionDisabled = !haveName || (nameIsTakenLocally && draft.id == null);
@@ -690,6 +699,7 @@ export function PreflightPage() {
               tree={tree}
               onPickClick={onPickClick}
               onPickType={onPickType}
+              onPickSelect={onPickSelect}
             />
           )}
         </div>

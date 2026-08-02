@@ -19,6 +19,9 @@ export const StepKind = z.enum([
   'click',
   'type',
   'fill',
+  // Pick an option in a native <select> dropdown (agent-browser select).
+  // Options of a closed select have no box model, so they can't be clicked.
+  'select',
   'scroll',
   'screenshot',
   'wait',
@@ -43,6 +46,13 @@ const StepType = z.object({
 });
 const StepFill = z.object({
   kind: z.literal('fill'),
+  selector: SelectorStrategy,
+  value: z.string(),
+});
+// selector targets the <select> element itself (role "combobox" in the
+// snapshot), NOT one of its options; value is the option's label or value.
+const StepSelect = z.object({
+  kind: z.literal('select'),
   selector: SelectorStrategy,
   value: z.string(),
 });
@@ -83,6 +93,7 @@ export const StepPayload = z.discriminatedUnion('kind', [
   StepClick,
   StepType,
   StepFill,
+  StepSelect,
   StepScroll,
   StepScreenshot,
   StepWait,
@@ -167,6 +178,8 @@ export const PreflightStep = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('wait'), ms: z.number().int().positive() }),
   z.object({ kind: z.literal('click'), selector: SelectorStrategy }),
   z.object({ kind: z.literal('type'), selector: SelectorStrategy, text: z.string() }),
+  // Pick an option in a native <select>; selector targets the combobox itself.
+  z.object({ kind: z.literal('select'), selector: SelectorStrategy, value: z.string() }),
   // Single-form login via agent-browser's encrypted Auth Vault. The actual
   // username + password live in ~/.agent-browser/auth/<name>.json (AES-GCM
   // encrypted), keeping credentials out of preflight steps_json in the DB.

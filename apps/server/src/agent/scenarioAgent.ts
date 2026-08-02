@@ -4,6 +4,7 @@ import { getSetting, setSetting } from '../settings.js';
 import { run, runJson, ensureSession, closeSession } from '../agentBrowser/driver.js';
 import { parseSnapshotText } from '../agentBrowser/parser.js';
 import { resolveSelector } from '../scenarios/selector.js';
+import { isOptionSelector, execSelectOptionFallback } from '../scenarios/selectFallback.js';
 import type { A11yNode, A11yTree, SelectorStrategy } from '@eab/shared';
 
 // LLM-driven scenario builder. Given a natural-language prompt, an agent loop
@@ -185,6 +186,7 @@ type AgentAction =
   | { kind: 'click'; selector: AgentSelector }
   | { kind: 'fill'; selector: AgentSelector; value: string }
   | { kind: 'type'; selector: AgentSelector; text: string }
+  | { kind: 'select'; selector: AgentSelector; value: string }
   | { kind: 'scroll'; dy?: number; toBottom?: boolean }
   | { kind: 'wait'; ms: number }
   | { kind: 'screenshot'; label: string }
@@ -199,6 +201,7 @@ Actions:
 {"kind":"click","selector":{"role":"button","name":"Accept all"}}  — click an element
 {"kind":"fill","selector":{"role":"textbox","name":"Email"},"value":"…"} — set an input's value
 {"kind":"type","selector":{"role":"textbox","name":"Search"},"text":"…"} — type with keystrokes
+{"kind":"select","selector":{"role":"combobox","name":"Country"},"value":"…"} — pick a dropdown option by its label
 {"kind":"scroll","dy":800}                                          — scroll down (negative = up)
 {"kind":"scroll","toBottom":true}                                   — scroll through the whole page (lazy-load)
 {"kind":"wait","ms":1500}                                           — pause (after navigation/animation)
@@ -209,6 +212,7 @@ Rules:
 - selector.role and selector.name MUST be copied EXACTLY from the element list (they replay against future page loads).
 - When the element list marks an entry with [appears N×], several elements share that role+name — you MUST add "ordinal" to the selector to pick one (0 = first in document order), e.g. {"kind":"click","selector":{"role":"button","name":"Ja","ordinal":0}}. Also add "ordinal" when an action fails with "Ambiguous selector".
 - Prefer "fill" for inputs, "click" for buttons/links.
+- For dropdowns (role "combobox"), use "select" on the combobox itself with the option's label as "value". If the list shows only "option" entries (no combobox), use "select" with the OPTION as the selector, e.g. {"kind":"select","selector":{"role":"option","name":"1 persoon"},"value":"1 persoon"}. NEVER click an "option" element — options of a closed dropdown are not clickable.
 - If a cookie/consent banner blocks the page, dismiss it first.
 - After a navigate or a click that loads new content, the next turn shows the new page — you do not need a wait unless timing is flaky.
 - Add a screenshot step when the task asks to capture/verify something visual.
@@ -246,6 +250,8 @@ function parseAction(raw: string): AgentAction {
       return { kind, selector: sel(obj), value: String(obj.value ?? '') };
     case 'type':
       return { kind, selector: sel(obj), text: String(obj.text ?? '') };
+    case 'select':
+      return { kind, selector: sel(obj), value: String(obj.value ?? '') };
     case 'scroll':
       if (obj.toBottom) return { kind, toBottom: true };
       return { kind, dy: Number(obj.dy ?? 800) };
@@ -272,6 +278,7 @@ function summarizeAction(a: AgentAction): string {
     case 'click': return `click ${selDesc(a.selector)}`;
     case 'fill': return `fill ${selDesc(a.selector)} = ${JSON.stringify(a.value)}`;
     case 'type': return `type ${selDesc(a.selector)} ${JSON.stringify(a.text)}`;
+    case 'select': return `select ${selDesc(a.selector)} = ${JSON.stringify(a.value)}`;
     case 'scroll': return a.toBottom ? 'scroll to bottom' : `scroll ${Number(a.dy) >= 0 ? 'down' : 'up'} ${Math.abs(Number(a.dy ?? 800))}px`;
     case 'wait': return `wait ${a.ms}ms`;
     case 'screenshot': return `screenshot "${a.label}"`;
@@ -307,10 +314,15 @@ async function executeAction(session: string, action: AgentAction): Promise<void
     }
     case 'click':
     case 'fill':
-    case 'type': {
+    case 'type':
+    case 'select': {
       const ref = await resolveWithWait(session, action.selector);
+      if (action.kind === 'select' && isOptionSelector(action.selector)) {
+        await execSelectOptionFallback(session, action.selector, action.value);
+        return;
+      }
       const args: string[] = [action.kind, ref];
-      if (action.kind === 'fill') args.push(action.value);
+      if (action.kind === 'fill' || action.kind === 'select') args.push(action.value);
       if (action.kind === 'type') args.push(action.text);
       const r = await run(args, { session, timeoutMs: 30_000 });
       if (r.exitCode !== 0) throw new Error(`${action.kind} failed: ${r.stderr || r.stdout}`);
@@ -353,6 +365,7 @@ function actionToStep(action: AgentAction): { kind: string; payload: unknown } |
     case 'click': return { kind: 'click', payload: { selector: action.selector } };
     case 'fill': return { kind: 'fill', payload: { selector: action.selector, value: action.value } };
     case 'type': return { kind: 'type', payload: { selector: action.selector, text: action.text } };
+    case 'select': return { kind: 'select', payload: { selector: action.selector, value: action.value } };
     case 'scroll': return { kind: 'scroll', payload: action.toBottom ? { toBottom: true } : { dy: Number(action.dy ?? 800) } };
     case 'wait': return { kind: 'wait', payload: { ms: action.ms } };
     case 'screenshot': return { kind: 'screenshot', payload: { label: action.label } };

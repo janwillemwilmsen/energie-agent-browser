@@ -37,17 +37,33 @@ function buildStrategy(
   return strategy;
 }
 
+// Roles where agent-browser's `select <ref> <value>` applies — the native
+// <select> element itself. Its `option` children are not clickable (options
+// of a closed dropdown have no box model), so option rows get a `select`
+// button that targets their parent dropdown with the label pre-filled.
+const SELECT_ROLES = new Set(['combobox', 'listbox']);
+
+// Nearest dropdown ancestor of an option node (index into `ancestors`), or -1.
+function nearestSelectAncestor(ancestors: A11yNode[]): number {
+  for (let i = ancestors.length - 1; i >= 0; i--) {
+    if (SELECT_ROLES.has(ancestors[i]!.role)) return i;
+  }
+  return -1;
+}
+
 export interface SnapshotPickerProps {
   tree: A11yTree;
   onPickClick?: (s: SelectorStrategy) => void;
   onPickType?: (s: SelectorStrategy) => void;
   onPickFill?: (s: SelectorStrategy) => void;
+  onPickSelect?: (s: SelectorStrategy, value?: string) => void;
   onPickWait?: (s: SelectorStrategy) => void;
   onPickScroll?: (s: SelectorStrategy) => void;
 }
 
 export function SnapshotPicker(props: SnapshotPickerProps) {
-  const { tree, onPickClick, onPickType, onPickFill, onPickWait, onPickScroll } = props;
+  const { tree, onPickClick, onPickType, onPickFill, onPickSelect, onPickWait, onPickScroll } =
+    props;
   const flat = useMemo(() => flatten(tree.root, 0, []), [tree]);
   const allNodes = useMemo(() => flat.map((x) => x.node), [flat]);
 
@@ -72,6 +88,36 @@ export function SnapshotPicker(props: SnapshotPickerProps) {
                 {onPickFill && (
                   <button onClick={() => onPickFill(strategy)}>fill</button>
                 )}
+                {onPickSelect && SELECT_ROLES.has(node.role) && (
+                  <button
+                    onClick={() => onPickSelect(strategy)}
+                    title="Pick an option in this dropdown by its label"
+                  >
+                    select
+                  </button>
+                )}
+                {onPickSelect &&
+                  node.role === 'option' &&
+                  (() => {
+                    // Prefer targeting the ref-addressable dropdown ancestor
+                    // (combobox/listbox). When the a11y tree exposes none
+                    // (e.g. Chromium's MenuListPopup shape), store the OPTION
+                    // itself — the runner then sets the parent <select> via a
+                    // JS fallback instead of the ref-based CLI command.
+                    const i = nearestSelectAncestor(ancestors);
+                    const target =
+                      i === -1
+                        ? strategy
+                        : buildStrategy(ancestors[i]!, ancestors.slice(0, i), allNodes);
+                    return (
+                      <button
+                        onClick={() => onPickSelect(target, node.name)}
+                        title="Select this option in its dropdown"
+                      >
+                        select
+                      </button>
+                    );
+                  })()}
                 {onPickWait && (
                   <button onClick={() => onPickWait(strategy)}>wait</button>
                 )}

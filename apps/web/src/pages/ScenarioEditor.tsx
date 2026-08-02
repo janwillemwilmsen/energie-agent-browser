@@ -714,6 +714,15 @@ export function ScenarioEditor() {
                 const value = prompt('Fill with?');
                 if (value != null) addStep('fill', { selector: strategy, value });
               }}
+              onPickSelect={(strategy, value) => {
+                // A pick from an option row arrives with the value pre-filled;
+                // a pick from the combobox row itself asks for the label.
+                const v =
+                  value ?? prompt('Select which option? (option label, e.g. "1 persoon")');
+                if (v != null && v.trim()) {
+                  addStep('select', { selector: strategy, value: v.trim() });
+                }
+              }}
               onPickWait={(strategy) => addStep('wait', { selector: strategy })}
               onPickScroll={(strategy) => addStep('scroll', { selector: strategy })}
             />
@@ -815,7 +824,7 @@ function clampInt(v: string): number {
 
 function summarizeStep(kind: string, p: any): string {
   if (kind === 'navigate') return `→ ${p.url ?? ''}`;
-  if (kind === 'click' || kind === 'type' || kind === 'fill') {
+  if (kind === 'click' || kind === 'type' || kind === 'fill' || kind === 'select') {
     const s = p.selector ?? {};
     const txt = p.text ?? p.value ?? '';
     return `${s.role ?? ''} "${s.name ?? ''}"${txt ? ` ${JSON.stringify(txt)}` : ''}`;
@@ -870,11 +879,27 @@ function buildStrategy(node: A11yNode, ancestors: A11yNode[], siblings: A11yNode
   return strategy;
 }
 
+// Roles where agent-browser's `select <ref> <value>` applies — the native
+// <select> element itself. Its `option` children are NOT clickable (a closed
+// dropdown's options have no box model), so an option row instead gets a
+// `select` button that targets its parent dropdown with the option's label
+// pre-filled as the value.
+const SELECT_ROLES = new Set(['combobox', 'listbox']);
+
+// Nearest dropdown ancestor of an option node (index into `ancestors`), or -1.
+function nearestSelectAncestor(ancestors: A11yNode[]): number {
+  for (let i = ancestors.length - 1; i >= 0; i--) {
+    if (SELECT_ROLES.has(ancestors[i]!.role)) return i;
+  }
+  return -1;
+}
+
 function TreeView({
   tree,
   onPickClick,
   onPickType,
   onPickFill,
+  onPickSelect,
   onPickWait,
   onPickScroll,
 }: {
@@ -882,6 +907,7 @@ function TreeView({
   onPickClick: (s: SelectorStrategy) => void;
   onPickType: (s: SelectorStrategy) => void;
   onPickFill: (s: SelectorStrategy) => void;
+  onPickSelect: (s: SelectorStrategy, value?: string) => void;
   onPickWait: (s: SelectorStrategy) => void;
   onPickScroll: (s: SelectorStrategy) => void;
 }) {
@@ -903,6 +929,35 @@ function TreeView({
                 <button onClick={() => onPickClick(strategy)}>click</button>
                 <button onClick={() => onPickType(strategy)}>type</button>
                 <button onClick={() => onPickFill(strategy)}>fill</button>
+                {SELECT_ROLES.has(node.role) && (
+                  <button
+                    onClick={() => onPickSelect(strategy)}
+                    title="Pick an option in this dropdown by its label"
+                  >
+                    select
+                  </button>
+                )}
+                {node.role === 'option' &&
+                  (() => {
+                    // Prefer targeting the ref-addressable dropdown ancestor
+                    // (combobox/listbox). When the a11y tree exposes none
+                    // (e.g. Chromium's MenuListPopup shape), store the OPTION
+                    // itself — the runner then sets the parent <select> via a
+                    // JS fallback instead of the ref-based CLI command.
+                    const i = nearestSelectAncestor(ancestors);
+                    const target =
+                      i === -1
+                        ? strategy
+                        : buildStrategy(ancestors[i]!, ancestors.slice(0, i), allNodes);
+                    return (
+                      <button
+                        onClick={() => onPickSelect(target, node.name)}
+                        title="Select this option in its dropdown"
+                      >
+                        select
+                      </button>
+                    );
+                  })()}
                 <button onClick={() => onPickWait(strategy)}>wait</button>
                 <button
                   onClick={() => onPickScroll(strategy)}
