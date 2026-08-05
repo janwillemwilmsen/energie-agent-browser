@@ -204,6 +204,33 @@ button {
 }
 button:hover { filter: brightness(1.1); }
 
+/* Notification destinations — rows are buttons for a11y but should read as
+   selectable list items, not primary actions, so no accent background. The
+   list scrolls past ~6 rows to keep the page length constant. */
+.dest-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 520px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+.dest-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  font-weight: 500;
+  flex-shrink: 0;
+}
+.dest-row:hover { filter: none; background: rgba(255, 255, 255, 0.06); }
+.dest-row.selected { border-color: var(--accent); outline: 1px solid var(--accent); }
+
 .table { width: 100%; border-collapse: collapse; margin-top: 16px; }
 .table th, .table td {
   border-bottom: 1px solid var(--border);
