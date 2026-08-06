@@ -250,6 +250,8 @@ export const api = {
   deleteRecording: (id: number) =>
     req<void>(`/api/recordings/${id}`, { method: 'DELETE' }),
   recordingVideoUrl: (id: number) => `/api/recordings/${id}/video`,
+  serverTime: () =>
+    req<{ now: string; timezone: string; offsetMinutes: number }>('/api/time'),
   listSchedules: () => req<Schedule[]>('/api/schedules'),
   createSchedule: (body: { scenario_ids: number[]; cron_expr: string; enabled: boolean }) =>
     req<Schedule>('/api/schedules', { method: 'POST', body: JSON.stringify(body) }),

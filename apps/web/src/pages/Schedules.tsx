@@ -2,6 +2,72 @@ import { useEffect, useMemo, useState } from 'react';
 import cronstrue from 'cronstrue';
 import { api, type Schedule, type Scenario } from '../lib/api.js';
 
+function formatUtcOffset(minutes: number): string {
+  const sign = minutes >= 0 ? '+' : '-';
+  const abs = Math.abs(minutes);
+  const h = Math.floor(abs / 60);
+  const m = abs % 60;
+  return `UTC${sign}${h}${m ? `:${String(m).padStart(2, '0')}` : ''}`;
+}
+
+function formatHourDiff(minutes: number): string {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  const parts: string[] = [];
+  if (h) parts.push(`${h} h`);
+  if (m) parts.push(`${m} min`);
+  return parts.join(' ');
+}
+
+// Live server clock. Crons fire in the server's local time zone, so when the
+// server sits in another zone (or its clock drifts) a "09:00" schedule won't
+// run at the user's 09:00 — this makes that visible right where schedules are
+// built. One fetch on mount: the display extrapolates from the measured
+// server-vs-browser clock difference, so no polling is needed.
+function ServerClock() {
+  const [info, setInfo] = useState<{
+    driftMs: number;
+    timezone: string;
+    offsetMinutes: number;
+  } | null>(null);
+  const [, setTick] = useState(0);
+
+  useEffect(() => {
+    void api
+      .serverTime()
+      .then((t) =>
+        setInfo({
+          driftMs: new Date(t.now).getTime() - Date.now(),
+          timezone: t.timezone,
+          offsetMinutes: t.offsetMinutes,
+        }),
+      )
+      .catch(() => {});
+    const timer = setInterval(() => setTick((n) => n + 1), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  if (!info) return null;
+
+  // Shift the (drift-corrected) instant by the server's UTC offset and format
+  // as UTC — yields the server's wall clock without relying on IANA zone names.
+  const serverWall = new Date(Date.now() + info.driftMs + info.offsetMinutes * 60_000);
+  const time = serverWall.toLocaleTimeString('en-GB', { timeZone: 'UTC' });
+  const browserOffset = -new Date().getTimezoneOffset();
+  const diff = info.offsetMinutes - browserOffset;
+  const diffText =
+    diff === 0
+      ? 'same time zone as your browser'
+      : `${formatHourDiff(Math.abs(diff))} ${diff > 0 ? 'ahead of' : 'behind'} your browser`;
+
+  return (
+    <p className="muted">
+      🕒 Server time: <strong>{time}</strong> ({info.timezone}, {formatUtcOffset(info.offsetMinutes)})
+      — {diffText}. Schedules fire in <strong>server</strong> time.
+    </p>
+  );
+}
+
 const WEEKDAYS: { v: number; l: string }[] = [
   { v: 1, l: 'Mon' },
   { v: 2, l: 'Tue' },
@@ -197,6 +263,7 @@ export function Schedules() {
   return (
     <section>
       <h1>Schedules</h1>
+      <ServerClock />
       {err && <p className="error">{err}</p>}
 
       <form onSubmit={create} className="card">

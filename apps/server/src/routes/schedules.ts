@@ -45,6 +45,18 @@ function toApi(row: any) {
 }
 
 export async function schedulesRoutes(app: FastifyInstance) {
+  // Cron expressions fire in the server's local time zone, which may differ
+  // from the browser's — the UI shows this next to the schedule builder.
+  app.get('/api/time', async () => {
+    const now = new Date();
+    return {
+      now: now.toISOString(),
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      // Minutes east of UTC (e.g. Amsterdam summer = 120).
+      offsetMinutes: -now.getTimezoneOffset(),
+    };
+  });
+
   app.get('/api/schedules', async () => {
     return (getDb().prepare('SELECT * FROM schedules ORDER BY id').all() as any[]).map(toApi);
   });
