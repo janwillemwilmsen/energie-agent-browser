@@ -36,6 +36,7 @@ async function sendEmail(opts: {
     {
       from: config.email.from,
       to: [opts.to],
+      ...(config.email.replyTo ? { replyTo: config.email.replyTo } : {}),
       subject: opts.subject,
       html: opts.html,
       text: opts.text,

@@ -105,6 +105,9 @@ export const config = {
     // Sender. The domain must be verified in Resend — the onboarding@resend.dev
     // sandbox only delivers to the Resend account owner's own address.
     from: optional('EMAIL_FROM', 'Energie Agent <onboarding@resend.dev>'),
+    // Where replies go. The sender address usually has no inbox; this can be
+    // any address (needs no Resend verification). Empty → no Reply-To header.
+    replyTo: optional('EMAIL_REPLY_TO', ''),
     // Base URL used for links in emails (to the /runs page).
     appBaseUrl: optional('APP_BASE_URL', ''),
   },
