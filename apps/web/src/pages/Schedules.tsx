@@ -12,7 +12,27 @@ const WEEKDAYS: { v: number; l: string }[] = [
   { v: 0, l: 'Sun' },
 ];
 
+const MONTHS: { v: number; l: string }[] = [
+  { v: 1, l: 'Jan' },
+  { v: 2, l: 'Feb' },
+  { v: 3, l: 'Mar' },
+  { v: 4, l: 'Apr' },
+  { v: 5, l: 'May' },
+  { v: 6, l: 'Jun' },
+  { v: 7, l: 'Jul' },
+  { v: 8, l: 'Aug' },
+  { v: 9, l: 'Sep' },
+  { v: 10, l: 'Oct' },
+  { v: 11, l: 'Nov' },
+  { v: 12, l: 'Dec' },
+];
+
 type HourMode = 'every' | 'stepped' | 'specific' | 'range';
+
+// Weekly and monthly are mutually exclusive on purpose: cron treats a
+// restricted day-of-week AND day-of-month as OR ("either matches"), which is
+// never what a user building "the 1st, if it's a Monday" expects.
+type RepeatMode = 'weekly' | 'monthly';
 
 function daysToField(days: number[]): string {
   if (days.length === 0 || days.length === 7) return '*';
@@ -23,6 +43,29 @@ function daysToField(days: number[]): string {
   // Detect Sat+Sun
   if (sorted.length === 2 && sorted[0] === 0 && sorted[1] === 6) return '0,6';
   return sorted.join(',');
+}
+
+// "1, 15" → sorted unique days clamped to 1-31. Empty/garbage falls back to
+// the 1st so monthly mode can never emit "* *" (which would mean every day).
+function parseDom(input: string): number[] {
+  return [
+    ...new Set(
+      input
+        .split(',')
+        .map((p) => parseInt(p.trim(), 10))
+        .filter((n) => Number.isInteger(n) && n >= 1 && n <= 31),
+    ),
+  ].sort((a, b) => a - b);
+}
+
+function domToField(input: string): string {
+  const days = parseDom(input);
+  return days.length === 0 ? '1' : days.join(',');
+}
+
+function monthsToField(months: number[]): string {
+  if (months.length === 0 || months.length === 12) return '*';
+  return [...new Set(months)].sort((a, b) => a - b).join(',');
 }
 
 function hoursToField(mode: HourMode, hour: string, hourStep: string, hourStart: string, hourEnd: string): string {
@@ -44,8 +87,14 @@ export function Schedules() {
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
   const [scenarioId, setScenarioId] = useState<number | ''>('');
 
+  const [mode, setMode] = useState<RepeatMode>('weekly');
+
   // Day-of-week chips. Empty = every day (*).
   const [days, setDays] = useState<number[]>([]);
+
+  // Monthly mode: comma list of days of the month + month chips (empty = every month).
+  const [domInput, setDomInput] = useState('1');
+  const [months, setMonths] = useState<number[]>([]);
 
   // Hour controls.
   const [hourMode, setHourMode] = useState<HourMode>('specific');
@@ -73,9 +122,11 @@ export function Schedules() {
   const cronExpr = useMemo(() => {
     const m = minute || '0';
     const h = hoursToField(hourMode, hour, hourStep, hourStart, hourEnd);
-    const d = daysToField(days);
-    return `${m} ${h} * * ${d}`;
-  }, [minute, hour, hourMode, hourStep, hourStart, hourEnd, days]);
+    if (mode === 'monthly') {
+      return `${m} ${h} ${domToField(domInput)} ${monthsToField(months)} *`;
+    }
+    return `${m} ${h} * * ${daysToField(days)}`;
+  }, [minute, hour, hourMode, hourStep, hourStart, hourEnd, days, mode, domInput, months]);
 
   let humanized = '';
   try {
@@ -86,6 +137,10 @@ export function Schedules() {
 
   function toggleDay(v: number) {
     setDays((prev) => (prev.includes(v) ? prev.filter((d) => d !== v) : [...prev, v]));
+  }
+
+  function toggleMonth(v: number) {
+    setMonths((prev) => (prev.includes(v) ? prev.filter((m) => m !== v) : [...prev, v]));
   }
 
   async function create(e: React.FormEvent) {
@@ -134,43 +189,132 @@ export function Schedules() {
         </label>
 
         <div>
-          <div className="filter-group-label">Days</div>
+          <div className="filter-group-label">Repeat</div>
           <div className="chip-row">
             <button
               type="button"
-              className={`chip ${days.length === 0 ? 'chip-on' : ''}`}
-              onClick={() => setDays([])}
+              className={`chip ${mode === 'weekly' ? 'chip-on' : ''}`}
+              onClick={() => setMode('weekly')}
             >
-              Every day
+              Weekly
             </button>
             <button
               type="button"
-              className={`chip ${daysToField(days) === '1-5' ? 'chip-on' : ''}`}
-              onClick={() => setDays([1, 2, 3, 4, 5])}
+              className={`chip ${mode === 'monthly' ? 'chip-on' : ''}`}
+              onClick={() => setMode('monthly')}
             >
-              Workdays
+              Monthly
             </button>
-            <button
-              type="button"
-              className={`chip ${daysToField(days) === '0,6' ? 'chip-on' : ''}`}
-              onClick={() => setDays([0, 6])}
-            >
-              Weekends
-            </button>
-          </div>
-          <div className="chip-row" style={{ marginTop: 6 }}>
-            {WEEKDAYS.map((d) => (
-              <button
-                key={d.v}
-                type="button"
-                className={`chip ${days.includes(d.v) ? 'chip-on' : ''}`}
-                onClick={() => toggleDay(d.v)}
-              >
-                {d.l}
-              </button>
-            ))}
           </div>
         </div>
+
+        {mode === 'weekly' ? (
+          <div>
+            <div className="filter-group-label">Days</div>
+            <div className="chip-row">
+              <button
+                type="button"
+                className={`chip ${days.length === 0 ? 'chip-on' : ''}`}
+                onClick={() => setDays([])}
+              >
+                Every day
+              </button>
+              <button
+                type="button"
+                className={`chip ${daysToField(days) === '1-5' ? 'chip-on' : ''}`}
+                onClick={() => setDays([1, 2, 3, 4, 5])}
+              >
+                Workdays
+              </button>
+              <button
+                type="button"
+                className={`chip ${daysToField(days) === '0,6' ? 'chip-on' : ''}`}
+                onClick={() => setDays([0, 6])}
+              >
+                Weekends
+              </button>
+            </div>
+            <div className="chip-row" style={{ marginTop: 6 }}>
+              {WEEKDAYS.map((d) => (
+                <button
+                  key={d.v}
+                  type="button"
+                  className={`chip ${days.includes(d.v) ? 'chip-on' : ''}`}
+                  onClick={() => toggleDay(d.v)}
+                >
+                  {d.l}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <>
+            <div>
+              <div className="filter-group-label">Day of month</div>
+              <div className="chip-row">
+                <button
+                  type="button"
+                  className={`chip ${domToField(domInput) === '1' ? 'chip-on' : ''}`}
+                  onClick={() => setDomInput('1')}
+                >
+                  1st
+                </button>
+                <button
+                  type="button"
+                  className={`chip ${domToField(domInput) === '15' ? 'chip-on' : ''}`}
+                  onClick={() => setDomInput('15')}
+                >
+                  15th
+                </button>
+                <button
+                  type="button"
+                  className={`chip ${domToField(domInput) === '28' ? 'chip-on' : ''}`}
+                  onClick={() => setDomInput('28')}
+                >
+                  28th
+                </button>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  Day(s)
+                  <input
+                    value={domInput}
+                    onChange={(e) => setDomInput(e.target.value)}
+                    placeholder="e.g. 1 or 1,15"
+                    style={{ width: 110 }}
+                    aria-label="Day(s) of the month, comma-separated"
+                  />
+                </label>
+              </div>
+              {parseDom(domInput).some((d) => d >= 29) && (
+                <p className="muted" style={{ marginTop: 6 }}>
+                  Days 29–31 are silently skipped in months that don't have them (cron has no
+                  "last day of month" — 28 is the latest day that exists in every month).
+                </p>
+              )}
+            </div>
+            <div>
+              <div className="filter-group-label">Months</div>
+              <div className="chip-row">
+                <button
+                  type="button"
+                  className={`chip ${months.length === 0 ? 'chip-on' : ''}`}
+                  onClick={() => setMonths([])}
+                >
+                  Every month
+                </button>
+                {MONTHS.map((m) => (
+                  <button
+                    key={m.v}
+                    type="button"
+                    className={`chip ${months.includes(m.v) ? 'chip-on' : ''}`}
+                    onClick={() => toggleMonth(m.v)}
+                  >
+                    {m.l}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </>
+        )}
 
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <label style={{ flex: 1, minWidth: 160 }}>
