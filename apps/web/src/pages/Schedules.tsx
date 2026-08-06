@@ -85,7 +85,10 @@ function hoursToField(mode: HourMode, hour: string, hourStep: string, hourStart:
 export function Schedules() {
   const [items, setItems] = useState<Schedule[]>([]);
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
-  const [scenarioId, setScenarioId] = useState<number | ''>('');
+
+  // Ordered chain of scenario ids the schedule runs sequentially. Duplicates
+  // are allowed on purpose (run the same scenario at the start and end).
+  const [chain, setChain] = useState<number[]>([]);
 
   const [mode, setMode] = useState<RepeatMode>('weekly');
 
@@ -143,15 +146,37 @@ export function Schedules() {
     setMonths((prev) => (prev.includes(v) ? prev.filter((m) => m !== v) : [...prev, v]));
   }
 
+  function addToChain(id: number) {
+    setChain((prev) => [...prev, id]);
+  }
+
+  function removeFromChain(index: number) {
+    setChain((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  function moveInChain(index: number, delta: -1 | 1) {
+    setChain((prev) => {
+      const j = index + delta;
+      if (j < 0 || j >= prev.length) return prev;
+      const next = [...prev];
+      [next[index], next[j]] = [next[j]!, next[index]!];
+      return next;
+    });
+  }
+
+  function scenarioName(id: number): string {
+    return scenarios.find((s) => s.id === id)?.name ?? `#${id}`;
+  }
+
   async function create(e: React.FormEvent) {
     e.preventDefault();
     setErr(null);
-    if (!scenarioId) {
-      setErr('Pick a scenario');
+    if (chain.length === 0) {
+      setErr('Add at least one scenario');
       return;
     }
     try {
-      await api.createSchedule({ scenario_id: Number(scenarioId), cron_expr: cronExpr, enabled: true });
+      await api.createSchedule({ scenario_ids: chain, cron_expr: cronExpr, enabled: true });
       await load();
     } catch (e: any) {
       setErr(e.message);
@@ -177,9 +202,14 @@ export function Schedules() {
       <form onSubmit={create} className="card">
         <h3>New schedule</h3>
         <label>
-          Scenario
-          <select value={scenarioId} onChange={(e) => setScenarioId(e.target.value ? Number(e.target.value) : '')}>
-            <option value="">— pick a scenario —</option>
+          Scenarios (run in order, one after another)
+          <select
+            value=""
+            onChange={(e) => {
+              if (e.target.value) addToChain(Number(e.target.value));
+            }}
+          >
+            <option value="">— add a scenario to the chain —</option>
             {scenarios.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.name}
@@ -187,6 +217,43 @@ export function Schedules() {
             ))}
           </select>
         </label>
+        {chain.length > 0 && (
+          <ol style={{ margin: 0, paddingLeft: 20, display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {chain.map((id, i) => (
+              <li key={`${id}-${i}`}>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  <code>{scenarioName(id)}</code>
+                  <button
+                    type="button"
+                    onClick={() => moveInChain(i, -1)}
+                    disabled={i === 0}
+                    aria-label={`Move ${scenarioName(id)} earlier`}
+                    style={{ padding: '2px 8px', fontSize: 12 }}
+                  >
+                    ↑
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => moveInChain(i, 1)}
+                    disabled={i === chain.length - 1}
+                    aria-label={`Move ${scenarioName(id)} later`}
+                    style={{ padding: '2px 8px', fontSize: 12 }}
+                  >
+                    ↓
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => removeFromChain(i)}
+                    aria-label={`Remove ${scenarioName(id)} from the chain`}
+                    style={{ padding: '2px 8px', fontSize: 12 }}
+                  >
+                    ✕
+                  </button>
+                </span>
+              </li>
+            ))}
+          </ol>
+        )}
 
         <div>
           <div className="filter-group-label">Repeat</div>
@@ -400,7 +467,9 @@ export function Schedules() {
             return (
               <tr key={s.id}>
                 <td data-label="ID">{s.id}</td>
-                <td data-label="Scenario">{scenarios.find((sc) => sc.id === s.scenario_id)?.name ?? s.scenario_id}</td>
+                <td data-label="Scenario">
+                  {(s.scenario_ids ?? [s.scenario_id]).map(scenarioName).join(' → ')}
+                </td>
                 <td data-label="Cron"><code>{s.cron_expr}</code></td>
                 <td data-label="When">{when}</td>
                 <td data-label="Enabled">

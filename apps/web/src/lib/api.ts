@@ -117,6 +117,8 @@ async function req<T>(url: string, init?: RequestInit): Promise<T> {
 export interface Schedule {
   id: number;
   scenario_id: number;
+  // Ordered chain of scenarios this schedule runs sequentially.
+  scenario_ids: number[];
   cron_expr: string;
   enabled: 0 | 1 | boolean;
   last_run_at: string | null;
@@ -249,9 +251,9 @@ export const api = {
     req<void>(`/api/recordings/${id}`, { method: 'DELETE' }),
   recordingVideoUrl: (id: number) => `/api/recordings/${id}/video`,
   listSchedules: () => req<Schedule[]>('/api/schedules'),
-  createSchedule: (body: { scenario_id: number; cron_expr: string; enabled: boolean }) =>
+  createSchedule: (body: { scenario_ids: number[]; cron_expr: string; enabled: boolean }) =>
     req<Schedule>('/api/schedules', { method: 'POST', body: JSON.stringify(body) }),
-  updateSchedule: (id: number, body: Partial<{ scenario_id: number; cron_expr: string; enabled: boolean }>) =>
+  updateSchedule: (id: number, body: Partial<{ scenario_ids: number[]; cron_expr: string; enabled: boolean }>) =>
     req<Schedule>(`/api/schedules/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
   deleteSchedule: (id: number) =>
     req<void>(`/api/schedules/${id}`, { method: 'DELETE' }),
