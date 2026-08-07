@@ -14,6 +14,9 @@ export function Runs() {
   const [lastIndex, setLastIndex] = useState<number | null>(null);
   const [comparing, setComparing] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  // false → plain list sorted by date (API order, newest first).
+  // true → rows regrouped under their Brand/Type tag combination.
+  const [groupByTags, setGroupByTags] = useState(false);
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   // Open a specific run's panel when arrived via /runs?run=<id> (e.g. from the
@@ -69,6 +72,31 @@ export function Runs() {
     });
   }, [runs, selectedBrands, selectedTypes]);
 
+  // The rows in the order they are shown: date order for the list view, or
+  // stably re-sorted by tag group (untagged last) for the grouped view. All
+  // selection/range logic works off this order so shift-click matches what's
+  // on screen.
+  const displayRuns = useMemo(() => {
+    if (!groupByTags) return visibleRuns;
+    return visibleRuns.slice().sort((a, b) => {
+      const ka = tagGroupKey(a);
+      const kb = tagGroupKey(b);
+      if (ka === kb) return 0;
+      if (!ka) return 1;
+      if (!kb) return -1;
+      return ka.localeCompare(kb);
+    });
+  }, [visibleRuns, groupByTags]);
+
+  const groupCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const r of displayRuns) {
+      const k = tagGroupKey(r);
+      counts.set(k, (counts.get(k) ?? 0) + 1);
+    }
+    return counts;
+  }, [displayRuns]);
+
   function toggle(set: Set<string>, value: string, setter: (next: Set<string>) => void) {
     const next = new Set(set);
     if (next.has(value)) next.delete(value);
@@ -85,7 +113,7 @@ export function Runs() {
   function toggleSelect(id: number, index: number, shift: boolean) {
     if (shift && lastIndex != null) {
       const [a, b] = lastIndex < index ? [lastIndex, index] : [index, lastIndex];
-      const rangeIds = visibleRuns.slice(a, b + 1).map((r) => r.id);
+      const rangeIds = displayRuns.slice(a, b + 1).map((r) => r.id);
       const selecting = !isSelected(id);
       let next = selectedIds.slice();
       if (selecting) {
@@ -120,6 +148,14 @@ export function Runs() {
     .filter((r): r is Run => !!r);
   const canCompare =
     selectedRows.length === 2 && selectedRows[0]!.scenario_id === selectedRows[1]!.scenario_id;
+  // Why compare is unavailable right now, shown next to the button. Null when
+  // comparing is possible or when nothing is selected yet.
+  const compareHint =
+    selectedRows.length > 2
+      ? `comparing needs exactly two runs — ${selectedRows.length} selected`
+      : selectedRows.length === 2 && !canCompare
+        ? 'runs must share a scenario to compare'
+        : null;
 
   async function runComparison() {
     if (!canCompare) return;
@@ -175,7 +211,26 @@ export function Runs() {
 
   return (
     <section>
-      <h1>Runs</h1>
+      <div className="runs-head">
+        <h1>Runs</h1>
+        <button
+          type="button"
+          className="runs-view-toggle"
+          onClick={() => {
+            setGroupByTags((v) => !v);
+            // Row order changes with the view, so a remembered shift-click
+            // anchor would span the wrong rows.
+            setLastIndex(null);
+          }}
+          title={
+            groupByTags
+              ? 'Back to the plain list sorted by date'
+              : 'Group runs under their Brand/Type tags'
+          }
+        >
+          {groupByTags ? '☰ List view' : '⊞ Group by tags'}
+        </button>
+      </div>
       {err && <p className="error">{err}</p>}
 
       <details className="filter-panel" open={activeFilterCount > 0}>
@@ -242,10 +297,12 @@ export function Runs() {
           Tick runs to delete in bulk, or tick exactly two of the same scenario to compare.
         </span>
         {selectedIds.length > 0 && <span>{selectedIds.length} selected</span>}
-        {selectedRows.length === 2 && !canCompare && (
-          <span className="error">runs must share a scenario to compare</span>
-        )}
-        <button onClick={runComparison} disabled={!canCompare || comparing}>
+        {compareHint && <span className="error">{compareHint}</span>}
+        <button
+          onClick={runComparison}
+          disabled={!canCompare || comparing}
+          title={compareHint ?? 'Compare the two selected runs'}
+        >
           {comparing ? 'Comparing…' : 'Compare runs'}
         </button>
         <button
@@ -287,8 +344,27 @@ export function Runs() {
             </tr>
           </thead>
           <tbody>
-            {visibleRuns.map((r, idx) => (
+            {displayRuns.map((r, idx) => (
               <Fragment key={r.id}>
+              {groupByTags &&
+                (idx === 0 || tagGroupKey(displayRuns[idx - 1]!) !== tagGroupKey(r)) && (
+                  <tr className="runs-group-row">
+                    <td colSpan={8}>
+                      {r.brand || r.type ? (
+                        <span className="run-tags">
+                          {r.brand && <span className="run-tag">{r.brand}</span>}
+                          {r.type && <span className="run-tag">{r.type}</span>}
+                        </span>
+                      ) : (
+                        'No tags'
+                      )}
+                      <span className="muted" style={{ marginLeft: 8 }}>
+                        {groupCounts.get(tagGroupKey(r))} run
+                        {groupCounts.get(tagGroupKey(r)) === 1 ? '' : 's'}
+                      </span>
+                    </td>
+                  </tr>
+                )}
               <tr
                 onClick={() => setSelected(r)}
                 style={{
@@ -448,6 +524,12 @@ function RunDetail({
       </div>
     </div>
   );
+}
+
+// Identity of a run's tag group. Empty string = untagged, which the grouped
+// view sorts last.
+function tagGroupKey(r: Run): string {
+  return [r.brand, r.type].filter(Boolean).join(' · ');
 }
 
 function collectTagValues(runs: Run[], key: 'brand' | 'type'): string[] {

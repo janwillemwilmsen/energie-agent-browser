@@ -410,6 +410,22 @@ code { background: rgba(255,255,255,0.06); padding: 2px 4px; border-radius: 3px;
   font-size: 11px;
 }
 
+.runs-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.runs-head h1 { margin-right: auto; }
+.runs-view-toggle {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 13px;
+}
+.runs-view-toggle:hover { border-color: var(--accent); color: var(--accent); }
+.runs-group-row td {
+  background: rgba(56,189,248,0.06);
+  border-top: 1px solid var(--border);
+  padding: 8px 10px;
+  font-weight: 600;
+}
+
 .scenario-actions { display: flex; gap: 8px; white-space: nowrap; align-items: center; }
 .scenario-actions .btn-link {
   background: var(--accent);
@@ -969,6 +985,8 @@ code { background: rgba(255,255,255,0.06); padding: 2px 4px; border-radius: 3px;
 .ss-block-head h2 a:hover { text-decoration: underline; }
 .ss-block-head .muted a { color: var(--muted); text-decoration: none; }
 .ss-block-head .muted a:hover { color: var(--accent); }
+.ss-run-link { color: var(--accent); text-decoration: none; }
+.ss-run-link:hover { text-decoration: underline; }
 .ss-timeline-link {
   font-size: 13px;
   color: var(--accent);
@@ -1106,6 +1124,18 @@ code { background: rgba(255,255,255,0.06); padding: 2px 4px; border-radius: 3px;
     font-size: 12px;
     font-weight: 600;
   }
+
+  /* Tag-group header rows are plain banners, not label/value cards. */
+  .runs-table tr.runs-group-row {
+    background: rgba(56,189,248,0.06);
+    padding: 0;
+  }
+  .runs-table .runs-group-row td {
+    display: block;
+    padding: 8px 12px;
+    border-bottom: none;
+  }
+  .runs-table .runs-group-row td::before { content: none; }
 
   /* Long URL / cron string wraps within its value column. */
   .scenario-url { word-break: break-all; overflow-wrap: anywhere; }

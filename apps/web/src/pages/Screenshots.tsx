@@ -3,8 +3,9 @@ import { Link } from 'react-router-dom';
 import { api, type Run } from '../lib/api.js';
 
 // Per-scenario gallery: one section per scenario that has runs (after the
-// global Brand/Type filter), and each section carries its OWN date picker so
-// different scenarios can be parked on different days. Default per scenario:
+// global Brand/Type filter), and each section carries its OWN day dropdown
+// (listing only days with runs) so different scenarios can be parked on
+// different days. Default per scenario:
 // the day of its latest run. A "reset all" shortcut snaps every section back
 // to that latest-per-scenario default.
 
@@ -16,17 +17,6 @@ function toDayKey(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
   return d.toISOString().slice(0, 10);
-}
-
-function addDays(dayKey: string, n: number): string {
-  // Parse as local midnight, shift, format back. Avoids the UTC drift that
-  // toISOString() would introduce on day boundaries.
-  const [y, m, d] = dayKey.split('-').map(Number);
-  const dt = new Date(y!, m! - 1, d! + n);
-  const yy = dt.getFullYear();
-  const mm = String(dt.getMonth() + 1).padStart(2, '0');
-  const dd = String(dt.getDate()).padStart(2, '0');
-  return `${yy}-${mm}-${dd}`;
 }
 
 function collectTagValues(runs: Run[], key: 'brand' | 'type'): string[] {
@@ -44,7 +34,7 @@ interface ScenarioData {
   brand: string | null;
   type: string | null;
   // Days that have at least one run for this scenario, NEWEST first. Used by
-  // the per-scenario older/newer buttons.
+  // the per-scenario day dropdown.
   populatedDays: string[];
   // Latest run on a given day for this scenario.
   runByDay: Map<string, Run>;
@@ -203,8 +193,8 @@ export function Screenshots() {
 
       <div className="screenshots-toolbar">
         <span className="muted">
-          Each scenario has its own date picker — newest run is the default. Brand/Type filters
-          narrow which scenarios show below.
+          Each scenario has its own day dropdown (only days with screenshots) — newest run is the
+          default. Brand/Type filters narrow which scenarios show below.
         </span>
         {Object.keys(dayByScenario).length > 0 && (
           <button
@@ -258,29 +248,6 @@ function ScenarioBlock({
   onResetToLatest: () => void;
   isDefaultDay: boolean;
 }) {
-  // Per-scenario navigation: older/newer hop to the next-older / next-newer
-  // day THIS scenario actually has runs for. Falls back to a calendar step
-  // when there's no neighbouring populated day, so the user can scan empty
-  // territory if they want.
-  function gotoNearer(direction: 'older' | 'newer') {
-    const idx = data.populatedDays.indexOf(day);
-    if (idx === -1) {
-      if (data.populatedDays.length > 0) {
-        onSetDay(data.populatedDays[0]!);
-        return;
-      }
-      onSetDay(addDays(day || new Date().toISOString().slice(0, 10), direction === 'older' ? -1 : 1));
-      return;
-    }
-    if (direction === 'older' && idx < data.populatedDays.length - 1) {
-      onSetDay(data.populatedDays[idx + 1]!);
-    } else if (direction === 'newer' && idx > 0) {
-      onSetDay(data.populatedDays[idx - 1]!);
-    } else {
-      onSetDay(addDays(day, direction === 'older' ? -1 : 1));
-    }
-  }
-
   const run = data.runByDay.get(day) ?? null;
   let screenshots: string[] = [];
   if (run) {
@@ -288,7 +255,6 @@ function ScenarioBlock({
   }
 
   const latestDay = data.populatedDays[0] ?? '';
-  const atNewest = day === latestDay;
 
   return (
     <article className="ss-block">
@@ -310,26 +276,21 @@ function ScenarioBlock({
         </Link>
 
         <div className="screenshots-day" style={{ marginLeft: 'auto' }}>
-          <button
-            type="button"
-            onClick={() => gotoNearer('older')}
-            title="Jump to this scenario's previous day with screenshots"
-          >
-            ◀ older
-          </button>
-          <input
-            type="date"
-            value={day}
+          <select
+            value={data.populatedDays.includes(day) ? day : ''}
             onChange={(e) => onSetDay(e.target.value || latestDay)}
-          />
-          <button
-            type="button"
-            onClick={() => gotoNearer('newer')}
-            disabled={atNewest}
-            title="Jump to this scenario's next day with screenshots"
+            title="Pick a day this scenario has screenshots for"
           >
-            newer ▶
-          </button>
+            {/* Placeholder only shows if the selected day has no run (e.g. stale
+                selection after a filter change); picking any option clears it. */}
+            {!data.populatedDays.includes(day) && <option value="">No run on {day}</option>}
+            {data.populatedDays.map((d, i) => (
+              <option key={d} value={d}>
+                {d}
+                {i === 0 ? ' (latest)' : ''}
+              </option>
+            ))}
+          </select>
           {!isDefaultDay && (
             <button
               type="button"
@@ -346,7 +307,11 @@ function ScenarioBlock({
       {run ? (
         <>
           <p className="muted" style={{ margin: '0 0 10px', fontSize: 12 }}>
-            <Link to={`/runs?run=${run.id}`} title="Open this run on the Runs page">
+            <Link
+              to={`/runs?run=${run.id}`}
+              className="ss-run-link"
+              title="Open this run on the Runs page"
+            >
               Run #{run.id} · {run.started_at}
             </Link>
             {screenshots.length > 0 && <> · {screenshots.length} screenshot{screenshots.length === 1 ? '' : 's'}</>}
