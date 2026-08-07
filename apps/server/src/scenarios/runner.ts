@@ -210,7 +210,11 @@ async function executeStep(ctx: RunContext, step: StepRow): Promise<void> {
     case 'click':
     case 'type':
     case 'fill':
-    case 'select': {
+    case 'select':
+    // check/uncheck are the state-aware checkbox actions: no-ops when the box
+    // is already in the desired state, unlike a blind click toggle.
+    case 'check':
+    case 'uncheck': {
       const selector = payload.selector as SelectorStrategy;
       const tree = await snapshotTree(ctx.session);
       const ref = resolveSelector(selector, tree);

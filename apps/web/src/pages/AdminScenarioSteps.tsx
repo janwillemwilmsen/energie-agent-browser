@@ -18,6 +18,8 @@ const STEP_KINDS = [
   'type',
   'fill',
   'select',
+  'check',
+  'uncheck',
   'scroll',
   'screenshot',
   'wait',

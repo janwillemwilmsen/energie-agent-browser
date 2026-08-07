@@ -22,6 +22,11 @@ export const StepKind = z.enum([
   // Pick an option in a native <select> dropdown (agent-browser select).
   // Options of a closed select have no box model, so they can't be clicked.
   'select',
+  // State-aware checkbox steps (agent-browser check/uncheck). Unlike click —
+  // which toggles blindly — these assert the desired end state and are a no-op
+  // when the box is already there, so retries/re-runs can't flip it back.
+  'check',
+  'uncheck',
   'scroll',
   'screenshot',
   'wait',
@@ -56,6 +61,8 @@ const StepSelect = z.object({
   selector: SelectorStrategy,
   value: z.string(),
 });
+const StepCheck = z.object({ kind: z.literal('check'), selector: SelectorStrategy });
+const StepUncheck = z.object({ kind: z.literal('uncheck'), selector: SelectorStrategy });
 const StepScroll = z.object({
   kind: z.literal('scroll'),
   selector: SelectorStrategy.optional(),
@@ -94,6 +101,8 @@ export const StepPayload = z.discriminatedUnion('kind', [
   StepType,
   StepFill,
   StepSelect,
+  StepCheck,
+  StepUncheck,
   StepScroll,
   StepScreenshot,
   StepWait,

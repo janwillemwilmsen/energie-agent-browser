@@ -723,6 +723,8 @@ export function ScenarioEditor() {
                   addStep('select', { selector: strategy, value: v.trim() });
                 }
               }}
+              onPickCheck={(strategy) => addStep('check', { selector: strategy })}
+              onPickUncheck={(strategy) => addStep('uncheck', { selector: strategy })}
               onPickWait={(strategy) => addStep('wait', { selector: strategy })}
               onPickScroll={(strategy) => addStep('scroll', { selector: strategy })}
             />
@@ -824,7 +826,10 @@ function clampInt(v: string): number {
 
 function summarizeStep(kind: string, p: any): string {
   if (kind === 'navigate') return `→ ${p.url ?? ''}`;
-  if (kind === 'click' || kind === 'type' || kind === 'fill' || kind === 'select') {
+  if (
+    kind === 'click' || kind === 'type' || kind === 'fill' || kind === 'select' ||
+    kind === 'check' || kind === 'uncheck'
+  ) {
     const s = p.selector ?? {};
     const txt = p.text ?? p.value ?? '';
     return `${s.role ?? ''} "${s.name ?? ''}"${txt ? ` ${JSON.stringify(txt)}` : ''}`;
@@ -886,6 +891,12 @@ function buildStrategy(node: A11yNode, ancestors: A11yNode[], siblings: A11yNode
 // pre-filled as the value.
 const SELECT_ROLES = new Set(['combobox', 'listbox']);
 
+// Roles where agent-browser's state-aware `check` / `uncheck` apply. Preferred
+// over `click` for checkboxes: click toggles blindly, check/uncheck assert the
+// desired end state (no-op when already there). Radios can only be checked —
+// unchecking happens by checking a sibling — so they get no uncheck button.
+const CHECKABLE_ROLES = new Set(['checkbox', 'switch']);
+
 // Nearest dropdown ancestor of an option node (index into `ancestors`), or -1.
 function nearestSelectAncestor(ancestors: A11yNode[]): number {
   for (let i = ancestors.length - 1; i >= 0; i--) {
@@ -900,6 +911,8 @@ function TreeView({
   onPickType,
   onPickFill,
   onPickSelect,
+  onPickCheck,
+  onPickUncheck,
   onPickWait,
   onPickScroll,
 }: {
@@ -908,6 +921,8 @@ function TreeView({
   onPickType: (s: SelectorStrategy) => void;
   onPickFill: (s: SelectorStrategy) => void;
   onPickSelect: (s: SelectorStrategy, value?: string) => void;
+  onPickCheck: (s: SelectorStrategy) => void;
+  onPickUncheck: (s: SelectorStrategy) => void;
   onPickWait: (s: SelectorStrategy) => void;
   onPickScroll: (s: SelectorStrategy) => void;
 }) {
@@ -958,6 +973,22 @@ function TreeView({
                       </button>
                     );
                   })()}
+                {(CHECKABLE_ROLES.has(node.role) || node.role === 'radio') && (
+                  <button
+                    onClick={() => onPickCheck(strategy)}
+                    title="Check this box (state-aware: no-op when already checked — prefer over click)"
+                  >
+                    check
+                  </button>
+                )}
+                {CHECKABLE_ROLES.has(node.role) && (
+                  <button
+                    onClick={() => onPickUncheck(strategy)}
+                    title="Uncheck this box (state-aware: no-op when already unchecked — prefer over click)"
+                  >
+                    uncheck
+                  </button>
+                )}
                 <button onClick={() => onPickWait(strategy)}>wait</button>
                 <button
                   onClick={() => onPickScroll(strategy)}
