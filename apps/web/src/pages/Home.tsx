@@ -7,6 +7,9 @@ export function Home() {
   const [err, setErr] = useState<string | null>(null);
   const [selectedBrands, setSelectedBrands] = useState<Set<string>>(new Set());
   const [selectedTypes, setSelectedTypes] = useState<Set<string>>(new Set());
+  // 'date' → one flat grid in API order (updated_at DESC). 'brand'/'type' →
+  // a section per value of that tag, alphabetical, untagged last.
+  const [groupBy, setGroupBy] = useState<'date' | 'brand' | 'type'>('date');
 
   useEffect(() => {
     api
@@ -26,6 +29,26 @@ export function Home() {
     });
   }, [cards, selectedBrands, selectedTypes]);
 
+  // Grouped view: cards bucketed by the chosen tag's value, groups sorted
+  // alphabetically with the untagged bucket last. Card order inside a group
+  // keeps the API order (updated_at DESC).
+  const groups = useMemo(() => {
+    if (groupBy === 'date') return [];
+    const map = new Map<string, ScenarioCard[]>();
+    for (const c of visible) {
+      const k = c[groupBy] ?? '';
+      const list = map.get(k);
+      if (list) list.push(c);
+      else map.set(k, [c]);
+    }
+    return Array.from(map.entries()).sort(([a], [b]) => {
+      if (a === b) return 0;
+      if (!a) return 1;
+      if (!b) return -1;
+      return a.localeCompare(b);
+    });
+  }, [visible, groupBy]);
+
   function toggle(set: Set<string>, value: string, setter: (next: Set<string>) => void) {
     const next = new Set(set);
     if (next.has(value)) next.delete(value);
@@ -37,7 +60,35 @@ export function Home() {
 
   return (
     <section>
-      <h1>Dashboard</h1>
+      <div className="runs-head">
+        <h1>Dashboard</h1>
+        <div className="view-switch">
+          <button
+            type="button"
+            className={`runs-view-toggle${groupBy === 'date' ? ' on' : ''}`}
+            onClick={() => setGroupBy('date')}
+            title="One flat grid, most recently updated first"
+          >
+            ☰ Date
+          </button>
+          <button
+            type="button"
+            className={`runs-view-toggle${groupBy === 'brand' ? ' on' : ''}`}
+            onClick={() => setGroupBy('brand')}
+            title="Group scenarios by their Brand tag"
+          >
+            ⊞ Brand
+          </button>
+          <button
+            type="button"
+            className={`runs-view-toggle${groupBy === 'type' ? ' on' : ''}`}
+            onClick={() => setGroupBy('type')}
+            title="Group scenarios by their Type tag"
+          >
+            ⊞ Type
+          </button>
+        </div>
+      </div>
       {err && <p className="error">{err}</p>}
 
       <details className="filter-panel" open={activeFilterCount > 0}>
@@ -109,6 +160,26 @@ export function Home() {
         <p className="muted" style={{ marginTop: 24 }}>
           No scenarios match the current filters.
         </p>
+      ) : groupBy !== 'date' ? (
+        groups.map(([key, groupCards]) => (
+          <div key={key || '(untagged)'}>
+            <div className="card-group-head">
+              {key ? (
+                <span className={`tag tag-${groupBy}`}>{key}</span>
+              ) : (
+                `No ${groupBy}`
+              )}
+              <span className="muted">
+                {groupCards.length} scenario{groupCards.length === 1 ? '' : 's'}
+              </span>
+            </div>
+            <div className="card-grid">
+              {groupCards.map((c) => (
+                <ScenarioCardView key={c.id} card={c} />
+              ))}
+            </div>
+          </div>
+        ))
       ) : (
         <div className="card-grid">
           {visible.map((c) => (

@@ -412,17 +412,45 @@ code { background: rgba(255,255,255,0.06); padding: 2px 4px; border-radius: 3px;
 
 .runs-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .runs-head h1 { margin-right: auto; }
+/* Secondary action: neutral background so the accent hover text stays
+   readable (the global button rule is accent-on-dark). */
 .runs-view-toggle {
+  background: transparent;
+  color: var(--text);
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 6px 12px;
   font-size: 13px;
+  font-weight: 500;
 }
-.runs-view-toggle:hover { border-color: var(--accent); color: var(--accent); }
+.runs-view-toggle:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  filter: none;
+}
+.runs-view-toggle.on {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(56,189,248,0.12);
+}
+.view-switch { display: inline-flex; gap: 6px; }
 .runs-group-row td {
-  background: rgba(56,189,248,0.06);
+  background: rgba(56,189,248,0.1);
   border-top: 1px solid var(--border);
-  padding: 8px 10px;
+  border-left: 3px solid var(--accent);
+  padding: 10px 12px;
+  font-weight: 600;
+}
+.card-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 24px 0 12px;
+  padding: 8px 12px;
+  background: rgba(56,189,248,0.1);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 6px;
   font-weight: 600;
 }
 
@@ -1127,7 +1155,8 @@ code { background: rgba(255,255,255,0.06); padding: 2px 4px; border-radius: 3px;
 
   /* Tag-group header rows are plain banners, not label/value cards. */
   .runs-table tr.runs-group-row {
-    background: rgba(56,189,248,0.06);
+    background: rgba(56,189,248,0.1);
+    border-left: 3px solid var(--accent);
     padding: 0;
   }
   .runs-table .runs-group-row td {
