@@ -111,6 +111,7 @@ export function Scenarios() {
               value={name}
               onChange={(e) => setName(e.target.value)}
               required
+			  placeholder="Testing ABCDefgh"
             />
           </label>
           <label htmlFor="scenario-url">
@@ -121,6 +122,7 @@ export function Scenarios() {
               type="url"
               value={url}
               onChange={(e) => setUrl(e.target.value)}
+			  placeholder="https...."
               required
             />
           </label>
