@@ -347,6 +347,7 @@ export function ScenarioEditor() {
           <label className="scenario-meta-name">
             <span>Name</span>
             <input
+			  id="scenario-name"
               value={draft.name}
               onChange={(e) => setDraft({ ...draft, name: e.target.value })}
               required
@@ -369,6 +370,7 @@ export function ScenarioEditor() {
         <label className="scenario-meta-url">
           <span>URL</span>
           <input
+		    id="scenario-url"
             value={draft.url}
             onChange={(e) => setDraft({ ...draft, url: e.target.value })}
             required
@@ -392,7 +394,7 @@ export function ScenarioEditor() {
             />
           </label>
           <label>
-            <span>Use auth from</span>
+            <span>Use preflight steps from</span>
             <select
               value={draft.preflight_id ?? ''}
               onChange={(e) =>
