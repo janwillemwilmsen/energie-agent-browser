@@ -103,29 +103,59 @@ export function Scenarios() {
       <details className="card">
         <summary><h3>New scenario</h3></summary>
         <form onSubmit={create}>
-          <label>
+          <label htmlFor="scenario-name">
             Name
-            <input value={name} onChange={(e) => setName(e.target.value)} required />
+            <input
+              id="scenario-name"
+              name="name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              required
+            />
           </label>
-          <label>
+          <label htmlFor="scenario-url">
             URL
-            <input value={url} onChange={(e) => setUrl(e.target.value)} required />
+            <input
+              id="scenario-url"
+              name="url"
+              type="url"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              required
+            />
           </label>
-          <label>
+          <label htmlFor="scenario-viewport">
             Viewport
-            <select value={preset} onChange={(e) => setPreset(e.target.value as any)}>
+            <select
+              id="scenario-viewport"
+              name="viewport_preset"
+              value={preset}
+              onChange={(e) => setPreset(e.target.value as any)}
+            >
               <option value="desktop">Desktop</option>
               <option value="mobile">Mobile</option>
               <option value="both">Both</option>
             </select>
           </label>
-          <label>
+          <label htmlFor="scenario-brand">
             Brand <span className="muted">(used to filter on the homepage)</span>
-            <input value={brand} onChange={(e) => setBrand(e.target.value)} placeholder="e.g. Acme" />
+            <input
+              id="scenario-brand"
+              name="brand"
+              value={brand}
+              onChange={(e) => setBrand(e.target.value)}
+              placeholder="e.g. Acme"
+            />
           </label>
-          <label>
+          <label htmlFor="scenario-type">
             Type <span className="muted">(used to filter on the homepage)</span>
-            <input value={type} onChange={(e) => setType(e.target.value)} placeholder="e.g. Checkout flow" />
+            <input
+              id="scenario-type"
+              name="type"
+              value={type}
+              onChange={(e) => setType(e.target.value)}
+              placeholder="e.g. Checkout flow"
+            />
           </label>
           <button type="submit">Create</button>
         </form>
@@ -154,6 +184,7 @@ export function Scenarios() {
               <td data-label="Brand">
                 <input
                   className="inline-tag-input"
+                  aria-label={`Brand for ${s.name}`}
                   defaultValue={s.brand ?? ''}
                   placeholder="—"
                   onBlur={(e) => updateTag(s, 'brand', e.target.value)}
@@ -162,6 +193,7 @@ export function Scenarios() {
               <td data-label="Type">
                 <input
                   className="inline-tag-input"
+                  aria-label={`Type for ${s.name}`}
                   defaultValue={s.type ?? ''}
                   placeholder="—"
                   onBlur={(e) => updateTag(s, 'type', e.target.value)}

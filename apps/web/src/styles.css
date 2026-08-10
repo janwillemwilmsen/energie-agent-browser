@@ -368,7 +368,10 @@ code { background: rgba(255,255,255,0.06); padding: 2px 4px; border-radius: 3px;
   max-height: 60vh;
   overflow: auto;
 }
-.a11y-tree li { display: flex; align-items: center; gap: 6px; padding: 1px 0; }
+.a11y-tree li { display: flex; align-items: center; gap: 6px; padding: 1px 6px; border-radius: 4px; }
+/* Highlight the hovered row so it's clear which element the action buttons
+   on the right belong to. */
+.a11y-tree li:hover { background: rgba(255,255,255,0.07); }
 .a11y-tree .role { color: var(--accent); }
 .a11y-tree .name { color: var(--text); }
 .a11y-tree .ref { color: var(--muted); font-style: italic; }
