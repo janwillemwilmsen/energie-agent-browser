@@ -347,6 +347,7 @@ export function ScenarioEditor() {
           <label className="scenario-meta-name">
             <span>Name</span>
             <input
+			type="text"
 			  id="scenario-name"
               value={draft.name}
               onChange={(e) => setDraft({ ...draft, name: e.target.value })}
@@ -370,6 +371,7 @@ export function ScenarioEditor() {
         <label className="scenario-meta-url">
           <span>URL</span>
           <input
+		  type="url"
 		    id="scenario-url"
             value={draft.url}
             onChange={(e) => setDraft({ ...draft, url: e.target.value })}
