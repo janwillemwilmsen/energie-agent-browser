@@ -347,6 +347,7 @@ export function ScenarioEditor() {
           <label className="scenario-meta-name">
             <span>Name</span>
             <input
+			name="name"
 			type="text"
 			  id="scenario-name"
               value={draft.name}
@@ -371,6 +372,7 @@ export function ScenarioEditor() {
         <label className="scenario-meta-url">
           <span>URL</span>
           <input
+		  name="url"
 		  type="url"
 		    id="scenario-url"
             value={draft.url}
