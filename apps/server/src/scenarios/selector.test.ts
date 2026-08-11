@@ -36,6 +36,39 @@ describe('parseSnapshotText', () => {
     expect(lastPara.children[0]!.role).toBe('link');
     expect(lastPara.children[0]!.ref).toBe('@e2');
   });
+
+  // Inputs with a current value get a `: value` suffix after the attrs block.
+  // These lines used to fail the line regex entirely, silently dropping the
+  // node (and its ref) from the tree.
+  it('keeps nodes that carry a ": value" suffix', () => {
+    const t = parseSnapshotText(
+      `- form
+  - LabelText
+    - StaticText "URL "
+    - textbox "URL " [required, ref=e4]: https://
+      - StaticText "https://"
+  - combobox "Viewport " [expanded=false, ref=e5]: Desktop
+    - MenuListPopup
+      - option "Desktop" [selected, ref=e7]`,
+      '',
+    );
+    const form = t.root.children[0]!;
+    const label = form.children[0]!;
+    const textbox = label.children[1]!;
+    expect(textbox.role).toBe('textbox');
+    expect(textbox.ref).toBe('@e4');
+    expect(textbox.value).toBe('https://');
+    const combobox = form.children[1]!;
+    expect(combobox.role).toBe('combobox');
+    expect(combobox.ref).toBe('@e5');
+    expect(combobox.value).toBe('Desktop');
+    expect(combobox.children[0]!.children[0]!.ref).toBe('@e7');
+  });
+
+  it('parses a value containing a colon', () => {
+    const t = parseSnapshotText(`- textbox "URL" [ref=e1]: https://example.com:8080/x`, '');
+    expect(t.root.children[0]!.value).toBe('https://example.com:8080/x');
+  });
 });
 
 describe('resolveSelector', () => {

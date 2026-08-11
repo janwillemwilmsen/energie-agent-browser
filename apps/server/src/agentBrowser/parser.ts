@@ -6,9 +6,16 @@ interface ParsedLine {
   name: string;
   ref: string;
   attrs: Record<string, string>;
+  value: string | undefined;
 }
 
-const LINE_RE = /^(?<indent>\s*)- (?<role>[A-Za-z][A-Za-z0-9_]*)(?:\s+"(?<name>(?:[^"\\]|\\.)*)")?(?:\s+\[(?<attrs>[^\]]+)\])?\s*$/;
+// Nodes with a current value (filled textbox, combobox with a selection) get a
+// `: value` suffix after the attrs block, e.g.
+//   - textbox "URL" [required, ref=e4]: https://
+// so the trailing `(?:: value)?` group must be part of the line shape — a
+// regex anchored right after `[attrs]` would drop exactly the filled-in
+// inputs a user most wants to target.
+const LINE_RE = /^(?<indent>\s*)- (?<role>[A-Za-z][A-Za-z0-9_]*)(?:\s+"(?<name>(?:[^"\\]|\\.)*)")?(?:\s+\[(?<attrs>[^\]]+)\])?(?::\s?(?<value>.*?))?\s*$/;
 
 function parseAttrs(s: string | undefined): Record<string, string> {
   if (!s) return {};
@@ -38,6 +45,7 @@ function parseLine(line: string): ParsedLine | null {
     name: (m.groups.name ?? '').replace(/\\"/g, '"'),
     ref: ref ? '@' + ref : '',
     attrs,
+    value: m.groups.value,
   };
 }
 
@@ -68,7 +76,8 @@ export function parseSnapshotText(text: string, url: string): A11yTree {
       children: [],
     };
     if (parsed.role === 'StaticText') node.text = parsed.name;
-    if (parsed.attrs.value) node.value = parsed.attrs.value;
+    const value = parsed.attrs.value ?? parsed.value;
+    if (value) node.value = value;
 
     while (stack.length > 1 && stack[stack.length - 1]!.indent >= parsed.indent) {
       stack.pop();
