@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { api, type Run } from '../lib/api.js';
+import { GroupBySwitch, GroupLabel, groupKey, sortByGroup, type GroupBy } from '../lib/tagGrouping.js';
 
 export function Runs() {
   const [runs, setRuns] = useState<Run[]>([]);
@@ -14,9 +15,10 @@ export function Runs() {
   const [lastIndex, setLastIndex] = useState<number | null>(null);
   const [comparing, setComparing] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  // false → plain list sorted by date (API order, newest first).
-  // true → rows regrouped under their Brand/Type tag combination.
-  const [groupByTags, setGroupByTags] = useState(false);
+  // 'date' → plain list sorted by date (API order, newest first). Otherwise
+  // rows regrouped under their Brand / Type / Brand+Type tag value (shared
+  // with the Dashboard and /scenarios via lib/tagGrouping).
+  const [groupBy, setGroupBy] = useState<GroupBy>('date');
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   // Open a specific run's panel when arrived via /runs?run=<id> (e.g. from the
@@ -76,26 +78,16 @@ export function Runs() {
   // stably re-sorted by tag group (untagged last) for the grouped view. All
   // selection/range logic works off this order so shift-click matches what's
   // on screen.
-  const displayRuns = useMemo(() => {
-    if (!groupByTags) return visibleRuns;
-    return visibleRuns.slice().sort((a, b) => {
-      const ka = tagGroupKey(a);
-      const kb = tagGroupKey(b);
-      if (ka === kb) return 0;
-      if (!ka) return 1;
-      if (!kb) return -1;
-      return ka.localeCompare(kb);
-    });
-  }, [visibleRuns, groupByTags]);
+  const displayRuns = useMemo(() => sortByGroup(visibleRuns, groupBy), [visibleRuns, groupBy]);
 
   const groupCounts = useMemo(() => {
     const counts = new Map<string, number>();
     for (const r of displayRuns) {
-      const k = tagGroupKey(r);
+      const k = groupKey(r, groupBy);
       counts.set(k, (counts.get(k) ?? 0) + 1);
     }
     return counts;
-  }, [displayRuns]);
+  }, [displayRuns, groupBy]);
 
   function toggle(set: Set<string>, value: string, setter: (next: Set<string>) => void) {
     const next = new Set(set);
@@ -213,23 +205,15 @@ export function Runs() {
     <section>
       <div className="runs-head">
         <h1>Runs</h1>
-        <button
-          type="button"
-          className="runs-view-toggle"
-          onClick={() => {
-            setGroupByTags((v) => !v);
+        <GroupBySwitch
+          value={groupBy}
+          onChange={(next) => {
+            setGroupBy(next);
             // Row order changes with the view, so a remembered shift-click
             // anchor would span the wrong rows.
             setLastIndex(null);
           }}
-          title={
-            groupByTags
-              ? 'Back to the plain list sorted by date'
-              : 'Group runs under their Brand/Type tags'
-          }
-        >
-          {groupByTags ? '☰ List view' : '⊞ Group by tags'}
-        </button>
+        />
       </div>
       {err && <p className="error">{err}</p>}
 
@@ -346,21 +330,15 @@ export function Runs() {
           <tbody>
             {displayRuns.map((r, idx) => (
               <Fragment key={r.id}>
-              {groupByTags &&
-                (idx === 0 || tagGroupKey(displayRuns[idx - 1]!) !== tagGroupKey(r)) && (
+              {groupBy !== 'date' &&
+                (idx === 0 ||
+                  groupKey(displayRuns[idx - 1]!, groupBy) !== groupKey(r, groupBy)) && (
                   <tr className="runs-group-row">
                     <td colSpan={8}>
-                      {r.brand || r.type ? (
-                        <span className="run-tags">
-                          {r.brand && <span className="run-tag">{r.brand}</span>}
-                          {r.type && <span className="run-tag">{r.type}</span>}
-                        </span>
-                      ) : (
-                        'No tags'
-                      )}
+                      <GroupLabel groupBy={groupBy} brand={r.brand} type={r.type} />
                       <span className="muted" style={{ marginLeft: 8 }}>
-                        {groupCounts.get(tagGroupKey(r))} run
-                        {groupCounts.get(tagGroupKey(r)) === 1 ? '' : 's'}
+                        {groupCounts.get(groupKey(r, groupBy))} run
+                        {groupCounts.get(groupKey(r, groupBy)) === 1 ? '' : 's'}
                       </span>
                     </td>
                   </tr>
@@ -401,12 +379,18 @@ export function Runs() {
                     </Link>
                   </span>
                   <div>
-                    <Link
-                      to={`/screenshots/timeline/${r.scenario_id}`}
-                      title="Open the scenario timeline"
-                    >
-                      Screenshots
-                    </Link>
+                    {(() => {
+                      const n = screenshotCount(r);
+                      if (n === 0) return <span className="muted">No screenshots</span>;
+                      return (
+                        <Link
+                          to={`/screenshots/timeline/${r.scenario_id}`}
+                          title="Open the scenario timeline"
+                        >
+                          {n} screenshot{n === 1 ? '' : 's'}
+                        </Link>
+                      );
+                    })()}
                   </div>
                 </td>
                 <td data-label="Tags">
@@ -538,10 +522,15 @@ function RunDetail({
   );
 }
 
-// Identity of a run's tag group. Empty string = untagged, which the grouped
-// view sorts last.
-function tagGroupKey(r: Run): string {
-  return [r.brand, r.type].filter(Boolean).join(' · ');
+// Number of screenshots a run produced (from the JSON list the runner stores
+// on the row). Tolerates a missing/corrupt value → 0.
+function screenshotCount(r: Run): number {
+  try {
+    const arr = JSON.parse(r.screenshot_paths_json || '[]');
+    return Array.isArray(arr) ? arr.length : 0;
+  } catch {
+    return 0;
+  }
 }
 
 function collectTagValues(runs: Run[], key: 'brand' | 'type'): string[] {

@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, type Scenario } from '../lib/api.js';
+import { GroupBySwitch, GroupLabel, groupKey, sortByGroup, type GroupBy } from '../lib/tagGrouping.js';
 
 export function Scenarios() {
   const [items, setItems] = useState<Scenario[]>([]);
@@ -10,6 +11,13 @@ export function Scenarios() {
   const [brand, setBrand] = useState('');
   const [type, setType] = useState('');
   const [err, setErr] = useState<string | null>(null);
+  // Brand/Type chip filters — same UI and semantics as /runs: within a group
+  // any selected value matches (OR), across groups both must match (AND).
+  const [selectedBrands, setSelectedBrands] = useState<Set<string>>(new Set());
+  const [selectedTypes, setSelectedTypes] = useState<Set<string>>(new Set());
+  // Sort / group: 'date' keeps API order; brand / type / both insert group
+  // header rows, exactly like /runs and the Dashboard (lib/tagGrouping).
+  const [groupBy, setGroupBy] = useState<GroupBy>('date');
   // Which scenario is currently being launched, and a short status line. Runs
   // share the single 'default' session, so only one launch happens at a time.
   const [runningId, setRunningId] = useState<number | null>(null);
@@ -89,9 +97,43 @@ export function Scenarios() {
     }
   }
 
+  const brands = useMemo(() => collectTagValues(items, 'brand'), [items]);
+  const types = useMemo(() => collectTagValues(items, 'type'), [items]);
+
+  const visibleItems = useMemo(() => {
+    return items.filter((s) => {
+      const brandOk = selectedBrands.size === 0 || (s.brand != null && selectedBrands.has(s.brand));
+      const typeOk = selectedTypes.size === 0 || (s.type != null && selectedTypes.has(s.type));
+      return brandOk && typeOk;
+    });
+  }, [items, selectedBrands, selectedTypes]);
+
+  const displayItems = useMemo(() => sortByGroup(visibleItems, groupBy), [visibleItems, groupBy]);
+
+  const groupCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const s of displayItems) {
+      const k = groupKey(s, groupBy);
+      counts.set(k, (counts.get(k) ?? 0) + 1);
+    }
+    return counts;
+  }, [displayItems, groupBy]);
+
+  function toggle(set: Set<string>, value: string, setter: (next: Set<string>) => void) {
+    const next = new Set(set);
+    if (next.has(value)) next.delete(value);
+    else next.add(value);
+    setter(next);
+  }
+
+  const activeFilterCount = selectedBrands.size + selectedTypes.size;
+
   return (
     <section>
-      <h1>Scenarios</h1>
+      <div className="runs-head">
+        <h1>Scenarios</h1>
+        <GroupBySwitch value={groupBy} onChange={setGroupBy} />
+      </div>
       {err && <p className="error">{err}</p>}
       {runStatus && (
         <p className="muted">
@@ -163,6 +205,65 @@ export function Scenarios() {
         </form>
       </details>
 
+      <details className="filter-panel" open={activeFilterCount > 0}>
+        <summary>
+          Filter{' '}
+          {activeFilterCount > 0 && <span className="filter-count">{activeFilterCount} active</span>}
+        </summary>
+        <div className="filter-body">
+          <div className="filter-group">
+            <div className="filter-group-label">Brand</div>
+            {brands.length === 0 ? (
+              <span className="muted">No brands yet</span>
+            ) : (
+              <div className="chip-row">
+                {brands.map((b) => (
+                  <button
+                    key={b}
+                    type="button"
+                    className={`chip${selectedBrands.has(b) ? ' chip-on' : ''}`}
+                    onClick={() => toggle(selectedBrands, b, setSelectedBrands)}
+                  >
+                    {b}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="filter-group">
+            <div className="filter-group-label">Type</div>
+            {types.length === 0 ? (
+              <span className="muted">No types yet</span>
+            ) : (
+              <div className="chip-row">
+                {types.map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    className={`chip${selectedTypes.has(t) ? ' chip-on' : ''}`}
+                    onClick={() => toggle(selectedTypes, t, setSelectedTypes)}
+                  >
+                    {t}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          {activeFilterCount > 0 && (
+            <button
+              type="button"
+              className="filter-clear"
+              onClick={() => {
+                setSelectedBrands(new Set());
+                setSelectedTypes(new Set());
+              }}
+            >
+              Clear filters
+            </button>
+          )}
+        </div>
+      </details>
+
       <table className="table scenarios-table">
         <thead>
           <tr>
@@ -176,8 +277,29 @@ export function Scenarios() {
           </tr>
         </thead>
         <tbody>
-          {items.map((s) => (
-            <tr key={s.id}>
+          {items.length > 0 && visibleItems.length === 0 && (
+            <tr>
+              <td colSpan={7} className="muted" style={{ textAlign: 'center', padding: 16 }}>
+                No scenarios match the current filters.
+              </td>
+            </tr>
+          )}
+          {displayItems.map((s, idx) => (
+            <Fragment key={s.id}>
+            {groupBy !== 'date' &&
+              (idx === 0 ||
+                groupKey(displayItems[idx - 1]!, groupBy) !== groupKey(s, groupBy)) && (
+                <tr className="runs-group-row">
+                  <td colSpan={7}>
+                    <GroupLabel groupBy={groupBy} brand={s.brand} type={s.type} />
+                    <span className="muted" style={{ marginLeft: 8 }}>
+                      {groupCounts.get(groupKey(s, groupBy))} scenario
+                      {groupCounts.get(groupKey(s, groupBy)) === 1 ? '' : 's'}
+                    </span>
+                  </td>
+                </tr>
+              )}
+            <tr>
               <td data-label="Name">
                 <Link to={`/scenarios/${s.id}`}>{s.name}</Link>
               </td>
@@ -203,24 +325,40 @@ export function Scenarios() {
               </td>
               <td data-label="Updated">{s.updated_at}</td>
               <td className="scenario-actions">
-                <button
-                  onClick={() => runScenario(s)}
-                  disabled={runningId != null}
-                  title="Reset the browser session, then run this scenario"
-                >
-                  {runningId === s.id ? 'Running…' : '▶ Run'}
-                </button>
-                <Link to={`/screenshots/timeline/${s.id}`} className="btn-link">
-                  Screenshots
-                </Link>
-                <button onClick={() => remove(s.id)} disabled={runningId != null}>
-                  Delete
-                </button>
+                {/* Flex lives on an inner wrapper, not the <td>: a flex <td>
+                    stops being a table cell, so it wouldn't stretch to the
+                    row height and its bottom border fell short of the row. */}
+                <div className="scenario-actions-row">
+                  <button
+                    onClick={() => runScenario(s)}
+                    disabled={runningId != null}
+                    title="Reset the browser session, then run this scenario"
+                  >
+                    {runningId === s.id ? 'Running…' : '▶ Run'}
+                  </button>
+                  <Link to={`/screenshots/timeline/${s.id}`} className="btn-link">
+                    Screenshots
+                  </Link>
+                  <button onClick={() => remove(s.id)} disabled={runningId != null}>
+                    Delete
+                  </button>
+                </div>
               </td>
             </tr>
+            </Fragment>
           ))}
         </tbody>
       </table>
     </section>
   );
+}
+
+// Distinct, sorted tag values present in the list (drives the filter chips).
+function collectTagValues(items: Scenario[], key: 'brand' | 'type'): string[] {
+  const set = new Set<string>();
+  for (const s of items) {
+    const v = s[key];
+    if (v) set.add(v);
+  }
+  return Array.from(set).sort((a, b) => a.localeCompare(b));
 }

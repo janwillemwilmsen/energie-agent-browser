@@ -189,6 +189,12 @@ body {
   border-radius: 4px;
   padding: 6px 8px;
 }
+/* A collapsible card must not be a flex container: Chrome keeps the closed
+   <details> content as a zero-height box, so `.card`'s flex gap adds a phantom
+   12px below the summary (the "too much bottom padding" when collapsed), and
+   when open the gap stacked on the form's own margin-top. Block layout +
+   the form's margin-top gives the same 12px spacing, once, only when open. */
+details.card { display: block; }
 details.card > summary { cursor: pointer; }
 details.card > summary h3 { display: inline; margin: 0; }
 details.card > form { display: flex; flex-direction: column; gap: 12px; margin-top: 12px; }
@@ -401,6 +407,8 @@ code { background: rgba(255,255,255,0.06); padding: 2px 4px; border-radius: 3px;
 .screenshots { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
 .shot img { width: 100%; height: auto; border: 1px solid var(--border); border-radius: 4px; }
 .run-tags { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+/* Tag chips in a group header (Dashboard sections, /runs and /scenarios group rows). */
+.group-label-tags { display: inline-flex; gap: 4px; flex-wrap: wrap; vertical-align: middle; }
 .run-scenario-cell { line-height: 1.4; }
 .run-scenario-cell a { color: var(--accent); text-decoration: none; }
 .run-scenario-cell a:hover { text-decoration: underline; }
@@ -457,7 +465,10 @@ code { background: rgba(255,255,255,0.06); padding: 2px 4px; border-radius: 3px;
   font-weight: 600;
 }
 
-.scenario-actions { display: flex; gap: 8px; white-space: nowrap; align-items: center; }
+/* The <td> stays a real table cell (so it stretches to the row height and its
+   bottom border spans the row); the flex layout is on the inner wrapper. */
+.scenario-actions { white-space: nowrap; vertical-align: middle; }
+.scenario-actions-row { display: flex; gap: 8px; align-items: center; }
 .scenario-actions .btn-link {
   background: var(--accent);
   color: #0f172a;
@@ -1184,17 +1195,20 @@ code { background: rgba(255,255,255,0.06); padding: 2px 4px; border-radius: 3px;
   }
 
   /* Tag-group header rows are plain banners, not label/value cards. */
-  .runs-table tr.runs-group-row {
+  .runs-table tr.runs-group-row,
+  .scenarios-table tr.runs-group-row {
     background: rgba(56,189,248,0.1);
     border-left: 3px solid var(--accent);
     padding: 0;
   }
-  .runs-table .runs-group-row td {
+  .runs-table .runs-group-row td,
+  .scenarios-table .runs-group-row td {
     display: block;
     padding: 8px 12px;
     border-bottom: none;
   }
-  .runs-table .runs-group-row td::before { content: none; }
+  .runs-table .runs-group-row td::before,
+  .scenarios-table .runs-group-row td::before { content: none; }
 
   /* Long URL / cron string wraps within its value column. */
   .scenario-url { word-break: break-all; overflow-wrap: anywhere; }
@@ -1204,7 +1218,6 @@ code { background: rgba(255,255,255,0.06); padding: 2px 4px; border-radius: 3px;
   .scenarios-table .inline-tag-input { width: 100%; box-sizing: border-box; }
 
   /* Actions row: drop the label, let the buttons wrap and share the width. */
-  .scenarios-table td.scenario-actions,
   .schedules-table td.schedule-actions,
   .auth-table td.auth-actions {
     display: flex;
@@ -1216,9 +1229,19 @@ code { background: rgba(255,255,255,0.06); padding: 2px 4px; border-radius: 3px;
   .scenarios-table td.scenario-actions::before,
   .schedules-table td.schedule-actions::before,
   .auth-table td.auth-actions::before { content: none; }
-  .scenarios-table td.scenario-actions > *,
   .schedules-table td.schedule-actions > *,
   .auth-table td.auth-actions > * {
+    flex: 1 1 auto;
+    text-align: center;
+  }
+  /* Scenarios: the flex row is the inner wrapper, so wrap/stretch its children. */
+  .scenarios-table td.scenario-actions {
+    display: block;
+    white-space: normal;
+    padding-top: 12px;
+  }
+  .scenarios-table .scenario-actions-row { flex-wrap: wrap; }
+  .scenarios-table .scenario-actions-row > * {
     flex: 1 1 auto;
     text-align: center;
   }

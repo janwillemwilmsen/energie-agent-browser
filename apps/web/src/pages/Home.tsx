@@ -2,15 +2,17 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Settings } from 'lucide-react';
 import { api, type ScenarioCard } from '../lib/api.js';
+import { GroupBySwitch, GroupLabel, groupByTag, type GroupBy } from '../lib/tagGrouping.js';
 
 export function Home() {
   const [cards, setCards] = useState<ScenarioCard[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [selectedBrands, setSelectedBrands] = useState<Set<string>>(new Set());
   const [selectedTypes, setSelectedTypes] = useState<Set<string>>(new Set());
-  // 'date' → one flat grid in API order (updated_at DESC). 'brand'/'type' →
-  // a section per value of that tag, alphabetical, untagged last.
-  const [groupBy, setGroupBy] = useState<'date' | 'brand' | 'type'>('date');
+  // 'date' → one flat grid in API order (updated_at DESC). Otherwise a
+  // section per Brand / Type / Brand+Type value, alphabetical, untagged last
+  // (shared with /scenarios and /runs via lib/tagGrouping).
+  const [groupBy, setGroupBy] = useState<GroupBy>('date');
 
   useEffect(() => {
     api
@@ -30,25 +32,10 @@ export function Home() {
     });
   }, [cards, selectedBrands, selectedTypes]);
 
-  // Grouped view: cards bucketed by the chosen tag's value, groups sorted
+  // Grouped view: cards bucketed by the chosen tag value(s), groups sorted
   // alphabetically with the untagged bucket last. Card order inside a group
   // keeps the API order (updated_at DESC).
-  const groups = useMemo(() => {
-    if (groupBy === 'date') return [];
-    const map = new Map<string, ScenarioCard[]>();
-    for (const c of visible) {
-      const k = c[groupBy] ?? '';
-      const list = map.get(k);
-      if (list) list.push(c);
-      else map.set(k, [c]);
-    }
-    return Array.from(map.entries()).sort(([a], [b]) => {
-      if (a === b) return 0;
-      if (!a) return 1;
-      if (!b) return -1;
-      return a.localeCompare(b);
-    });
-  }, [visible, groupBy]);
+  const groups = useMemo(() => groupByTag(visible, groupBy), [visible, groupBy]);
 
   function toggle(set: Set<string>, value: string, setter: (next: Set<string>) => void) {
     const next = new Set(set);
@@ -63,32 +50,7 @@ export function Home() {
     <section>
       <div className="runs-head">
         <h1>Dashboard</h1>
-        <div className="view-switch">
-          <button
-            type="button"
-            className={`runs-view-toggle${groupBy === 'date' ? ' on' : ''}`}
-            onClick={() => setGroupBy('date')}
-            title="One flat grid, most recently updated first"
-          >
-            ☰ Date
-          </button>
-          <button
-            type="button"
-            className={`runs-view-toggle${groupBy === 'brand' ? ' on' : ''}`}
-            onClick={() => setGroupBy('brand')}
-            title="Group scenarios by their Brand tag"
-          >
-            ⊞ Brand
-          </button>
-          <button
-            type="button"
-            className={`runs-view-toggle${groupBy === 'type' ? ' on' : ''}`}
-            onClick={() => setGroupBy('type')}
-            title="Group scenarios by their Type tag"
-          >
-            ⊞ Type
-          </button>
-        </div>
+        <GroupBySwitch value={groupBy} onChange={setGroupBy} />
       </div>
       {err && <p className="error">{err}</p>}
 
@@ -162,20 +124,16 @@ export function Home() {
           No scenarios match the current filters.
         </p>
       ) : groupBy !== 'date' ? (
-        groups.map(([key, groupCards]) => (
-          <div key={key || '(untagged)'}>
+        groups.map((g) => (
+          <div key={g.key || '(untagged)'}>
             <div className="card-group-head">
-              {key ? (
-                <span className={`tag tag-${groupBy}`}>{key}</span>
-              ) : (
-                `No ${groupBy}`
-              )}
+              <GroupLabel groupBy={groupBy} brand={g.brand} type={g.type} />
               <span className="muted">
-                {groupCards.length} scenario{groupCards.length === 1 ? '' : 's'}
+                {g.items.length} scenario{g.items.length === 1 ? '' : 's'}
               </span>
             </div>
             <div className="card-grid">
-              {groupCards.map((c) => (
+              {g.items.map((c) => (
                 <ScenarioCardView key={c.id} card={c} />
               ))}
             </div>
