@@ -7,7 +7,7 @@ import { PreflightCreate, PreflightUpdate, PreflightStep } from '@eab/shared';
 import { getDb } from '../db/index.js';
 import {
   ensureSession,
-  closeSession,
+  restartSession,
   flushSessionState,
   clearPersistedSessionState,
   persistSessionState,
@@ -268,11 +268,20 @@ export async function preflightsRoutes(app: FastifyInstance) {
         // the state file, then wipe the persisted state so the steps re-run
         // against a truly blank browser (no leftover cookies, localStorage, or
         // IndexedDB from a previous record/replay).
-        await closeSession(PREFLIGHT_RECORDER_SESSION).catch(() => undefined);
-        await flushSessionState();
-        clearPersistedSessionState(row.name);
-
-        await ensureSession(PREFLIGHT_RECORDER_SESSION, { sessionName: row.name });
+        //
+        // One locked restart, not close → wipe → ensure as separate calls: the
+        // live preview on /preflight keeps issuing `screenshot` every 1.5 s,
+        // and with a gap between close and re-bootstrap it would slip in,
+        // auto-launch its own (unnamed) daemon and collide with ours —
+        // surfacing as "⚠ Daemon version mismatch detected, restarting..." /
+        // "started concurrently with different daemon configuration".
+        await restartSession(PREFLIGHT_RECORDER_SESSION, {
+          sessionName: row.name,
+          between: async () => {
+            await flushSessionState();
+            clearPersistedSessionState(row.name);
+          },
+        });
         await executePreflightSteps(PREFLIGHT_RECORDER_SESSION, steps, undefined, policy);
 
         // Replay completed → persist the freshly-built state to disk. This is

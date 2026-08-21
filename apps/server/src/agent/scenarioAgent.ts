@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { getDb } from '../db/index.js';
 import { getSetting, setSetting } from '../settings.js';
-import { run, runJson, ensureSession, closeSession } from '../agentBrowser/driver.js';
+import { run, runJson, ensureSession, restartSession } from '../agentBrowser/driver.js';
 import { parseSnapshotText } from '../agentBrowser/parser.js';
 import { resolveSelector } from '../scenarios/selector.js';
 import { isOptionSelector, execSelectOptionFallback } from '../scenarios/selectFallback.js';
@@ -399,8 +399,9 @@ async function runLoop(job: AgentJob): Promise<void> {
   // as "Reset & play". Otherwise the model perceives (and builds steps on top
   // of) whatever page and cookies the previous task left behind.
   job.log.push('resetting browser session…');
-  await closeSession(SESSION).catch(() => undefined);
-  await ensureSession(SESSION);
+  // One locked close+start so a concurrent preview/command can't wedge in
+  // between and race the bootstrap.
+  await restartSession(SESSION);
   // Marker line: the modal turns on its live preview when it sees this, so the
   // preview WS doesn't race the daemon restart (it rejects when no pid exists).
   job.log.push('browser ready — live preview on');

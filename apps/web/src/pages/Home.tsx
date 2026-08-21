@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { Settings } from 'lucide-react';
 import { api, type ScenarioCard } from '../lib/api.js';
 
 export function Home() {
@@ -200,33 +201,45 @@ function ScenarioCardView({ card }: { card: ScenarioCard }) {
       ? `/api/runs/${card.latest_run_id}/screenshots/${encodeURIComponent(card.latest_screenshot)}?w=480&h=300`
       : null;
 
+  // The card body links to the timeline; the cog is a SIBLING link (nested
+  // anchors are invalid HTML), floated over the thumb corner via CSS.
   return (
-    <Link to={`/screenshots/timeline/${card.id}`} className="scenario-card">
-      <div className="scenario-card-thumb">
-        {thumb ? (
-          <img src={thumb} alt={`Latest run of ${card.name}`} loading="lazy" decoding="async" />
-        ) : (
-          <div className="scenario-card-thumb-empty">No runs yet</div>
-        )}
-      </div>
-      <div className="scenario-card-body">
-        <div className="scenario-card-title">{card.name}</div>
-        <div className="scenario-card-tags">
-          {card.brand && <span className="tag tag-brand">{card.brand}</span>}
-          {card.type && <span className="tag tag-type">{card.type}</span>}
+    <div className="scenario-card">
+      <Link to={`/screenshots/timeline/${card.id}`} className="scenario-card-link">
+        <div className="scenario-card-thumb">
+          {thumb ? (
+            <img src={thumb} alt={`Latest run of ${card.name}`} loading="lazy" decoding="async" />
+          ) : (
+            <div className="scenario-card-thumb-empty">No runs yet</div>
+          )}
         </div>
-        {card.latest_run_started_at && (
-          <div className="scenario-card-meta">
-            Last run {formatDate(card.latest_run_started_at)}
-            {card.latest_run_status && (
-              <span className={`status status-${card.latest_run_status}`} style={{ marginLeft: 8 }}>
-                {card.latest_run_status}
-              </span>
-            )}
+        <div className="scenario-card-body">
+          <div className="scenario-card-title">{card.name}</div>
+          <div className="scenario-card-tags">
+            {card.brand && <span className="tag tag-brand">{card.brand}</span>}
+            {card.type && <span className="tag tag-type">{card.type}</span>}
           </div>
-        )}
-      </div>
-    </Link>
+          {card.latest_run_started_at && (
+            <div className="scenario-card-meta">
+              Last run {formatDate(card.latest_run_started_at)}
+              {card.latest_run_status && (
+                <span className={`status status-${card.latest_run_status}`} style={{ marginLeft: 8 }}>
+                  {card.latest_run_status}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+      </Link>
+      <Link
+        to={`/scenarios/${card.id}`}
+        className="scenario-card-edit"
+        title={`Edit scenario "${card.name}"`}
+        aria-label={`Edit scenario "${card.name}"`}
+      >
+        <Settings size={16} aria-hidden />
+      </Link>
+    </div>
   );
 }
 

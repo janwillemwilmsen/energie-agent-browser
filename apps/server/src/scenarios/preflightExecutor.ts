@@ -2,6 +2,7 @@ import { run, runJson } from '../agentBrowser/driver.js';
 import { parseSnapshotText } from '../agentBrowser/parser.js';
 import { resolveSelector } from './selector.js';
 import { isOptionSelector, execSelectOptionFallback } from './selectFallback.js';
+import { isElementNotFound, runLocatorFallback } from './shadowFallback.js';
 import { getAuthSelectors } from '../authSelectors.js';
 import type { A11yNode, A11yTree, PreflightStep, SelectorStrategy } from '@eab/shared';
 
@@ -178,8 +179,13 @@ export async function executePreflightStep(session: string, step: PreflightStep)
   // a11y tree exposes no ref-addressable combobox), the JS fallback sets the
   // parent <select> directly.
   const selector = step.selector as SelectorStrategy;
-  const ref = await resolveSelectorWithWait(session, selector);
-  if (step.kind === 'select' && isOptionSelector(selector)) {
+  // A raw locator ("#id", "[data-testid=…]", "text=…", "xpath=…", any CSS)
+  // is handed to agent-browser as-is — it resolves (and auto-waits for) the
+  // element itself, so no a11y-tree resolution and no ambiguity is possible.
+  const ref = selector.locator?.trim()
+    ? selector.locator.trim()
+    : await resolveSelectorWithWait(session, selector);
+  if (step.kind === 'select' && !selector.locator && isOptionSelector(selector)) {
     await execSelectOptionFallback(session, selector, step.value);
     return;
   }
@@ -187,7 +193,21 @@ export async function executePreflightStep(session: string, step: PreflightStep)
   if (step.kind === 'type') args.push(step.text);
   if (step.kind === 'select') args.push(step.value);
   const r = await run(args, { session, timeoutMs: 30_000 });
-  if (r.exitCode !== 0) throw new Error(`${step.kind} failed: ${r.stderr || r.stdout}`);
+  if (r.exitCode !== 0) {
+    // agent-browser's CSS/text/xpath locators don't pierce shadow DOM, so a
+    // locator that is perfectly valid in the page source (web-component
+    // sites: ing.nl, essent.nl, …) comes back "Element not found". Retry the
+    // action in-page via a deep query that walks open shadow roots.
+    if (selector.locator && isElementNotFound(r.stderr, r.stdout)) {
+      const value = step.kind === 'type' ? step.text : step.kind === 'select' ? step.value : undefined;
+      const fb = await runLocatorFallback(session, step.kind, selector.locator, value);
+      if (fb.ok) return;
+      throw new Error(
+        `${step.kind} failed: ${(r.stderr || r.stdout).trim()} — shadow-DOM fallback also failed: ${fb.reason}`,
+      );
+    }
+    throw new Error(`${step.kind} failed: ${r.stderr || r.stdout}`);
+  }
 }
 
 // Run one preflight step, re-attempting on failure per the policy: pause

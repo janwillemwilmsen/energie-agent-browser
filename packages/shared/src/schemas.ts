@@ -11,6 +11,12 @@ export const SelectorStrategy = z.object({
   ancestorPath: z
     .array(z.object({ role: z.string(), name: z.string() }))
     .optional(),
+  // Precise, raw agent-browser locator that bypasses role/name resolution
+  // entirely: "#id", ".class", "div > button", "[data-testid='x']",
+  // "text=Submit", "xpath=//button[@type='submit']". Use it when several
+  // elements share the same role+name and ordinal/ancestorPath can't tell
+  // them apart reliably. role/name stay as the human-readable label.
+  locator: z.string().optional(),
 });
 export type SelectorStrategy = z.infer<typeof SelectorStrategy>;
 

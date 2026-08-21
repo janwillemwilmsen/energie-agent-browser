@@ -6,6 +6,7 @@ import { run, runJson, closeSession, ensureSession } from '../agentBrowser/drive
 import { parseSnapshotText } from '../agentBrowser/parser.js';
 import { resolveSelector } from './selector.js';
 import { isOptionSelector, execSelectOptionFallback } from './selectFallback.js';
+import { isElementNotFound, runLocatorFallback, waitForLocatorFallback } from './shadowFallback.js';
 import { executePreflightSteps } from './preflightExecutor.js';
 import { StreamRecorder } from './streamRecorder.js';
 import { notifyScenarioFailure, notifyScenarioSuccess } from '../push.js';
@@ -216,12 +217,16 @@ async function executeStep(ctx: RunContext, step: StepRow): Promise<void> {
     case 'check':
     case 'uncheck': {
       const selector = payload.selector as SelectorStrategy;
-      const tree = await snapshotTree(ctx.session);
-      const ref = resolveSelector(selector, tree);
+      // A raw locator ("#id", "[data-testid=…]", "text=…", "xpath=…", any
+      // CSS) goes to agent-browser verbatim — it resolves and auto-waits for
+      // the element itself, so no snapshot/a11y resolution (and no ambiguity).
+      const ref = selector.locator?.trim()
+        ? selector.locator.trim()
+        : resolveSelector(selector, await snapshotTree(ctx.session));
       // A select step whose selector targets the OPTION (not the dropdown)
       // means the a11y tree had no ref-addressable combobox (e.g. Chromium's
       // MenuListPopup shape) — set the parent <select> via the JS fallback.
-      if (step.kind === 'select' && isOptionSelector(selector)) {
+      if (step.kind === 'select' && !selector.locator && isOptionSelector(selector)) {
         appendLog(ctx, `select (option fallback) ${JSON.stringify(String(payload.value ?? ''))}`);
         await execSelectOptionFallback(ctx.session, selector, String(payload.value ?? ''));
         return;
@@ -233,18 +238,46 @@ async function executeStep(ctx: RunContext, step: StepRow): Promise<void> {
       if (step.kind === 'fill' || step.kind === 'select') args.push(String(payload.value ?? ''));
       appendLog(ctx, `${step.kind} ${ref}`);
       const r = await run(args, { session: ctx.session, timeoutMs: 30_000 });
-      if (r.exitCode !== 0) throw new Error(`${step.kind} failed: ${r.stderr || r.stdout}`);
+      if (r.exitCode !== 0) {
+        // CSS/text/xpath locators don't pierce shadow DOM in agent-browser;
+        // retry in-page via a deep query over open shadow roots.
+        if (selector.locator && isElementNotFound(r.stderr, r.stdout)) {
+          const value =
+            step.kind === 'type' ? String(payload.text ?? '')
+            : step.kind === 'fill' || step.kind === 'select' ? String(payload.value ?? '')
+            : undefined;
+          appendLog(ctx, `${step.kind}: locator not found by CLI — trying shadow-DOM fallback`);
+          const fb = await runLocatorFallback(ctx.session, step.kind, selector.locator, value);
+          if (fb.ok) {
+            appendLog(ctx, `${step.kind} ${selector.locator} via shadow-DOM fallback (<${fb.tag}>)`);
+            return;
+          }
+          throw new Error(
+            `${step.kind} failed: ${(r.stderr || r.stdout).trim()} — shadow-DOM fallback also failed: ${fb.reason}`,
+          );
+        }
+        throw new Error(`${step.kind} failed: ${r.stderr || r.stdout}`);
+      }
       return;
     }
     case 'scroll': {
       // A scroll step carrying a selector means "scroll this element into
       // view" — resolve the selector against a fresh snapshot, like click.
       if (payload.selector) {
-        const tree = await snapshotTree(ctx.session);
-        const ref = resolveSelector(payload.selector as SelectorStrategy, tree);
+        const sel = payload.selector as SelectorStrategy;
+        const ref = sel.locator?.trim()
+          ? sel.locator.trim()
+          : resolveSelector(sel, await snapshotTree(ctx.session));
         appendLog(ctx, `scroll into view ${ref}`);
         const r = await run(['scrollintoview', ref], { session: ctx.session, timeoutMs: 30_000 });
-        if (r.exitCode !== 0) throw new Error(`scroll into view failed: ${r.stderr || r.stdout}`);
+        if (r.exitCode !== 0) {
+          if (sel.locator && isElementNotFound(r.stderr, r.stdout)) {
+            const fb = await runLocatorFallback(ctx.session, 'scrollintoview', sel.locator);
+            if (fb.ok) { appendLog(ctx, `scrolled into view via shadow-DOM fallback`); return; }
+            throw new Error(`scroll into view failed: ${(r.stderr || r.stdout).trim()} — shadow-DOM fallback also failed: ${fb.reason}`);
+          }
+          throw new Error(`scroll into view failed: ${r.stderr || r.stdout}`);
+        }
         return;
       }
       if (payload.toTop) {
@@ -293,16 +326,25 @@ async function executeStep(ctx: RunContext, step: StepRow): Promise<void> {
         // polls the live page for a substring match, which is what the user
         // actually means by "wait for the button labelled X".
         const sel = payload.selector as SelectorStrategy;
+        const locator = sel.locator?.trim();
         const text = sel.name?.trim();
-        if (!text) {
-          throw new Error('wait: selector has no name/text to wait for');
+        if (!locator && !text) {
+          throw new Error('wait: selector has no locator or name/text to wait for');
         }
-        appendLog(ctx, `wait for text "${text}" (${sel.role})`);
-        const r = await run(['wait', '--text', text], {
+        // A raw locator waits for that exact element (`wait <selector>`);
+        // otherwise fall back to the text-substring poll described above.
+        appendLog(ctx, locator ? `wait for ${locator}` : `wait for text "${text}" (${sel.role})`);
+        const r = await run(locator ? ['wait', locator] : ['wait', '--text', text!], {
           session: ctx.session,
           timeoutMs: 35_000,
         });
         if (r.exitCode !== 0) {
+          if (locator) {
+            // The CLI's selector wait can't see into shadow DOM — poll a deep
+            // query over open shadow roots instead before giving up.
+            const fb = await waitForLocatorFallback(ctx.session, locator);
+            if (fb.ok) { appendLog(ctx, `wait satisfied via shadow-DOM fallback`); return; }
+          }
           throw new Error(
             `wait failed (exit=${r.exitCode}): ${r.stderr.trim() || r.stdout.trim() || 'no output — element did not appear within agent-browser default timeout'}`,
           );

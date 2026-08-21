@@ -12,9 +12,29 @@ export class SelectorNotFoundError extends Error {
 
 export class SelectorAmbiguousError extends Error {
   candidates: A11yNode[];
-  constructor(strategy: SelectorStrategy, candidates: A11yNode[]) {
+  constructor(
+    strategy: SelectorStrategy,
+    candidates: A11yNode[],
+    ancestorsOf?: (n: A11yNode) => A11yNode[],
+  ) {
+    // Spell out the candidates so the fix is obvious from the error alone:
+    // which ordinal to add, or which landmark / locator to pin.
+    const list = candidates
+      .map((n, i) => {
+        const path = ancestorsOf
+          ? ancestorsOf(n)
+              .filter((a) => a.role !== 'root' && a.role !== 'generic')
+              .map((a) => (a.name ? `${a.role} "${a.name}"` : a.role))
+              .slice(-3)
+              .join(' > ')
+          : '';
+        return `  [ordinal ${i}] ${n.ref || '(no ref)'}${path ? ` under ${path}` : ''}`;
+      })
+      .join('\n');
     super(
-      `Ambiguous selector { role: "${strategy.role}", name: "${strategy.name}" }: ${candidates.length} candidates remain after filtering`,
+      `Ambiguous selector { role: "${strategy.role}", name: "${strategy.name}" }: ` +
+        `${candidates.length} candidates remain after filtering. Add "ordinal" to pick one, ` +
+        `or set "locator" (#id, [data-testid=…], css, text=…, xpath=…) to target it directly:\n${list}`,
     );
     this.candidates = candidates;
   }
@@ -113,10 +133,32 @@ export function resolveSelector(strategy: SelectorStrategy, tree: A11yTree): str
     candidates = [candidates[idx]!];
   }
 
+  // Last resort: collapse same-role+name WRAPPERS. agent-browser 0.34 started
+  // exposing web-component hosts as their own node, so a control can show up
+  // as a button nested inside a button with the identical name, e.g.
+  //   - button "Cookies accepteren" [ref=e1] focusable [tabindex]
+  //     - button "Cookies accepteren" [ref=e7]
+  // Interactive content can't legitimately nest in HTML, so an ancestor that
+  // shares role+name with a descendant candidate is the same control seen
+  // twice, not a second choice. Drop such ancestors and keep the innermost
+  // (the real element). Genuine duplicates (siblings, or two separate
+  // wrapper+inner pairs) still end up >1 here and stay Ambiguous — and a
+  // step recorded WITH an ordinal never reaches this point, since ordinal
+  // already picked one above.
   if (candidates.length > 1) {
+    // The deepest candidate is never an ancestor of another, so this always
+    // keeps at least one.
+    candidates = candidates.filter(
+      (c) => !candidates.some((other) => other !== c && other.ancestors.includes(c.node)),
+    );
+  }
+
+  if (candidates.length > 1) {
+    const byNode = new Map(candidates.map((c) => [c.node, c.ancestors] as const));
     throw new SelectorAmbiguousError(
       strategy,
       candidates.map((c) => c.node),
+      (n) => byNode.get(n) ?? [],
     );
   }
 

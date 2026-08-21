@@ -139,6 +139,46 @@ describe('resolveSelector', () => {
     );
   });
 
+  // agent-browser 0.34 exposes web-component hosts as their own node, so one
+  // control can appear as a button wrapping a button with the same name
+  // (essent.nl's cookie banner). That's one control seen twice, not two
+  // choices — resolve to the inner element without needing an ordinal, so
+  // preflights recorded before 0.34 keep working.
+  it('collapses a same-role+name wrapper onto its inner element (0.34+)', () => {
+    const nested = parseSnapshotText(
+      `- dialog
+  - button "Cookies accepteren" [ref=e1] focusable [tabindex]
+    - button "Cookies accepteren" [ref=e7]
+  - button "Cookies weigeren" [ref=e2] focusable [tabindex]
+    - button "Cookies weigeren" [ref=e8]`,
+      '',
+    );
+    expect(resolveSelector({ role: 'button', name: 'Cookies accepteren' }, nested)).toBe('@e7');
+    expect(resolveSelector({ role: 'button', name: 'Cookies weigeren' }, nested)).toBe('@e8');
+    // An explicit ordinal (as the picker records now) still wins and can
+    // address either node.
+    expect(
+      resolveSelector({ role: 'button', name: 'Cookies accepteren', ordinal: 0 }, nested),
+    ).toBe('@e1');
+    expect(
+      resolveSelector({ role: 'button', name: 'Cookies accepteren', ordinal: 1 }, nested),
+    ).toBe('@e7');
+  });
+
+  it('still throws Ambiguous for two separate wrapper+inner pairs', () => {
+    const twoPairs = parseSnapshotText(
+      `- button "Ja" [ref=e1]
+  - button "Ja" [ref=e2]
+- button "Ja" [ref=e3]
+  - button "Ja" [ref=e4]`,
+      '',
+    );
+    expect(() => resolveSelector({ role: 'button', name: 'Ja' }, twoPairs)).toThrow(
+      SelectorAmbiguousError,
+    );
+    expect(resolveSelector({ role: 'button', name: 'Ja', ordinal: 2 }, twoPairs)).toBe('@e3');
+  });
+
   it('uses ancestorPath to disambiguate', () => {
     const nested = parseSnapshotText(
       `- navigation "Top" [ref=e10]

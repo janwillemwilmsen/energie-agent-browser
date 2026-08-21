@@ -64,6 +64,10 @@ export interface SelectorStrategy {
   textContains?: string;
   ordinal?: number;
   ancestorPath?: { role: string; name: string }[];
+  // Raw agent-browser locator (#id, .class, css, [data-testid=…], text=…,
+  // xpath=…). When set, the server targets it directly instead of resolving
+  // role/name against the accessibility tree.
+  locator?: string;
 }
 
 export type PreflightStep =

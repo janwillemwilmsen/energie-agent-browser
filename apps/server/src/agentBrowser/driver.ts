@@ -1,5 +1,6 @@
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -40,7 +41,58 @@ const CMD_TIMEOUT_MS = 60_000;
 // browser launch emits before it becomes ready (see connectSession).
 const FAIL_GRACE_MS = 10_000;
 
-const sessionsConnecting = new Map<string, Promise<void>>();
+// --- Per-session restart lock ----------------------------------------------
+// CLI commands and daemon close/bootstrap must never overlap. A CLI invocation
+// that starts while we're killing/wiping a daemon either finds the dying
+// daemon still answering on its port minus its `.version` marker — agent-
+// browser then prints "⚠ Daemon version mismatch detected, restarting..." and
+// bounces it again — or auto-launches its own daemon that collides with the
+// one we're spawning ("started concurrently with different daemon
+// configuration"). The /preflight live preview fires `screenshot` every
+// 1.5 s, so that overlap was routine during Replay / session-name rebinds.
+//
+// The lock serializes close + bootstrap against each other; `run*` acquire it
+// just long enough to (a) make sure the daemon is up and (b) register the
+// command as in-flight, so a later restart first drains running commands
+// (bounded) before it pulls the daemon out from under them.
+const sessionLocks = new Map<string, Promise<void>>();
+const inflightCommands = new Map<string, Set<Promise<unknown>>>();
+
+async function waitSessionIdle(session: string): Promise<void> {
+  while (sessionLocks.has(session)) await sessionLocks.get(session);
+}
+
+async function withSessionLock<T>(session: string, fn: () => Promise<T>): Promise<T> {
+  await waitSessionIdle(session);
+  let release!: () => void;
+  const held = new Promise<void>((r) => { release = r; });
+  sessionLocks.set(session, held);
+  try {
+    return await fn();
+  } finally {
+    sessionLocks.delete(session);
+    release();
+  }
+}
+
+// Register a command promise as in-flight for `session`. Registration is
+// synchronous (before the first await) so callers can do it while holding the
+// lock and be sure a restart acquiring the lock next will see it.
+function trackCommand<T>(session: string, p: Promise<T>): Promise<T> {
+  let set = inflightCommands.get(session);
+  if (!set) { set = new Set(); inflightCommands.set(session, set); }
+  set.add(p);
+  return p.finally(() => { set!.delete(p); });
+}
+
+async function drainInflight(session: string, maxMs = 5_000): Promise<void> {
+  const set = inflightCommands.get(session);
+  if (!set || set.size === 0) return;
+  await Promise.race([
+    Promise.allSettled([...set]),
+    new Promise<void>((r) => setTimeout(r, maxMs)),
+  ]);
+}
 
 // Disk-backed record of which agent-browser --session-name a given --session
 // daemon was started with. Lives next to the other daemon markers (.pid,
@@ -294,7 +346,89 @@ function isSessionAlive(session: string): boolean {
 
 const LAUNCH_HELPER = path.join(__dirname, 'launchConnect.cjs');
 
-async function killStaleDaemons(): Promise<void> {
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+// On Windows, agent-browser's CLI decides "is a daemon running?" by opening a
+// TCP connection to 127.0.0.1:<port>, where <port> is read from
+// ~/.agent-browser/<session>.port — or, when that file is missing, DERIVED from
+// a hash of the session name (cli/src/connection.rs get_port_for_session). So
+// deleting the marker files does NOT hide a still-dying daemon: the next CLI
+// invocation connects to the hashed port, finds the old daemon still listening,
+// sees no `.version` file (we just wiped it) and prints
+// "⚠ Daemon version mismatch detected, restarting..." before bouncing the
+// daemon a second time. Mirror the hash here so we can wait for that port to
+// actually stop answering before we spawn the replacement.
+function hashedPortForSession(session: string): number {
+  let h = 0;
+  for (const ch of session) h = ((h << 5) - h + ch.charCodeAt(0)) | 0;
+  return 49152 + (Math.abs(h) % 16383);
+}
+
+function portAccepting(port: number, timeoutMs = 150): Promise<boolean> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const sock = net.connect({ host: '127.0.0.1', port });
+    const done = (v: boolean) => {
+      if (settled) return;
+      settled = true;
+      sock.destroy();
+      resolve(v);
+    };
+    sock.setTimeout(timeoutMs, () => done(false));
+    sock.once('connect', () => done(true));
+    sock.once('error', () => done(false));
+  });
+}
+
+// Wait (bounded) until nothing answers on the daemon port(s) for `session`.
+// `knownPort` is whatever the .port marker said before we deleted it; the
+// hashed port is checked too since that's what the CLI falls back to.
+async function waitForDaemonPortClosed(session: string, knownPort: number | null): Promise<void> {
+  if (process.platform !== 'win32') return;
+  const ports = new Set<number>([hashedPortForSession(session)]);
+  if (knownPort) ports.add(knownPort);
+  for (let i = 0; i < 40; i++) {
+    let listening = false;
+    for (const p of ports) {
+      if (await portAccepting(p)) { listening = true; break; }
+    }
+    if (!listening) return;
+    await sleep(100);
+  }
+  if (DEBUG) console.log(`[ab] daemon port for session=${session} still answering after wait`);
+}
+
+function readPortMarker(session: string): number | null {
+  try {
+    const v = Number(fs.readFileSync(path.join(os.homedir(), '.agent-browser', `${session}.port`), 'utf-8').trim());
+    return Number.isFinite(v) && v > 0 ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+// Windows sister of the pgrep loop below: taskkill returns once it has
+// *signalled* the processes, not once they're gone. Poll tasklist until no
+// agent-browser image is left (bounded). Match on the image name rather than
+// tasklist's "no tasks" text, which is localized.
+async function waitForWindowsDaemonsReaped(): Promise<void> {
+  for (let i = 0; i < 30; i++) {
+    const r = spawnSync('tasklist', ['/FI', 'IMAGENAME eq agent-browser-win32-x64.exe', '/NH'], {
+      shell: false,
+      windowsHide: true,
+      encoding: 'utf-8',
+      timeout: 3_000,
+    });
+    const out = `${r.stdout ?? ''}`;
+    if (!/agent-browser-win32-x64\.exe/i.test(out)) return;
+    await sleep(100);
+  }
+}
+
+async function killStaleDaemons(session: string): Promise<void> {
+  // Remember which port the live daemon for this session was on BEFORE we
+  // wipe the markers, so waitForDaemonPortClosed can watch it.
+  const knownPort = readPortMarker(session);
   // Zombie agent-browser daemons left over from prior failed bootstraps
   // correlate with 10060 errors on fresh connects. We must not just signal the
   // kill — we must WAIT until the processes are actually gone before deleting
@@ -315,6 +449,9 @@ async function killStaleDaemons(): Promise<void> {
     } catch {
       /* ignore */
     }
+    // Same reap-wait the pkill branch below does: don't wipe markers or spawn
+    // a replacement while the old exe is still shutting down.
+    await waitForWindowsDaemonsReaped();
   } else {
     try {
       spawnSync('pkill', ['-9', '-f', 'agent-browser-'], {
@@ -360,10 +497,15 @@ async function killStaleDaemons(): Promise<void> {
   } catch {
     /* ignore */
   }
+  // Windows: the CLI can still reach a dying daemon via its (hashed) TCP port
+  // even with every marker gone. Wait until that port refuses connections so
+  // the fresh `open`/`connect` below doesn't see "daemon ready, no .version"
+  // → "⚠ Daemon version mismatch detected, restarting...".
+  await waitForDaemonPortClosed(session, knownPort);
 }
 
 async function spawnConnectDetached(session: string, sessionName?: string | null): Promise<void> {
-  await killStaleDaemons();
+  await killStaleDaemons(session);
   const logDir = path.join(config.dataDir, 'agent-browser-logs');
   fs.mkdirSync(logDir, { recursive: true });
   const logPath = path.join(logDir, `${session}.log`);
@@ -547,16 +689,11 @@ export interface EnsureSessionOptions {
   skipStateLoad?: boolean;
 }
 
-export async function ensureSession(
-  session = 'default',
-  opts: EnsureSessionOptions = {},
+// Body of ensureSession. MUST be called with the session lock held.
+async function ensureSessionLocked(
+  session: string,
+  opts: EnsureSessionOptions,
 ): Promise<void> {
-  if (sessionsConnecting.has(session)) {
-    await sessionsConnecting.get(session);
-    // After the in-flight connect resolves, re-check the name match — if it
-    // doesn't, fall through to the restart path below.
-  }
-
   const wantName = opts.sessionName ?? null;
   const skipStateLoad = opts.skipStateLoad ?? false;
   const alive = isSessionAlive(session);
@@ -575,20 +712,57 @@ export async function ensureSession(
       return;
     }
     // Mismatch — close and re-bootstrap with the desired name.
-    await closeSession(session);
+    await closeSessionLocked(session);
   }
+  await connectSession(session, wantName, skipStateLoad);
+}
 
-  const p = connectSession(session, wantName, skipStateLoad).finally(() =>
-    sessionsConnecting.delete(session),
-  );
-  sessionsConnecting.set(session, p);
-  await p;
+export async function ensureSession(
+  session = 'default',
+  opts: EnsureSessionOptions = {},
+): Promise<void> {
+  await withSessionLock(session, () => ensureSessionLocked(session, opts));
+}
+
+export interface RestartSessionOptions extends EnsureSessionOptions {
+  /**
+   * Runs after the old daemon is fully closed and before the new one is
+   * spawned, with the session lock still held — so nothing (e.g. the live
+   * preview's screenshot loop) can sneak in and bootstrap an unnamed daemon
+   * in between. Use it for "wipe persisted state" style work.
+   */
+  between?: () => Promise<void> | void;
+}
+
+// Close + re-bootstrap as ONE locked operation. Prefer this over a manual
+// `closeSession(); ensureSession()` pair whenever other callers (preview,
+// recorder exec-step, …) might be issuing commands on the same session.
+export async function restartSession(
+  session: string,
+  opts: RestartSessionOptions = {},
+): Promise<void> {
+  const wantName = opts.sessionName ?? null;
+  await withSessionLock(session, async () => {
+    await closeSessionLocked(session).catch(() => undefined);
+    if (opts.between) await opts.between();
+    await connectSession(session, wantName, opts.skipStateLoad ?? false);
+  });
 }
 
 export async function run(args: string[], opts: RunOptions = {}): Promise<RunResult> {
   const session = opts.session ?? 'default';
-  await ensureSession(session);
-  return runRaw(['--session', session, ...args], opts.timeoutMs ?? CMD_TIMEOUT_MS);
+  // Make sure the daemon is up AND register the command as in-flight while
+  // still holding the lock, then let the command itself run unlocked.
+  const { cmd } = await withSessionLock(session, async () => {
+    await ensureSessionLocked(session, {});
+    return {
+      cmd: trackCommand(
+        session,
+        runRaw(['--session', session, ...args], opts.timeoutMs ?? CMD_TIMEOUT_MS),
+      ),
+    };
+  });
+  return cmd;
 }
 
 // Daemon-routed sister of `run` that pipes a single line into the child's
@@ -602,10 +776,9 @@ export async function runWithStdin(
   opts: RunOptions = {},
 ): Promise<RunResult> {
   const session = opts.session ?? 'default';
-  await ensureSession(session);
   const fullArgs = ['--session', session, ...args];
   const timeoutMs = opts.timeoutMs ?? CMD_TIMEOUT_MS;
-  return new Promise((resolve) => {
+  const start = (): Promise<RunResult> => new Promise((resolve) => {
     const proc = spawn(NATIVE_BIN, fullArgs, {
       shell: false,
       windowsHide: true,
@@ -631,6 +804,11 @@ export async function runWithStdin(
     proc.stdin.write(stdinLine.endsWith('\n') ? stdinLine : stdinLine + '\n');
     proc.stdin.end();
   });
+  const { cmd } = await withSessionLock(session, async () => {
+    await ensureSessionLocked(session, {});
+    return { cmd: trackCommand(session, start()) };
+  });
+  return cmd;
 }
 
 export async function runJson<T = unknown>(
@@ -692,6 +870,15 @@ export async function persistSessionState(session: string, sessionName: string):
 }
 
 export async function closeSession(session: string): Promise<void> {
+  await withSessionLock(session, () => closeSessionLocked(session));
+}
+
+// Body of closeSession. MUST be called with the session lock held.
+async function closeSessionLocked(session: string): Promise<void> {
+  // Let commands that are already talking to the daemon finish (bounded) so
+  // we don't yank it mid-command — that's the other half of the
+  // "version mismatch" / "started concurrently" noise.
+  await drainInflight(session);
   // NOTE: we deliberately do NOT auto-flush in-memory state to disk here.
   // Doing so would overwrite the canonical preflight auth.json with whatever
   // happens to be in the browser at close time — which is frequently a
@@ -707,16 +894,22 @@ export async function closeSession(session: string): Promise<void> {
   // Skip the graceful-close CLI round-trip (3-10 s on Windows). Just kill the
   // process and wipe the session marker files — the browserless side will
   // garbage-collect the wss session on its own idle timeout.
+  const knownPort = readPortMarker(session);
   try {
     const pid = Number(
       fs.readFileSync(pidFile(session), 'utf-8').trim(),
     );
     if (pid) {
       if (process.platform === 'win32') {
-        spawn('taskkill', ['/T', '/F', '/PID', String(pid)], {
+        // spawnSync, not spawn: the marker wipe below must not race the kill.
+        // A fire-and-forget taskkill let the next bootstrap find the old
+        // daemon still listening (minus its .version marker) and trip
+        // agent-browser's "Daemon version mismatch" self-restart.
+        spawnSync('taskkill', ['/T', '/F', '/PID', String(pid)], {
           shell: false,
           windowsHide: true,
           stdio: 'ignore',
+          timeout: 5_000,
         });
       } else {
         try { process.kill(pid); } catch { /* ignore */ }
@@ -736,6 +929,10 @@ export async function closeSession(session: string): Promise<void> {
     try { fs.unlinkSync(path.join(dir, `${session}.${ext}`)); } catch { /* ignore */ }
   }
   writeSessionName(session, null);
+  // Don't return until the old daemon has really let go of its port, so a
+  // caller that immediately re-bootstraps (Replay, session-name rebind)
+  // can't collide with it.
+  await waitForDaemonPortClosed(session, knownPort);
 }
 
 // /preflight recording targets the same 'default' daemon scenarios use, so

@@ -66,14 +66,22 @@ function coerceInt(v: string): number {
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
+// Human label for a selector: role "name", plus the locator / ordinal
+// when present so you can see at a glance how a step will be targeted.
+function selectorLabel(s: SelectorStrategy): string {
+  const base = s.role || s.name ? `${s.role} "${s.name}"` : '';
+  const extra = s.locator ? `${s.locator}` : typeof s.ordinal === 'number' ? `#${s.ordinal}` : '';
+  return [base, extra].filter(Boolean).join(' ');
+}
+
 function summarize(step: PreflightStep): string {
   if (step.kind === 'navigate') return `→ ${step.url}`;
   if (step.kind === 'wait') return `${step.ms}ms`;
-  if (step.kind === 'click') return `${step.selector.role} "${step.selector.name}"`;
+  if (step.kind === 'click') return selectorLabel(step.selector);
   if (step.kind === 'type')
-    return `${step.selector.role} "${step.selector.name}" ${JSON.stringify(step.text)}`;
+    return `${selectorLabel(step.selector)} ${JSON.stringify(step.text)}`;
   if (step.kind === 'select')
-    return `${step.selector.role} "${step.selector.name}" → ${JSON.stringify(step.value)}`;
+    return `${selectorLabel(step.selector)} → ${JSON.stringify(step.value)}`;
   if (step.kind === 'auth-login') return `🔐 auth profile "${step.name}"`;
   return '';
 }
@@ -628,6 +636,47 @@ export function PreflightPage() {
               title={stepActionDisabled ? 'Set a name first' : undefined}
             >
               + navigate
+            </button>
+            <button
+              onClick={() => {
+                // Precise targeting when several elements share a role+name:
+                // any agent-browser locator, handed to the CLI verbatim.
+                const locator = prompt(
+                  'Locator (agent-browser syntax):\n' +
+                    '  #id   .class   div > button   [data-testid="x"]   text=Submit   xpath=//button[@type="submit"]',
+                );
+                if (locator == null || !locator.trim()) return;
+                if (locator.trim().startsWith('@')) {
+                  alert(
+                    '"@eN" is a snapshot ref, not a selector: agent-browser renumbers elements on every snapshot/navigation, so it cannot be replayed later.\n' +
+                      'Use the click/type buttons on the snapshot row instead (they re-find the element by role + name each run), or enter a stable locator (#id, [data-testid=…], CSS, text=, xpath=).',
+                  );
+                  return;
+                }
+                const action = (prompt('Action? click / type / select', 'click') ?? '')
+                  .trim()
+                  .toLowerCase();
+                const selector: SelectorStrategy = { role: '', name: '', locator: locator.trim() };
+                if (action === 'click') {
+                  void addStep({ kind: 'click', selector });
+                } else if (action === 'type') {
+                  const text = prompt('Type what?');
+                  if (text != null) void addStep({ kind: 'type', selector, text });
+                } else if (action === 'select') {
+                  const value = prompt('Select which option? (option label)');
+                  if (value != null && value.trim()) void addStep({ kind: 'select', selector, value: value.trim() });
+                } else {
+                  alert('Unknown action');
+                }
+              }}
+              disabled={stepActionDisabled}
+              title={
+                stepActionDisabled
+                  ? 'Set a name first'
+                  : 'Add a step that targets an element by a precise locator (#id, CSS, [data-testid], text=, xpath=) instead of role+name'
+              }
+            >
+              + by selector…
             </button>
             <button
               onClick={() => {

@@ -706,19 +706,46 @@ code { background: rgba(255,255,255,0.06); padding: 2px 4px; border-radius: 3px;
   margin-top: 16px;
 }
 .scenario-card {
+  position: relative;
   display: flex;
   flex-direction: column;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 8px;
   overflow: hidden;
-  text-decoration: none;
-  color: var(--text);
   transition: border-color 0.15s, transform 0.15s;
 }
 .scenario-card:hover {
   border-color: var(--accent);
   transform: translateY(-2px);
+}
+.scenario-card-link {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  text-decoration: none;
+  color: var(--text);
+}
+/* Cog overlaid on the thumb corner, linking to the scenario editor. */
+.scenario-card-edit {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  opacity: 0.75;
+  transition: opacity 0.15s, background 0.15s;
+}
+.scenario-card-edit:hover,
+.scenario-card-edit:focus-visible {
+  opacity: 1;
+  background: var(--accent);
 }
 .scenario-card-thumb {
   width: 100%;

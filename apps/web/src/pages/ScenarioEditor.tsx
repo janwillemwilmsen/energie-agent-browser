@@ -33,6 +33,9 @@ interface SelectorStrategy {
   name: string;
   ordinal?: number;
   ancestorPath?: { role: string; name: string }[];
+  // Raw agent-browser locator (#id, .class, css, [data-testid=…], text=…,
+  // xpath=…); when set the server targets it directly (no a11y resolution).
+  locator?: string;
 }
 
 const SESSION = 'default';
@@ -540,6 +543,48 @@ export function ScenarioEditor() {
               + navigate ({data.url})
             </button>
             <button
+              onClick={() => {
+                // Precise targeting when several elements share a role+name:
+                // any agent-browser locator, handed to the CLI verbatim.
+                const locator = prompt(
+                  'Locator (agent-browser syntax):\n' +
+                    '  #id   .class   div > button   [data-testid="x"]   text=Submit   xpath=//button[@type="submit"]',
+                );
+                if (locator == null || !locator.trim()) return;
+                if (locator.trim().startsWith('@')) {
+                  alert(
+                    '"@eN" is a snapshot ref, not a selector: agent-browser renumbers elements on every snapshot/navigation, so it cannot be replayed later.\n' +
+                      'Use the click/type buttons on the snapshot row instead (they re-find the element by role + name each run), or enter a stable locator (#id, [data-testid=…], CSS, text=, xpath=).',
+                  );
+                  return;
+                }
+                const action = (prompt(
+                  'Action? click / fill / type / check / uncheck / wait / scroll',
+                  'click',
+                ) ?? '').trim().toLowerCase();
+                if (!['click', 'fill', 'type', 'check', 'uncheck', 'wait', 'scroll'].includes(action)) {
+                  alert('Unknown action');
+                  return;
+                }
+                const selector: SelectorStrategy = { role: '', name: '', locator: locator.trim() };
+                if (action === 'fill') {
+                  const value = prompt('Fill with?');
+                  if (value == null) return;
+                  addStep('fill', { selector, value });
+                } else if (action === 'type') {
+                  const text = prompt('Type what?');
+                  if (text == null) return;
+                  addStep('type', { selector, text });
+                } else {
+                  addStep(action, { selector });
+                }
+              }}
+              disabled={savingStep}
+              title="Add a step that targets an element by a precise locator (#id, CSS, [data-testid], text=, xpath=) instead of role+name"
+            >
+              + by selector…
+            </button>
+            <button
               onClick={() =>
                 addStep('screenshot', {
                   label: `step-${data.steps.length}`,
@@ -830,6 +875,14 @@ function clampInt(v: string): number {
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
+// Human label for a selector: role "name", plus the locator / ordinal
+// when present so you can see at a glance how a step will be targeted.
+function selectorLabel(s: any): string {
+  const base = s?.role || s?.name ? `${s.role ?? ''} "${s.name ?? ''}"` : '';
+  const extra = s?.locator ? `${s.locator}` : typeof s?.ordinal === 'number' ? `#${s.ordinal}` : '';
+  return [base, extra].filter(Boolean).join(' ');
+}
+
 function summarizeStep(kind: string, p: any): string {
   if (kind === 'navigate') return `→ ${p.url ?? ''}`;
   if (
@@ -838,12 +891,12 @@ function summarizeStep(kind: string, p: any): string {
   ) {
     const s = p.selector ?? {};
     const txt = p.text ?? p.value ?? '';
-    return `${s.role ?? ''} "${s.name ?? ''}"${txt ? ` ${JSON.stringify(txt)}` : ''}`;
+    return `${selectorLabel(s)}${txt ? ` ${JSON.stringify(txt)}` : ''}`;
   }
   if (kind === 'screenshot')
     return `${p.label ?? 'screenshot'}${p.fullPage ? ' (full)' : ''}${p.viewport === 'mobile' ? ' (mobile)' : ''}${p.annotate ? ' (annotated)' : ''}`;
   if (kind === 'scroll') {
-    if (p.selector) return `into view: ${p.selector.role ?? ''} "${p.selector.name ?? ''}"`;
+    if (p.selector) return `into view: ${selectorLabel(p.selector)}`;
     if (p.toBottom) return 'to bottom (lazy-load)';
     if (p.toTop) return 'to top';
     const dy = Number(p.dy ?? 0);
@@ -851,7 +904,7 @@ function summarizeStep(kind: string, p: any): string {
     return '';
   }
   if (kind === 'wait') {
-    if (p.selector) return `for ${p.selector.role} "${p.selector.name}"`;
+    if (p.selector) return `for ${selectorLabel(p.selector)}`;
     return `${p.ms ?? 0}ms`;
   }
   if (kind === 'record_start') return '⏺ start video recording';
