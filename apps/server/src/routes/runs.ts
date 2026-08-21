@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { config } from '../config.js';
 import { getDb } from '../db/index.js';
 import { executeScenario } from '../scenarios/runner.js';
+import { ensureThumb } from '../thumbs.js';
 
 const RunBody = z.object({ reset: z.boolean().default(false) });
 
@@ -51,6 +52,14 @@ export async function runsRoutes(app: FastifyInstance) {
     return row;
   });
 
+  // ?w=480 (and optionally &h=300) serves a cached WebP thumbnail instead of
+  // the original PNG — the dashboard cards and screenshot grids render at
+  // ~350-500px, so shipping the multi-MB full-page originals into them was
+  // most of the page weight.
+  const ShotQuery = z.object({
+    w: z.coerce.number().int().min(16).max(1600).optional(),
+    h: z.coerce.number().int().min(16).max(1600).optional(),
+  });
   app.get<{ Params: { id: string; name: string } }>(
     '/api/runs/:id/screenshots/:name',
     async (req, reply) => {
@@ -58,9 +67,43 @@ export async function runsRoutes(app: FastifyInstance) {
       const name = path.basename(req.params.name); // prevent traversal
       const filepath = path.join(config.dataDir, 'screenshots', String(runId), name);
       if (!fs.existsSync(filepath)) return reply.code(404).send({ error: 'not_found' });
-      const stream = fs.createReadStream(filepath);
-      reply.type('image/png');
-      return reply.send(stream);
+
+      // A finished run's screenshots never change (the run dir is only ever
+      // deleted wholesale), so let browsers cache them forever. While the run
+      // is still going, restart attempts overwrite the same filenames — force
+      // revalidation instead; the Last-Modified/304 below keeps that cheap.
+      const run = getDb().prepare('SELECT status FROM runs WHERE id = ?').get(runId) as
+        | { status: string }
+        | undefined;
+      const finished = run != null && run.status !== 'running';
+      reply.header(
+        'Cache-Control',
+        finished ? 'public, max-age=31536000, immutable' : 'no-cache',
+      );
+
+      const { w, h } = ShotQuery.parse(req.query);
+      let servePath = filepath;
+      let type = 'image/png';
+      if (w) {
+        try {
+          servePath = await ensureThumb(filepath, { width: w, height: h });
+          type = 'image/webp';
+        } catch (e) {
+          // Corrupt/unreadable source — fall back to serving the original.
+          req.log.warn({ err: e, filepath }, 'thumbnail generation failed');
+        }
+      }
+
+      const stat = fs.statSync(servePath);
+      reply.header('Last-Modified', stat.mtime.toUTCString());
+      const ims = req.headers['if-modified-since'];
+      // HTTP dates carry 1s granularity, so compare with the sub-second part
+      // of the file mtime dropped.
+      if (ims && !Number.isNaN(Date.parse(ims)) && stat.mtimeMs < Date.parse(ims) + 1000) {
+        return reply.code(304).send();
+      }
+      reply.type(type);
+      return reply.send(fs.createReadStream(servePath));
     },
   );
 

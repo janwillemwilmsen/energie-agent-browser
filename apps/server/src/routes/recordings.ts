@@ -40,6 +40,9 @@ export async function recordingsRoutes(app: FastifyInstance) {
 
     const stat = fs.statSync(abs);
     reply.header('Accept-Ranges', 'bytes');
+    // A recording row is only inserted after its webm is fully written, and
+    // the file is never rewritten afterwards — safe to cache forever.
+    reply.header('Cache-Control', 'public, max-age=31536000, immutable');
     reply.type('video/webm');
 
     const range = req.headers.range;

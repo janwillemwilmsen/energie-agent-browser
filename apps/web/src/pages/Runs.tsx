@@ -515,7 +515,19 @@ function RunDetail({
           <div className="screenshots">
             {screenshots.map((name) => (
               <div key={name} className="shot">
-                <img src={`/api/runs/${run.id}/screenshots/${name}`} alt={name} />
+                <a
+                  href={`/api/runs/${run.id}/screenshots/${name}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  title={`${name} (click to open full size)`}
+                >
+                  <img
+                    src={`/api/runs/${run.id}/screenshots/${name}?w=800`}
+                    alt={name}
+                    loading="lazy"
+                    decoding="async"
+                  />
+                </a>
                 <div className="muted">{name}</div>
               </div>
             ))}

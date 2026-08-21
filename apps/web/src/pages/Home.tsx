@@ -192,16 +192,19 @@ export function Home() {
 }
 
 function ScenarioCardView({ card }: { card: ScenarioCard }) {
+  // ?w/&h ask the server for a cached WebP thumbnail cover-cropped from the
+  // top — matching this card's 16:10 `object-fit: cover; object-position: top`
+  // box — instead of the multi-MB full-page original.
   const thumb =
     card.latest_run_id != null && card.latest_screenshot
-      ? `/api/runs/${card.latest_run_id}/screenshots/${encodeURIComponent(card.latest_screenshot)}`
+      ? `/api/runs/${card.latest_run_id}/screenshots/${encodeURIComponent(card.latest_screenshot)}?w=480&h=300`
       : null;
 
   return (
     <Link to={`/screenshots/timeline/${card.id}`} className="scenario-card">
       <div className="scenario-card-thumb">
         {thumb ? (
-          <img src={thumb} alt={`Latest run of ${card.name}`} loading="lazy" />
+          <img src={thumb} alt={`Latest run of ${card.name}`} loading="lazy" decoding="async" />
         ) : (
           <div className="scenario-card-thumb-empty">No runs yet</div>
         )}

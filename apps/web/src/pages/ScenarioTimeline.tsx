@@ -103,9 +103,10 @@ export function ScenarioTimeline() {
                             rel="noreferrer"
                           >
                             <img
-                              src={`/api/runs/${r.id}/screenshots/${encodeURIComponent(file)}`}
+                              src={`/api/runs/${r.id}/screenshots/${encodeURIComponent(file)}?w=480`}
                               alt={`${row.label} from run ${r.id}`}
                               loading="lazy"
+                              decoding="async"
                             />
                           </a>
                         ) : (

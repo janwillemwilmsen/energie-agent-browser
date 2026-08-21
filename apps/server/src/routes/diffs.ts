@@ -194,6 +194,9 @@ export async function diffsRoutes(app: FastifyInstance) {
     if (!a) return reply.code(404).send({ error: 'not_found' });
     const abs = absPath(a.file_path);
     if (!fs.existsSync(abs)) return reply.code(404).send({ error: 'file_missing' });
+    // Artifacts are written once at comparison time and never mutated (a new
+    // comparison creates new artifact rows) — safe to cache forever.
+    reply.header('Cache-Control', 'public, max-age=31536000, immutable');
     reply.type('image/png');
     return reply.send(fs.createReadStream(abs));
   });

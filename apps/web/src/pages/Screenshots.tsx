@@ -332,9 +332,10 @@ function ScenarioBlock({
                   title={name + ' (click to open full size)'}
                 >
                   <img
-                    src={`/api/runs/${run.id}/screenshots/${name}`}
+                    src={`/api/runs/${run.id}/screenshots/${name}?w=480`}
                     alt={name}
                     loading="lazy"
+                    decoding="async"
                   />
                   <figcaption>{name}</figcaption>
                 </a>
