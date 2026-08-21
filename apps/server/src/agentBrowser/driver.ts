@@ -347,7 +347,11 @@ async function killStaleDaemons(): Promise<void> {
   // so we clear it here along with the other runtime markers.
   try {
     const dir = path.join(os.homedir(), '.agent-browser');
-    const STALE_EXTS = ['.pid', '.port', '.stream', '.sock', '.engine', '.version'];
+    // .config (daemon configuration hash) and .target (current tab pointer)
+    // are new in agent-browser 0.34 — leaving either behind makes the next
+    // bootstrap detect a phantom "version mismatch" / "different daemon
+    // configuration" against the dead daemon and churn through restarts.
+    const STALE_EXTS = ['.pid', '.port', '.stream', '.sock', '.engine', '.version', '.config', '.target'];
     for (const f of fs.readdirSync(dir)) {
       if (STALE_EXTS.some((ext) => f.endsWith(ext))) {
         try { fs.unlinkSync(path.join(dir, f)); } catch { /* ignore */ }
@@ -724,8 +728,11 @@ export async function closeSession(session: string): Promise<void> {
   const dir = path.join(os.homedir(), '.agent-browser');
   // Include `sock` and `version`: on a persistent ~/.agent-browser volume a
   // stranded socket file makes the NEXT bootstrap fail with "Failed to connect:
-  // No such file or directory". Clear every runtime marker for this session.
-  for (const ext of ['pid', 'port', 'stream', 'engine', 'sock', 'version']) {
+  // No such file or directory". Clear every runtime marker for this session,
+  // including the 0.34+ `config` (daemon configuration hash) and `target`
+  // (current tab) markers — stale copies of those trigger "version mismatch" /
+  // "different daemon configuration" restart loops on the next bootstrap.
+  for (const ext of ['pid', 'port', 'stream', 'engine', 'sock', 'version', 'config', 'target']) {
     try { fs.unlinkSync(path.join(dir, `${session}.${ext}`)); } catch { /* ignore */ }
   }
   writeSessionName(session, null);

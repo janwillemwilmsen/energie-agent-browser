@@ -69,6 +69,22 @@ describe('parseSnapshotText', () => {
     const t = parseSnapshotText(`- textbox "URL" [ref=e1]: https://example.com:8080/x`, '');
     expect(t.root.children[0]!.value).toBe('https://example.com:8080/x');
   });
+
+  // agent-browser 0.34 appends bare annotation tokens after the attrs block on
+  // some nodes. Dropping such a line also re-parents its whole subtree, so the
+  // node (and its ref) must survive.
+  it('keeps nodes with trailing annotations after the attrs block (0.34+)', () => {
+    const t = parseSnapshotText(
+      `- generic [ref=e1] clickable [onclick]
+  - link "Scenarios" [ref=e4]`,
+      '',
+    );
+    const generic = t.root.children[0]!;
+    expect(generic.role).toBe('generic');
+    expect(generic.ref).toBe('@e1');
+    expect(generic.children[0]!.role).toBe('link');
+    expect(generic.children[0]!.name).toBe('Scenarios');
+  });
 });
 
 describe('resolveSelector', () => {

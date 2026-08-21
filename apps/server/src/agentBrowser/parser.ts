@@ -15,7 +15,14 @@ interface ParsedLine {
 // so the trailing `(?:: value)?` group must be part of the line shape — a
 // regex anchored right after `[attrs]` would drop exactly the filled-in
 // inputs a user most wants to target.
-const LINE_RE = /^(?<indent>\s*)- (?<role>[A-Za-z][A-Za-z0-9_]*)(?:\s+"(?<name>(?:[^"\\]|\\.)*)")?(?:\s+\[(?<attrs>[^\]]+)\])?(?::\s?(?<value>.*?))?\s*$/;
+//
+// agent-browser 0.34 additionally appends bare annotation tokens after the
+// attrs block on some nodes, e.g.
+//   - generic [ref=e1] clickable [onclick]
+// The annotations group tolerates any run of ` word` / ` [block]` tokens there
+// (they carry no data we use). It can't eat a `: value` suffix because values
+// start with a colon directly after the preceding block, never with a space.
+const LINE_RE = /^(?<indent>\s*)- (?<role>[A-Za-z][A-Za-z0-9_]*)(?:\s+"(?<name>(?:[^"\\]|\\.)*)")?(?:\s+\[(?<attrs>[^\]]+)\])?(?:\s+(?:[A-Za-z][\w-]*|\[[^\]]+\]))*(?::\s?(?<value>.*?))?\s*$/;
 
 function parseAttrs(s: string | undefined): Record<string, string> {
   if (!s) return {};
