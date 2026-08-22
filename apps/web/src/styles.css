@@ -598,7 +598,34 @@ code { background: rgba(255,255,255,0.06); padding: 2px 4px; border-radius: 3px;
   padding: 8px;
   margin: 12px 0;
 }
-.preview-status { font-size: 12px; margin-bottom: 6px; }
+.preview-status { font-size: 12px; margin-bottom: 6px; display: flex; align-items: center; gap: 8px; }
+.preview-zoom-toggle {
+  margin-left: auto;
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 500;
+}
+.preview-zoom-toggle:hover { color: var(--accent); border-color: var(--accent); filter: none; }
+.preview-zoom-toggle.on { color: var(--accent); border-color: var(--accent); background: rgba(56,189,248,0.12); }
+/* Hover magnifier over the live preview: the lens is a background-image copy
+   of the current frame, scaled up and offset to the spot under the cursor.
+   pointer-events:none so it never steals the mousemove from the image. */
+.preview-frame-wrap { position: relative; overflow: hidden; border-radius: 4px; }
+.preview-frame-wrap .preview-frame { cursor: zoom-in; }
+.preview-loupe {
+  position: absolute;
+  pointer-events: none;
+  border-radius: 50%;
+  border: 2px solid var(--accent);
+  box-shadow: 0 0 0 2px rgba(0,0,0,0.6), 0 6px 18px rgba(0,0,0,0.5);
+  background-repeat: no-repeat;
+  background-color: #000;
+  z-index: 2;
+}
 .preview-frame {
   width: 100%;
   max-height: 320px;
