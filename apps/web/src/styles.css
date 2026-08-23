@@ -55,16 +55,33 @@ body {
 .nav-icon { flex-shrink: 0; }
 .nav-label { overflow: hidden; text-overflow: ellipsis; }
 
-/* Admin link: pinned to the bottom of the sidebar, smaller + muted so it reads
-   as a secondary/utility entry rather than a primary destination. */
-.nav a.nav-admin {
-  margin-top: auto;
+/* Utility entries at the bottom of the sidebar (Admin link, Sign out button):
+   smaller + muted so they read as secondary, not primary destinations. Written
+   element-agnostic so the <button> gets exactly the same look as the <a>. */
+.nav .nav-admin {
+  /* Same box/layout as `.nav a` (the button doesn't inherit those rules). */
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  white-space: nowrap;
+  font: inherit;
   font-size: 13px;
   color: var(--muted);
-  gap: 10px;
+  text-decoration: none;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
 }
-.nav a.nav-admin:hover { color: var(--text); }
-.nav a.nav-admin.nav-active { color: var(--accent); }
+/* Only the Admin link pushes down to the bottom; Sign out then sits directly
+   beneath it with the normal nav gap. */
+.nav a.nav-admin { margin-top: auto; }
+.nav a.nav-admin + .nav-admin { margin-top: 0; }
+.nav .nav-admin:hover { background: rgba(255,255,255,0.06); color: var(--text); filter: none; }
+.nav .nav-admin.nav-active { background: rgba(56,189,248,0.14); color: var(--accent); }
 
 /* Collapse toggle button — styled to sit in the nav like the links. */
 .nav-toggle {
@@ -87,13 +104,44 @@ body {
    the toggle's own label. Labels are not rendered in JSX when collapsed, so
    there's nothing else to hide. */
 .nav-collapsed a,
-.nav-collapsed .nav-toggle {
+.nav-collapsed .nav-toggle,
+.nav-collapsed .nav-admin {
   justify-content: center;
   padding: 8px 0;
   gap: 0;
 }
 
 .main { padding: 24px; overflow: auto; }
+
+/* Mobile: the sidebar is always an icon rail (60px); the toggle opens the
+   full menu as an overlay on top of the content (fixed, 220px) instead of
+   shrinking the page, with a backdrop that closes it on tap. Breakpoint
+   matches the stacked-table rules further down. */
+@media (max-width: 640px) {
+  .app,
+  .app-collapsed { grid-template-columns: 60px 1fr; }
+  /* Pin both panes to their columns. When the menu opens, the nav becomes
+     position:fixed and leaves the grid flow — without this, `.main` would
+     auto-place into the empty 60px first column (content squeezed into a
+     sliver, the rest just dark background). */
+  .app > .nav { grid-column: 1; }
+  .app > .main { grid-column: 2; }
+  .app-mobile-open .nav {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 220px;
+    z-index: 60;
+    box-shadow: 8px 0 24px rgba(0,0,0,0.45);
+  }
+  .nav-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.3);
+    z-index: 50;
+  }
+}
 
 /* Admin page link list. */
 .admin-links { display: flex; flex-direction: column; gap: 8px; max-width: 480px; }

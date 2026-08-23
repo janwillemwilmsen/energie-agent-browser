@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
-import { NavLink, Route, Routes } from 'react-router-dom';
+import { NavLink, Route, Routes, useLocation } from 'react-router-dom';
 import {
   Bell,
   CalendarClock,
@@ -64,6 +64,25 @@ const NAV_ITEMS: NavItem[] = [
 
 const COLLAPSE_KEY = 'eab.nav.collapsed';
 
+// Reactive `window.matchMedia` — re-renders when the query flips (rotate,
+// resize, devtools device toggle). SSR-safe default: false.
+function useMediaQuery(query: string): boolean {
+  const [matches, setMatches] = useState<boolean>(() =>
+    typeof window !== 'undefined' && 'matchMedia' in window
+      ? window.matchMedia(query).matches
+      : false,
+  );
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('matchMedia' in window)) return;
+    const mql = window.matchMedia(query);
+    const onChange = (e: MediaQueryListEvent) => setMatches(e.matches);
+    setMatches(mql.matches);
+    mql.addEventListener('change', onChange);
+    return () => mql.removeEventListener('change', onChange);
+  }, [query]);
+  return matches;
+}
+
 export function App() {
   // Persist the collapsed state so the sidebar stays how the user left it.
   const [collapsed, setCollapsed] = useState<boolean>(() => {
@@ -81,6 +100,19 @@ export function App() {
       /* ignore — storage may be unavailable (private mode, etc.) */
     }
   }, [collapsed]);
+
+  // Mobile: the sidebar auto-collapses to an icon rail (same breakpoint as the
+  // stacked-table layout in styles.css). The toggle then opens it as an
+  // overlay on top of the content instead of pushing the page aside, and any
+  // navigation / tap outside closes it again. The desktop preference in
+  // localStorage is left untouched.
+  const isMobile = useMediaQuery('(max-width: 640px)');
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const location = useLocation();
+  useEffect(() => { setMobileOpen(false); }, [location.pathname]);
+  useEffect(() => { if (!isMobile) setMobileOpen(false); }, [isMobile]);
+  const navCollapsed = isMobile ? !mobileOpen : collapsed;
+  const toggleNav = () => (isMobile ? setMobileOpen((v) => !v) : setCollapsed((v) => !v));
 
   // Login gate. `null` = still checking; the app only renders once we know the
   // session is valid (or the gate is disabled server-side).
@@ -112,18 +144,23 @@ export function App() {
   }
 
   return (
-    <div className={`app${collapsed ? ' app-collapsed' : ''}`}>
-      <nav className={`nav${collapsed ? ' nav-collapsed' : ''}`}>
+    <div
+      className={`app${navCollapsed ? ' app-collapsed' : ''}${isMobile && mobileOpen ? ' app-mobile-open' : ''}`}
+    >
+      {isMobile && mobileOpen && (
+        <div className="nav-backdrop" onClick={() => setMobileOpen(false)} aria-hidden />
+      )}
+      <nav className={`nav${navCollapsed ? ' nav-collapsed' : ''}`}>
         <button
           type="button"
           className="nav-toggle"
-          onClick={() => setCollapsed((v) => !v)}
-          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          aria-pressed={collapsed}
+          onClick={toggleNav}
+          title={navCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          aria-label={navCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          aria-pressed={navCollapsed}
         >
-          {collapsed ? <PanelLeftOpen size={20} /> : <PanelLeftClose size={20} />}
-          {!collapsed && <span className="nav-label">Collapse</span>}
+          {navCollapsed ? <PanelLeftOpen size={20} /> : <PanelLeftClose size={20} />}
+          {!navCollapsed && <span className="nav-label">Collapse</span>}
         </button>
         {NAV_ITEMS.map(({ to, label, icon: Icon }) => (
           <NavLink
@@ -131,10 +168,10 @@ export function App() {
             to={to}
             end={to === '/'}
             className={({ isActive }) => (isActive ? 'nav-active' : undefined)}
-            title={collapsed ? label : undefined}
+            title={navCollapsed ? label : undefined}
           >
             <Icon size={20} className="nav-icon" aria-hidden />
-            {!collapsed && <span className="nav-label">{label}</span>}
+            {!navCollapsed && <span className="nav-label">{label}</span>}
           </NavLink>
         ))}
         {/* Admin sits at the bottom of the sidebar (pushed down via margin-top
@@ -142,20 +179,19 @@ export function App() {
         <NavLink
           to="/admin"
           className={({ isActive }) => `nav-admin${isActive ? ' nav-active' : ''}`}
-          title={collapsed ? 'Admin' : undefined}
+          title={navCollapsed ? 'Admin' : undefined}
         >
           <Settings size={18} className="nav-icon" aria-hidden />
-          {!collapsed && <span className="nav-label">Admin</span>}
+          {!navCollapsed && <span className="nav-label">Admin</span>}
         </NavLink>
         <button
           type="button"
           className="nav-admin"
           onClick={() => void logout()}
-          title={collapsed ? 'Sign out' : undefined}
-          style={{ background: 'none', border: 'none', cursor: 'pointer', font: 'inherit', color: 'inherit' }}
+          title={navCollapsed ? 'Sign out' : undefined}
         >
           <LogOut size={18} className="nav-icon" aria-hidden />
-          {!collapsed && <span className="nav-label">Sign out</span>}
+          {!navCollapsed && <span className="nav-label">Sign out</span>}
         </button>
       </nav>
       <main className="main">
