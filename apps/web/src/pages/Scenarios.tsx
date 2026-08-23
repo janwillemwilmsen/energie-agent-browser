@@ -153,7 +153,7 @@ export function Scenarios() {
               value={name}
               onChange={(e) => setName(e.target.value)}
               required
-			  placeholder="Testing ABCDefgh"
+			  placeholder="Name"
             />
           </label>
           <label htmlFor="scenario-url">
@@ -182,7 +182,7 @@ export function Scenarios() {
             </select>
           </label>
           <label htmlFor="scenario-brand">
-            Brand <span className="muted">(used to filter on the homepage)</span>
+            Brand <span className="muted">(used for filtering)</span>
             <input
               id="scenario-brand"
               name="brand"
@@ -192,7 +192,7 @@ export function Scenarios() {
             />
           </label>
           <label htmlFor="scenario-type">
-            Type <span className="muted">(used to filter on the homepage)</span>
+            Type <span className="muted">(used for filtering)</span>
             <input
               id="scenario-type"
               name="type"
