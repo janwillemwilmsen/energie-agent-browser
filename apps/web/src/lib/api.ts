@@ -228,6 +228,81 @@ export interface SessionState {
   inUse: boolean;
 }
 
+// Admin → Storage (GET /api/storage and friends).
+export interface StorageGroup {
+  key: string;
+  label: string;
+  dir: string;
+  bytes: number;
+  files: number;
+  cache?: boolean;
+}
+export interface StorageTable {
+  name: string;
+  rows: number | null;
+  bytes: number | null;
+}
+export interface StorageSummary {
+  dataDir: string;
+  totalBytes: number;
+  db: {
+    file: string;
+    fileBytes: number;
+    walBytes: number;
+    shmBytes: number;
+    pageSize: number;
+    pageCount: number;
+    freePages: number;
+    reclaimableBytes: number;
+    runLogBytes: number;
+    tables: StorageTable[];
+  };
+  groups: StorageGroup[];
+  orphans: {
+    screenshotDirs: number;
+    screenshotBytes: number;
+    diffFiles: number;
+    diffBytes: number;
+    missingRecordingRows: number;
+  };
+  generatedAt: string;
+}
+export interface RunStorageItem {
+  runId: number;
+  scenarioId: number | null;
+  scenarioName: string | null;
+  brand: string | null;
+  type: string | null;
+  status: string | null;
+  startedAt: string | null;
+  bytes: number;
+  files: number;
+  thumbBytes: number;
+  logBytes: number;
+  recordingBytes: number;
+  orphan: boolean;
+}
+export interface RecordingStorageItem {
+  id: number | null;
+  scenarioId: number | null;
+  scenarioName: string | null;
+  brand: string | null;
+  type: string | null;
+  runId: number | null;
+  filePath: string;
+  bytes: number;
+  createdAt: string | null;
+  missing: boolean;
+  orphan: boolean;
+}
+export type StorageCleanupAction =
+  | 'thumbs'
+  | 'preview'
+  | 'logs'
+  | 'orphan-screenshots'
+  | 'orphan-diffs'
+  | 'missing-recordings'
+  | 'vacuum';
 export const api = {
   listScenarios: () => req<Scenario[]>('/api/scenarios'),
   listScenarioCards: () => req<ScenarioCard[]>('/api/scenarios/cards'),
@@ -515,4 +590,22 @@ export const api = {
   listSessionStates: () => req<SessionState[]>('/api/session-states'),
   deleteSessionState: (name: string) =>
     req<void>(`/api/session-states/${encodeURIComponent(name)}`, { method: 'DELETE' }),
+  storageSummary: () => req<StorageSummary>('/api/storage'),
+  storageRuns: () => req<RunStorageItem[]>('/api/storage/runs'),
+  storageRecordings: () => req<RecordingStorageItem[]>('/api/storage/recordings'),
+  storageDeleteRuns: (ids: number[], withRecordings = false) =>
+    req<{ deletedRows: number; freedBytes: number; skippedRunning: number }>('/api/storage/runs/delete', {
+      method: 'POST',
+      body: JSON.stringify({ ids, withRecordings }),
+    }),
+  storageDeleteRecordings: (body: { ids?: number[]; files?: string[] }) =>
+    req<{ deleted: number; freedBytes: number }>('/api/storage/recordings/delete', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  storageCleanup: (action: StorageCleanupAction) =>
+    req<{ action: string; count: number; freedBytes: number }>('/api/storage/cleanup', {
+      method: 'POST',
+      body: JSON.stringify({ action }),
+    }),
 };

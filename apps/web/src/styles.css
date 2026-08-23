@@ -1336,3 +1336,91 @@ code { background: rgba(255,255,255,0.06); padding: 2px 4px; border-radius: 3px;
   .runs-table td.run-detail-cell { display: block; padding: 0; }
   .runs-table td.run-detail-cell::before { content: none; }
 }
+
+/* Admin → Storage. */
+.storage-page h2 { margin: 28px 0 4px; font-size: 18px; }
+.storage-notice {
+  color: #4ade80;
+  background: rgba(34,197,94,0.12);
+  border: 1px solid rgba(34,197,94,0.4);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 13px;
+}
+.storage-bar {
+  display: flex;
+  height: 14px;
+  border-radius: 7px;
+  overflow: hidden;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  margin-top: 8px;
+}
+.storage-bar-seg { height: 100%; min-width: 2px; }
+.storage-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin: 8px 0 16px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.storage-legend i,
+.storage-card-head i {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  vertical-align: -1px;
+  margin-right: 2px;
+}
+.storage-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+}
+.storage-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.storage-card .muted { overflow-wrap: anywhere; }
+.storage-card-head { display: flex; align-items: center; gap: 8px; }
+.storage-card-size { margin-left: auto; font-weight: 600; font-variant-numeric: tabular-nums; }
+.storage-details { margin: 16px 0; }
+.storage-details > summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+.storage-table-compact { max-width: 520px; margin-top: 8px; }
+.storage-table-compact td, .storage-table-compact th { padding: 4px 8px; font-size: 13px; }
+.storage-maint { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.storage-maint-row {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 14px;
+}
+.storage-maint-row > div:first-child { min-width: 0; flex: 1; }
+.storage-maint-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; }
+.storage-maint-actions button { padding: 4px 10px; font-size: 12px; }
+.storage-table-wrap { overflow-x: auto; }
+.storage-table { white-space: nowrap; }
+.storage-table th.num, .storage-table td.num,
+.storage-table-compact th.num, .storage-table-compact td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.storage-table td.storage-file { max-width: 280px; overflow: hidden; text-overflow: ellipsis; }
+.storage-table button { padding: 3px 8px; font-size: 12px; }
+.storage-table tr.storage-orphan td { color: var(--muted); }
+@media (max-width: 640px) {
+  .storage-maint-row { flex-direction: column; align-items: stretch; }
+  .storage-maint-actions { justify-content: flex-start; }
+}
