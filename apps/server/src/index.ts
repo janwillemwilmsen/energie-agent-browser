@@ -27,6 +27,7 @@ import { ensurePushConfigured } from './push.js';
 import { startEmailDigestSchedule } from './email.js';
 import { browserlessHealthRoutes } from './routes/browserlessHealth.js';
 import { storageRoutes } from './routes/storage.js';
+import { screenshotsZipRoutes } from './routes/screenshotsZip.js';
 import { terminalWsRoute } from './ws/terminal.js';
 import { screencastWsRoute } from './ws/screencast.js';
 import { startScheduler } from './scheduler/index.js';
@@ -106,6 +107,7 @@ async function main() {
   await app.register(agentTasksRoutes);
   await app.register(browserlessHealthRoutes);
   await app.register(storageRoutes);
+  await app.register(screenshotsZipRoutes);
   await app.register(terminalWsRoute);
   await app.register(screencastWsRoute);
 

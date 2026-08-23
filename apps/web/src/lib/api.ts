@@ -600,6 +600,24 @@ export const api = {
   listSessionStates: () => req<SessionState[]>('/api/session-states'),
   deleteSessionState: (name: string) =>
     req<void>(`/api/session-states/${encodeURIComponent(name)}`, { method: 'DELETE' }),
+  // Zip of run screenshots (Screenshots page → Download). Returns the blob +
+  // the server-suggested filename; the caller triggers the browser download.
+  downloadScreenshotsZip: async (
+    items: { runId: number; names?: string[] }[],
+  ): Promise<{ blob: Blob; filename: string }> => {
+    const res = await fetch('/api/screenshots/zip', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items }),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new Error(`${res.status} ${res.statusText}${text ? ` — ${text}` : ''}`);
+    }
+    const cd = res.headers.get('Content-Disposition') ?? '';
+    const m = /filename="([^"]+)"/.exec(cd);
+    return { blob: await res.blob(), filename: m?.[1] ?? 'screenshots.zip' };
+  },
   storageSummary: () => req<StorageSummary>('/api/storage'),
   storageRuns: () => req<RunStorageItem[]>('/api/storage/runs'),
   storageRecordings: () => req<RecordingStorageItem[]>('/api/storage/recordings'),

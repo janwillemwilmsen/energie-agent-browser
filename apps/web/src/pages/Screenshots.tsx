@@ -128,9 +128,105 @@ export function Screenshots() {
     setDayByScenario({});
   }
 
+  // What is actually on screen after filtering + per-scenario day choice: the
+  // run shown for each scenario and its screenshot files. Drives the counter
+  // and the zip download.
+  const shown = useMemo(() => {
+    const items: { scenarioId: number; runId: number; names: string[] }[] = [];
+    for (const s of scenarios) {
+      const day = dayByScenario[s.scenario_id] ?? s.populatedDays[0] ?? '';
+      const run = s.runByDay.get(day);
+      if (!run) continue;
+      let names: string[] = [];
+      try { names = JSON.parse(run.screenshot_paths_json); } catch { /* malformed */ }
+      items.push({ scenarioId: s.scenario_id, runId: run.id, names });
+    }
+    return items;
+  }, [scenarios, dayByScenario]);
+  const shownScreenshots = shown.reduce((n, it) => n + it.names.length, 0);
+
+  const [downloading, setDownloading] = useState(false);
+  async function downloadZip() {
+    const items = shown.filter((it) => it.names.length > 0).map((it) => ({ runId: it.runId, names: it.names }));
+    if (!items.length) return;
+    setDownloading(true);
+    setErr(null);
+    try {
+      const { blob, filename } = await api.downloadScreenshotsZip(items);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      // Give the browser a tick to start the download before revoking.
+      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    } catch (e: any) {
+      setErr(e?.message ?? String(e));
+    } finally {
+      setDownloading(false);
+    }
+  }
+
   return (
     <section>
       <h1>Screenshots</h1>
+      <p className="muted" style={{ marginTop: 0 }} aria-live="polite">
+        {activeFilterCount === 0 ? (
+          <>
+            Showing all scenarios and screenshots (if available). Filter on 'Brand' and/or 'Type' to
+            select specific scenarios and screenshots.
+          </>
+        ) : (
+          <>
+            Showing scenarios and screenshots (if available) for{' '}
+            {selectedBrands.size > 0 && (
+              <>
+                brand{selectedBrands.size === 1 ? '' : 's'}{' '}
+                <strong>{Array.from(selectedBrands).sort((a, b) => a.localeCompare(b)).join(', ')}</strong>
+              </>
+            )}
+            {selectedBrands.size > 0 && selectedTypes.size > 0 && ' and '}
+            {selectedTypes.size > 0 && (
+              <>
+                type{selectedTypes.size === 1 ? '' : 's'}{' '}
+                <strong>{Array.from(selectedTypes).sort((a, b) => a.localeCompare(b)).join(', ')}</strong>
+              </>
+            )}
+            .{' '}
+            <button
+              type="button"
+              className="filter-clear"
+              style={{ display: 'inline-block' }}
+              onClick={() => {
+                setSelectedBrands(new Set());
+                setSelectedTypes(new Set());
+              }}
+            >
+              Clear filters
+            </button>{' '}
+            to show all.
+          </>
+        )}
+      </p>
+
+      <div className="screenshots-toolbar" style={{ marginBottom: 12 }}>
+        <span className="ss-counter" aria-live="polite">
+          <strong>{scenarios.length}</strong> scenario{scenarios.length === 1 ? '' : 's'} ·{' '}
+          <strong>{shownScreenshots}</strong> screenshot{shownScreenshots === 1 ? '' : 's'}
+          {activeFilterCount > 0 && <span className="muted"> (filtered)</span>}
+        </span>
+        <button
+          type="button"
+          onClick={() => void downloadZip()}
+          disabled={downloading || shownScreenshots === 0}
+          title="Download the screenshots shown below (one folder per scenario/run) as a zip"
+          style={{ marginLeft: 'auto' }}
+        >
+          {downloading ? 'Preparing zip…' : `Download (${shownScreenshots})`}
+        </button>
+      </div>
 
       <details className="filter-panel" open={activeFilterCount > 0}>
         <summary>

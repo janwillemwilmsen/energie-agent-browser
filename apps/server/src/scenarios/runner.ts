@@ -117,6 +117,39 @@ async function applyViewport(ctx: RunContext): Promise<void> {
   }
 }
 
+// Chrome's CDP error for "the frame has no layout yet" — seen when a screenshot
+// is requested while a navigation is still committing / before first paint.
+function isPageNotReadyError(stderr: string, stdout: string): boolean {
+  const s = `${stderr}\n${stdout}`;
+  return /Cannot take screenshot with 0 (width|height)/i.test(s) ||
+    /Unable to capture screenshot/i.test(s);
+}
+
+const SCREENSHOT_NOT_READY_RETRIES = 6;
+
+// Best-effort `wait --load load`: returns as soon as the current document has
+// fired `load` (immediately if it already has). Never throws — a timeout just
+// means we proceed and let the next command report a real error.
+async function waitForLoad(session: string, timeoutMs: number): Promise<void> {
+  try {
+    await run(['wait', '--load', 'load'], { session, timeoutMs });
+  } catch {
+    /* ignore */
+  }
+}
+
+// After a click that may have started a navigation (link to another page or
+// site), let the new document load before the next step. `wait --load` is
+// cheap when nothing is navigating, so this adds no noticeable delay to
+// ordinary in-page clicks. Best-effort: never fails the step.
+async function settleAfterInteraction(ctx: RunContext): Promise<void> {
+  // A navigation triggered by the click needs a beat to actually start
+  // before the load-state wait can see it; the first screenshot retry above
+  // covers the (rare) case where it starts even later.
+  await sleep(150);
+  await waitForLoad(ctx.session, 10_000);
+}
+
 // Begin a recording at this point in the step sequence. Best-effort: a failure
 // to start logs a warning but never throws, so it can't fail the run. A
 // `record_start` while one is already open is ignored (keeps a single clip
@@ -258,6 +291,10 @@ async function executeStep(ctx: RunContext, step: StepRow): Promise<void> {
         }
         throw new Error(`${step.kind} failed: ${r.stderr || r.stdout}`);
       }
+      // A click may have kicked off a navigation (e.g. a link to another
+      // site). Give the new document a moment to load so the next step
+      // doesn't race it — see settleAfterInteraction.
+      if (step.kind === 'click') await settleAfterInteraction(ctx);
       return;
     }
     case 'scroll': {
@@ -406,7 +443,19 @@ async function executeStep(ctx: RunContext, step: StepRow): Promise<void> {
         ctx,
         `screenshot${fullPage ? ' (full)' : ' (viewport)'}${mobileShot ? ' (mobile)' : ''}${annotate ? ' (annotated)' : ''} → ${filename}`,
       );
-      const r = await run(args, { session: ctx.session, timeoutMs: 60_000 });
+      // Chrome refuses to capture while a navigation is mid-flight (the new
+      // document has no layout yet): "Cannot take screenshot with 0 width".
+      // That's a transient state — typically the step right after a click
+      // that navigated to another site, and more likely in a freshly
+      // (re)started browser where the new renderer is slow to come up. Wait
+      // for the load state and retry a few times before giving up.
+      let r = await run(args, { session: ctx.session, timeoutMs: 60_000 });
+      for (let attempt = 1; r.exitCode !== 0 && isPageNotReadyError(r.stderr, r.stdout) && attempt <= SCREENSHOT_NOT_READY_RETRIES; attempt++) {
+        appendLog(ctx, `screenshot: page not ready yet (${(r.stderr || r.stdout).trim().split('\n')[0]}) — waiting for load and retrying (${attempt}/${SCREENSHOT_NOT_READY_RETRIES})`);
+        await sleep(500);
+        await waitForLoad(ctx.session, 10_000);
+        r = await run(args, { session: ctx.session, timeoutMs: 60_000 });
+      }
       if (r.exitCode !== 0) throw new Error(`screenshot failed: ${r.stderr || r.stdout}`);
       ctx.screenshots.push(filename);
       // The annotate legend is on stdout — keep it in the run log so the labels

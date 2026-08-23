@@ -1420,6 +1420,9 @@ code { background: rgba(255,255,255,0.06); padding: 2px 4px; border-radius: 3px;
 .storage-table td.storage-file { max-width: 280px; overflow: hidden; text-overflow: ellipsis; }
 .storage-table button { padding: 3px 8px; font-size: 12px; }
 .storage-table tr.storage-orphan td { color: var(--muted); }
+
+/* Screenshots page: scenario/screenshot counter next to the Download button. */
+.ss-counter { font-size: 13px; color: var(--text); font-variant-numeric: tabular-nums; }
 @media (max-width: 640px) {
   .storage-maint-row { flex-direction: column; align-items: stretch; }
   .storage-maint-actions { justify-content: flex-start; }
