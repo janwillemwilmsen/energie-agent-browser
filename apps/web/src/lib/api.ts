@@ -4,7 +4,11 @@ export interface EmailRecipient {
   scenarioIds: number[];
   successScenarioIds: number[];
   dailyDigest: boolean;
+  weeklyDigest: boolean;
+  monthlyDigest: boolean;
 }
+
+export type DigestPeriod = 'daily' | 'weekly' | 'monthly';
 
 export interface Scenario {
   id: number;
@@ -493,7 +497,13 @@ export const api = {
     }),
   updateEmailRecipient: (
     id: number,
-    body: { scenarioIds: number[]; successScenarioIds: number[]; dailyDigest: boolean },
+    body: {
+      scenarioIds: number[];
+      successScenarioIds: number[];
+      dailyDigest: boolean;
+      weeklyDigest: boolean;
+      monthlyDigest: boolean;
+    },
   ) =>
     req<EmailRecipient>(`/api/email/recipients/${id}`, {
       method: 'PUT',
@@ -503,10 +513,10 @@ export const api = {
     req<void>(`/api/email/recipients/${id}`, { method: 'DELETE' }),
   sendEmailTest: (id: number) =>
     req<{ ok: true }>(`/api/email/recipients/${id}/test`, { method: 'POST' }),
-  sendEmailDigest: () =>
+  sendEmailDigest: (period: DigestPeriod = 'daily') =>
     req<{ ok: true; sent: number; runCount: number; errors: string[] }>(
       '/api/email/digest/send',
-      { method: 'POST' },
+      { method: 'POST', body: JSON.stringify({ period }) },
     ),
   updateAuthSelectors: (
     name: string,

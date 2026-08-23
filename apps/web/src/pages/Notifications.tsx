@@ -15,6 +15,8 @@ import {
 // the email recipient with that id.
 type DestKey = 'browser' | number;
 
+const DIGEST_LABELS = { daily: 'Daily', weekly: 'Weekly', monthly: 'Monthly' } as const;
+
 export function Notifications() {
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
   const [recipients, setRecipients] = useState<EmailRecipient[]>([]);
@@ -29,6 +31,10 @@ export function Notifications() {
   const [failSelected, setFailSelected] = useState<Set<number>>(new Set());
   const [successSelected, setSuccessSelected] = useState<Set<number>>(new Set());
   const [dailyDigest, setDailyDigest] = useState(false);
+  const [weeklyDigest, setWeeklyDigest] = useState(false);
+  const [monthlyDigest, setMonthlyDigest] = useState(false);
+  // Which digest the "Send digest now" button fires.
+  const [digestPeriod, setDigestPeriod] = useState<'daily' | 'weekly' | 'monthly'>('daily');
   const [dirty, setDirty] = useState(false);
 
   const [newEmail, setNewEmail] = useState('');
@@ -109,11 +115,15 @@ export function Notifications() {
       setFailSelected(new Set(browser.fail));
       setSuccessSelected(new Set(browser.success));
       setDailyDigest(false);
+      setWeeklyDigest(false);
+      setMonthlyDigest(false);
     } else {
       const r = recs.find((x) => x.id === key);
       setFailSelected(new Set(r?.scenarioIds ?? []));
       setSuccessSelected(new Set(r?.successScenarioIds ?? []));
       setDailyDigest(r?.dailyDigest ?? false);
+      setWeeklyDigest(r?.weeklyDigest ?? false);
+      setMonthlyDigest(r?.monthlyDigest ?? false);
     }
   }
 
@@ -178,6 +188,8 @@ export function Notifications() {
           scenarioIds: fail,
           successScenarioIds: success,
           dailyDigest,
+          weeklyDigest,
+          monthlyDigest,
         });
         setRecipients((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
         setNotice('Saved.');
@@ -280,9 +292,9 @@ export function Notifications() {
     setError(null);
     setNotice(null);
     try {
-      const r = await api.sendEmailDigest();
+      const r = await api.sendEmailDigest(digestPeriod);
       setNotice(
-        `Digest sent to ${r.sent} recipient(s), covering ${r.runCount} run(s).` +
+        `${DIGEST_LABELS[digestPeriod]} digest sent to ${r.sent} recipient(s), covering ${r.runCount} run(s).` +
           (r.errors.length ? ` Errors: ${r.errors.join('; ')}` : ''),
       );
     } catch (e: any) {
@@ -333,7 +345,11 @@ export function Notifications() {
             <span>✉️ {r.email}</span>
             <span className="muted">
               {r.scenarioIds.length} ❌ / {r.successScenarioIds.length} ✅
-              {r.dailyDigest ? ' · 📰 digest' : ''}
+              {r.dailyDigest || r.weeklyDigest || r.monthlyDigest
+                ? ` · 📰 ${[r.dailyDigest && 'daily', r.weeklyDigest && 'weekly', r.monthlyDigest && 'monthly']
+                    .filter(Boolean)
+                    .join('/')}`
+                : ''}
             </span>
           </button>
         ))}
@@ -385,18 +401,45 @@ export function Notifications() {
       )}
 
       {selectedKey !== 'browser' && selectedRecipient && (
-        <label style={{ display: 'flex', alignItems: 'center', gap: 6, margin: '8px 0' }}>
-          <input
-            type="checkbox"
-            checked={dailyDigest}
-            onChange={(e) => {
-              setDailyDigest(e.target.checked);
-              setDirty(true);
-              setNotice(null);
-            }}
-          />
-          Daily digest at 09:00 with the status of all runs of the last 24 hours
-        </label>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, margin: '8px 0' }}>
+          <span className="muted">Run status digests (all runs, all scenarios), sent at 09:00:</span>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <input
+              type="checkbox"
+              checked={dailyDigest}
+              onChange={(e) => {
+                setDailyDigest(e.target.checked);
+                setDirty(true);
+                setNotice(null);
+              }}
+            />
+            Daily — every day, covering the last 24 hours
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <input
+              type="checkbox"
+              checked={weeklyDigest}
+              onChange={(e) => {
+                setWeeklyDigest(e.target.checked);
+                setDirty(true);
+                setNotice(null);
+              }}
+            />
+            Weekly — every Monday, covering the last 7 days
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <input
+              type="checkbox"
+              checked={monthlyDigest}
+              onChange={(e) => {
+                setMonthlyDigest(e.target.checked);
+                setDirty(true);
+                setNotice(null);
+              }}
+            />
+            Monthly — on the 1st, covering the last month
+          </label>
+        </div>
       )}
 
       <details className="filter-panel" open={activeFilterCount > 0}>
@@ -560,10 +603,26 @@ export function Notifications() {
               <button onClick={onTest} disabled={busy != null || !emailStatus?.enabled}>
                 {busy === 'test' ? 'Sending…' : 'Send test email'}
               </button>
+              <select
+                value={digestPeriod}
+                onChange={(e) => setDigestPeriod(e.target.value as 'daily' | 'weekly' | 'monthly')}
+                disabled={busy != null}
+                aria-label="Which digest to send now"
+                title="Which digest the button below sends"
+              >
+                <option value="daily">Daily digest</option>
+                <option value="weekly">Weekly digest</option>
+                <option value="monthly">Monthly digest</option>
+              </select>
               <button
                 onClick={onSendDigest}
-                disabled={busy != null || recipients.every((r) => !r.dailyDigest)}
-                title="Send the daily digest (all runs of the last 24 hours) right now to every address with the digest enabled"
+                disabled={
+                  busy != null ||
+                  recipients.every((r) =>
+                    digestPeriod === 'daily' ? !r.dailyDigest : digestPeriod === 'weekly' ? !r.weeklyDigest : !r.monthlyDigest,
+                  )
+                }
+                title="Send the selected digest right now to every address that has it enabled"
               >
                 {busy === 'digest' ? 'Sending…' : 'Send digest now'}
               </button>

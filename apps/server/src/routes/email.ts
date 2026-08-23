@@ -9,7 +9,7 @@ import {
   deleteRecipient,
   getRecipient,
   sendTestEmail,
-  sendDailyDigest,
+  sendDigest,
 } from '../email.js';
 
 const AddBody = z.object({ email: z.string().email().max(254) });
@@ -17,6 +17,11 @@ const UpdateBody = z.object({
   scenarioIds: z.array(z.number().int()).default([]),
   successScenarioIds: z.array(z.number().int()).default([]),
   dailyDigest: z.boolean().default(false),
+  weeklyDigest: z.boolean().default(false),
+  monthlyDigest: z.boolean().default(false),
+});
+const DigestSendBody = z.object({
+  period: z.enum(['daily', 'weekly', 'monthly']).default('daily'),
 });
 
 export async function emailRoutes(app: FastifyInstance) {
@@ -56,9 +61,11 @@ export async function emailRoutes(app: FastifyInstance) {
     return { ok: true, id: res.id };
   });
 
-  // Manual digest trigger ("Send digest now") — bypasses the once-per-day guard.
+  // Manual digest trigger ("Send digest now") — bypasses the once-per-period
+  // guard. Body: { period?: 'daily' | 'weekly' | 'monthly' } (default daily).
   app.post('/api/email/digest/send', async (req, reply) => {
-    const res = await sendDailyDigest(true);
+    const { period } = DigestSendBody.parse(req.body ?? {});
+    const res = await sendDigest(period, true);
     if (res.errors.length > 0 && res.sent === 0) {
       return reply.code(502).send({ error: 'send_failed', message: res.errors.join('; ') });
     }

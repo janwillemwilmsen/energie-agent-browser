@@ -83,6 +83,8 @@ export interface EmailRecipient {
   scenarioIds: number[];
   successScenarioIds: number[];
   dailyDigest: boolean;
+  weeklyDigest: boolean;
+  monthlyDigest: boolean;
 }
 
 interface RecipientRow {
@@ -91,6 +93,8 @@ interface RecipientRow {
   scenario_ids_json: string;
   success_scenario_ids_json: string;
   daily_digest: number;
+  weekly_digest: number;
+  monthly_digest: number;
 }
 
 function parseIds(json: string): number[] {
@@ -108,6 +112,8 @@ function toRecipient(r: RecipientRow): EmailRecipient {
     scenarioIds: parseIds(r.scenario_ids_json),
     successScenarioIds: parseIds(r.success_scenario_ids_json),
     dailyDigest: r.daily_digest === 1,
+    weeklyDigest: r.weekly_digest === 1,
+    monthlyDigest: r.monthly_digest === 1,
   };
 }
 
@@ -135,12 +141,19 @@ export function addRecipient(email: string): EmailRecipient {
 
 export function updateRecipient(
   id: number,
-  patch: { scenarioIds: number[]; successScenarioIds: number[]; dailyDigest: boolean },
+  patch: {
+    scenarioIds: number[];
+    successScenarioIds: number[];
+    dailyDigest: boolean;
+    weeklyDigest: boolean;
+    monthlyDigest: boolean;
+  },
 ): EmailRecipient | null {
   const info = getDb()
     .prepare(
       `UPDATE email_recipients
-       SET scenario_ids_json = ?, success_scenario_ids_json = ?, daily_digest = ?,
+       SET scenario_ids_json = ?, success_scenario_ids_json = ?,
+           daily_digest = ?, weekly_digest = ?, monthly_digest = ?,
            updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
     )
@@ -148,6 +161,8 @@ export function updateRecipient(
       JSON.stringify(patch.scenarioIds),
       JSON.stringify(patch.successScenarioIds),
       patch.dailyDigest ? 1 : 0,
+      patch.weeklyDigest ? 1 : 0,
+      patch.monthlyDigest ? 1 : 0,
       id,
     );
   if (info.changes === 0) return null;
@@ -217,7 +232,7 @@ export async function sendTestEmail(to: string): Promise<SendResult> {
   return sendEmail({ to, subject, html, text });
 }
 
-// --- Daily digest -----------------------------------------------------------------
+// --- Run digests (daily / weekly / monthly) ---------------------------------------
 interface DigestRunRow {
   id: number;
   status: string;
@@ -226,8 +241,24 @@ interface DigestRunRow {
   scenario_name: string | null;
 }
 
-const DIGEST_LAST_SENT_KEY = 'email_digest_last_sent';
+export type DigestPeriod = 'daily' | 'weekly' | 'monthly';
+export const DIGEST_PERIODS: DigestPeriod[] = ['daily', 'weekly', 'monthly'];
+
 const DIGEST_HOUR = 9; // 09:00 server-local time
+
+interface DigestSpec {
+  label: string; // "Daily" — used in subject/heading
+  window: string; // SQLite datetime() modifier for the lookback
+  windowText: string; // "the last 24 hours"
+  settingKey: string; // app_settings key holding the last-sent period stamp
+  optedIn: (r: EmailRecipient) => boolean;
+  // Identifies the current period (date / Monday date / YYYY-MM); the digest
+  // is sent at most once per stamp.
+  stamp: (now: Date) => string;
+  // Whether this period's send time (09:00 on its first day) has passed for
+  // the current stamp — used by the catch-up check at startup.
+  due: (now: Date) => boolean;
+}
 
 function localDateStamp(d = new Date()): string {
   const y = d.getFullYear();
@@ -236,23 +267,66 @@ function localDateStamp(d = new Date()): string {
   return `${y}-${m}-${day}`;
 }
 
-export function buildDigest(): { subject: string; html: string; text: string; runCount: number } {
+// Date of the Monday that starts the week containing `d` (local time).
+function mondayOf(d: Date): Date {
+  const m = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const dow = (m.getDay() + 6) % 7; // Mon=0 … Sun=6
+  m.setDate(m.getDate() - dow);
+  return m;
+}
+
+const DIGEST_SPECS: Record<DigestPeriod, DigestSpec> = {
+  daily: {
+    label: 'Daily',
+    window: '-1 day',
+    windowText: 'the last 24 hours',
+    settingKey: 'email_digest_last_sent', // pre-existing key; keep for continuity
+    optedIn: (r) => r.dailyDigest,
+    stamp: (now) => localDateStamp(now),
+    due: (now) => now.getHours() >= DIGEST_HOUR,
+  },
+  weekly: {
+    label: 'Weekly',
+    window: '-7 days',
+    windowText: 'the last 7 days',
+    settingKey: 'email_digest_weekly_last_sent',
+    optedIn: (r) => r.weeklyDigest,
+    stamp: (now) => localDateStamp(mondayOf(now)),
+    // Due from Monday 09:00 onwards; any later day of the same week still
+    // counts as that week's (possibly late) digest.
+    due: (now) => now.getDay() !== 1 || now.getHours() >= DIGEST_HOUR,
+  },
+  monthly: {
+    label: 'Monthly',
+    window: '-1 month',
+    windowText: 'the last month',
+    settingKey: 'email_digest_monthly_last_sent',
+    optedIn: (r) => r.monthlyDigest,
+    stamp: (now) => localDateStamp(now).slice(0, 7), // YYYY-MM
+    due: (now) => now.getDate() !== 1 || now.getHours() >= DIGEST_HOUR,
+  },
+};
+
+export function buildDigest(
+  period: DigestPeriod = 'daily',
+): { subject: string; html: string; text: string; runCount: number } {
+  const spec = DIGEST_SPECS[period];
   const runs = getDb()
     .prepare(
       `SELECT runs.id, runs.status, runs.started_at, runs.finished_at,
               scenarios.name AS scenario_name
        FROM runs
        LEFT JOIN scenarios ON scenarios.id = runs.scenario_id
-       WHERE runs.started_at >= datetime('now', '-1 day')
+       WHERE runs.started_at >= datetime('now', ?)
        ORDER BY runs.id DESC`,
     )
-    .all() as DigestRunRow[];
+    .all(spec.window) as DigestRunRow[];
 
   const failed = runs.filter((r) => r.status === 'failed').length;
   const success = runs.filter((r) => r.status === 'success').length;
   const other = runs.length - failed - success;
 
-  const subject = `Daily run digest: ${runs.length} run(s), ${failed} failed`;
+  const subject = `${spec.label} run digest: ${runs.length} run(s), ${failed} failed`;
 
   const rowsHtml = runs
     .map((r) => {
@@ -269,9 +343,9 @@ export function buildDigest(): { subject: string; html: string; text: string; ru
   const link = runsUrl();
   const table =
     runs.length === 0
-      ? '<p>No scenario runs in the last 24 hours.</p>'
+      ? `<p>No scenario runs in ${spec.windowText}.</p>`
       : `<table style="border-collapse:collapse;width:100%;font-size:14px;">
-<caption style="text-align:left;padding:0 0 8px;font-weight:bold;">Runs of the last 24 hours</caption>
+<caption style="text-align:left;padding:0 0 8px;font-weight:bold;">Runs of ${spec.windowText}</caption>
 <thead>
 <tr>
 <th scope="col" style="text-align:left;padding:6px 10px;border-bottom:2px solid #1a1a1a;">Run</th>
@@ -287,8 +361,8 @@ ${rowsHtml}
 
   const html = baseHtml(
     subject,
-    `<h1 style="font-size:20px;margin:0 0 8px;">Daily run digest</h1>
-<p>${runs.length} run(s) in the last 24 hours: <strong>${success} succeeded</strong>, <strong>${failed} failed</strong>${other ? `, ${other} other` : ''}.</p>
+    `<h1 style="font-size:20px;margin:0 0 8px;">${spec.label} run digest</h1>
+<p>${runs.length} run(s) in ${spec.windowText}: <strong>${success} succeeded</strong>, <strong>${failed} failed</strong>${other ? `, ${other} other` : ''}.</p>
 ${table}
 ${link ? `<p><a href="${esc(link)}" style="color:#1d4ed8;">Open the Runs page</a></p>` : ''}`,
   );
@@ -297,27 +371,31 @@ ${link ? `<p><a href="${esc(link)}" style="color:#1d4ed8;">Open the Runs page</a
     (r) => `#${r.id}  ${r.scenario_name ?? '(deleted scenario)'}  ${r.status}  ${r.started_at} UTC`,
   );
   const text =
-    `Daily run digest — ${runs.length} run(s) in the last 24 hours: ${success} succeeded, ${failed} failed${other ? `, ${other} other` : ''}.\n\n` +
-    (textLines.length ? textLines.join('\n') : 'No scenario runs in the last 24 hours.') +
+    `${spec.label} run digest — ${runs.length} run(s) in ${spec.windowText}: ${success} succeeded, ${failed} failed${other ? `, ${other} other` : ''}.\n\n` +
+    (textLines.length ? textLines.join('\n') : `No scenario runs in ${spec.windowText}.`) +
     (link ? `\n\n${link}` : '');
 
   return { subject, html, text, runCount: runs.length };
 }
 
-// Send the digest to every recipient that opted in. `force` skips the
-// once-per-day guard (used by the manual "Send digest now" button).
-export async function sendDailyDigest(force = false): Promise<{
+// Send a period's digest to every recipient that opted in to it. `force`
+// skips the once-per-period guard (used by the manual "Send digest now" button).
+export async function sendDigest(
+  period: DigestPeriod = 'daily',
+  force = false,
+): Promise<{
   sent: number;
   skipped: boolean;
   runCount: number;
   errors: string[];
 }> {
-  const today = localDateStamp();
-  if (!force && getSetting(DIGEST_LAST_SENT_KEY) === today) {
+  const spec = DIGEST_SPECS[period];
+  const stamp = spec.stamp(new Date());
+  if (!force && getSetting(spec.settingKey) === stamp) {
     return { sent: 0, skipped: true, runCount: 0, errors: [] };
   }
-  const targets = listRecipients().filter((r) => r.dailyDigest);
-  const { subject, html, text, runCount } = buildDigest();
+  const targets = listRecipients().filter(spec.optedIn);
+  const { subject, html, text, runCount } = buildDigest(period);
   const errors: string[] = [];
   let sent = 0;
   for (const r of targets) {
@@ -327,35 +405,46 @@ export async function sendDailyDigest(force = false): Promise<{
       html,
       text,
       // Manual re-sends get a distinct key so they actually go out.
-      idempotencyKey: force ? undefined : `daily-digest/${today}-r${r.id}`,
+      idempotencyKey: force ? undefined : `${period}-digest/${stamp}-r${r.id}`,
     });
     if (res.ok) sent += 1;
     else errors.push(`${r.email}: ${res.error}`);
   }
-  if (!force) setSetting(DIGEST_LAST_SENT_KEY, today);
+  if (!force) setSetting(spec.settingKey, stamp);
   return { sent, skipped: false, runCount, errors };
 }
 
-async function maybeSendScheduledDigest(): Promise<void> {
+// Back-compat alias.
+export const sendDailyDigest = (force = false) => sendDigest('daily', force);
+
+async function maybeSendScheduledDigests(): Promise<void> {
   if (!emailEnabled()) return;
-  if (new Date().getHours() < DIGEST_HOUR) return; // before 09:00 — not due yet
-  try {
-    const r = await sendDailyDigest();
-    if (!r.skipped) {
-      console.log(
-        `email: daily digest sent to ${r.sent} recipient(s) (${r.runCount} runs)` +
-          (r.errors.length ? `; errors: ${r.errors.join('; ')}` : ''),
-      );
+  const now = new Date();
+  for (const period of DIGEST_PERIODS) {
+    const spec = DIGEST_SPECS[period];
+    if (!spec.due(now)) continue; // this period's 09:00 hasn't come yet
+    if (getSetting(spec.settingKey) === spec.stamp(now)) continue; // already sent
+    if (!listRecipients().some(spec.optedIn)) continue; // nobody wants it — don't burn the stamp
+    try {
+      const r = await sendDigest(period);
+      if (!r.skipped) {
+        console.log(
+          `email: ${period} digest sent to ${r.sent} recipient(s) (${r.runCount} runs)` +
+            (r.errors.length ? `; errors: ${r.errors.join('; ')}` : ''),
+        );
+      }
+    } catch (e: any) {
+      console.error(`email: ${period} digest failed: ${e?.message ?? e}`);
     }
-  } catch (e: any) {
-    console.error(`email: daily digest failed: ${e?.message ?? e}`);
   }
 }
 
-// Fire the digest at 09:00 server-local time. Also checked once at startup so a
-// server that was down (or deploying) at 09:00 still sends that day's digest;
-// the last-sent date in app_settings prevents duplicates either way.
+// Fire at 09:00 server-local time every day; each period decides for itself
+// whether it's due (daily: every day, weekly: Mondays, monthly: the 1st). Also
+// checked once at startup so a server that was down (or deploying) at 09:00
+// still sends that period's digest later; the last-sent stamp in app_settings
+// prevents duplicates either way.
 export function startEmailDigestSchedule(): void {
-  cron.schedule(`0 ${DIGEST_HOUR} * * *`, () => void maybeSendScheduledDigest());
-  void maybeSendScheduledDigest();
+  cron.schedule(`0 ${DIGEST_HOUR} * * *`, () => void maybeSendScheduledDigests());
+  void maybeSendScheduledDigests();
 }
