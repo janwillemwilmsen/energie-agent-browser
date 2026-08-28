@@ -299,6 +299,18 @@ export interface RecordingStorageItem {
   missing: boolean;
   orphan: boolean;
 }
+export interface AuthStorageFile {
+  name: string;
+  file: string;
+  bytes: number;
+  modifiedAt: string;
+}
+export interface AuthStorage {
+  dir: string;
+  profiles: AuthStorageFile[];
+  sessionStates: (AuthStorageFile & { inUse: boolean })[];
+  encryptionKeyExists: boolean;
+}
 export type StorageCleanupAction =
   | 'thumbs'
   | 'preview'
@@ -620,6 +632,7 @@ export const api = {
   },
   storageSummary: () => req<StorageSummary>('/api/storage'),
   storageRuns: () => req<RunStorageItem[]>('/api/storage/runs'),
+  storageAuth: () => req<AuthStorage>('/api/storage/auth'),
   storageRecordings: () => req<RecordingStorageItem[]>('/api/storage/recordings'),
   storageDeleteRuns: (ids: number[], withRecordings = false) =>
     req<{ deletedRows: number; freedBytes: number; skippedRunning: number }>('/api/storage/runs/delete', {

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   api,
+  type AuthStorage,
   type RecordingStorageItem,
   type RunStorageItem,
   type StorageCleanupAction,
@@ -81,6 +82,7 @@ export function AdminStorage() {
   const [summary, setSummary] = useState<StorageSummary | null>(null);
   const [runs, setRuns] = useState<RunStorageItem[]>([]);
   const [recs, setRecs] = useState<RecordingStorageItem[]>([]);
+  const [auth, setAuth] = useState<AuthStorage | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -106,10 +108,16 @@ export function AdminStorage() {
     setErr(null);
     setLoading(true);
     try {
-      const [s, r, v] = await Promise.all([api.storageSummary(), api.storageRuns(), api.storageRecordings()]);
+      const [s, r, v, a] = await Promise.all([
+        api.storageSummary(),
+        api.storageRuns(),
+        api.storageRecordings(),
+        api.storageAuth(),
+      ]);
       setSummary(s);
       setRuns(r);
       setRecs(v);
+      setAuth(a);
       setSelRuns(new Set());
       setSelRecs(new Set());
     } catch (e: any) {
@@ -177,6 +185,37 @@ export function AdminStorage() {
     await run('recs:delete', async () => {
       const r = await api.storageDeleteRecordings({ ids, files });
       return `Deleted ${fmtInt(r.deleted)} recording(s), freed ${fmtSize(r.freedBytes)}.`;
+    });
+  }
+
+  async function deleteAuthProfile(name: string) {
+    if (
+      !confirm(
+        `Delete auth profile "${name}"?\n\nThis permanently removes the saved (encrypted) credentials from the agent-browser vault. Preflights that log in with this profile will fail until it is re-created.`,
+      )
+    ) {
+      return;
+    }
+    await run(`auth:profile:${name}`, async () => {
+      await api.deleteAuthProfile(name);
+      return `Auth profile "${name}" deleted.`;
+    });
+  }
+
+  async function deleteSessionStateFile(name: string, inUse: boolean) {
+    const warning = inUse
+      ? `"${name}" is currently bound to a live session — deleting it won't take effect until that daemon restarts.\n\n`
+      : '';
+    if (
+      !confirm(
+        `${warning}Delete persisted session state for "${name}"? The next run under this session starts with a clean cookie jar.`,
+      )
+    ) {
+      return;
+    }
+    await run(`auth:state:${name}`, async () => {
+      await api.deleteSessionState(name);
+      return `Session state "${name}" deleted.`;
     });
   }
 
@@ -486,6 +525,100 @@ export function AdminStorage() {
               onClick={() => void cleanup('vacuum', 'Database compacted')}
             />
           </div>
+        </>
+      )}
+
+      {/* ---- Auth & session files ---- */}
+      {auth && (
+        <>
+          <h2>Auth &amp; session files</h2>
+          <p className="muted">
+            agent-browser's files under <code>{auth.dir}</code>: the encrypted auth vault
+            (saved login credentials, one file per profile) and persisted session states (cookie
+            jars, one file per <code>--session-name</code>).
+            {auth.encryptionKeyExists && (
+              <>
+                {' '}The vault's <code>.encryption-key</code> is present — back it up; without it
+                every profile becomes unreadable.
+              </>
+            )}
+          </p>
+
+          <h3 style={{ margin: '12px 0 0' }}>Auth profiles (vault)</h3>
+          {auth.profiles.length === 0 ? (
+            <p className="muted">No saved auth profiles.</p>
+          ) : (
+            <table className="table storage-table-compact">
+              <thead>
+                <tr>
+                  <th>Profile</th>
+                  <th>File</th>
+                  <th className="num">Size</th>
+                  <th>Modified</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {auth.profiles.map((p) => (
+                  <tr key={p.name}>
+                    <td><code>{p.name}</code></td>
+                    <td className="storage-file"><code>auth/{p.file}</code></td>
+                    <td className="num">{fmtSize(p.bytes)}</td>
+                    <td>{fmtDate(p.modifiedAt)}</td>
+                    <td>
+                      <button
+                        className="btn-danger"
+                        disabled={busy != null}
+                        onClick={() => void deleteAuthProfile(p.name)}
+                      >
+                        {busy === `auth:profile:${p.name}` ? 'Deleting…' : 'Delete'}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+
+          <h3 style={{ margin: '16px 0 0' }}>Session states (cookie jars)</h3>
+          {auth.sessionStates.length === 0 ? (
+            <p className="muted">No saved session state files.</p>
+          ) : (
+            <table className="table storage-table-compact">
+              <thead>
+                <tr>
+                  <th>Session</th>
+                  <th>File</th>
+                  <th className="num">Size</th>
+                  <th>Modified</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {auth.sessionStates.map((s) => (
+                  <tr key={s.name}>
+                    <td>
+                      <code>{s.name}</code>
+                      {s.inUse && <span className="muted"> · in use</span>}
+                    </td>
+                    <td className="storage-file"><code>sessions/{s.file}</code></td>
+                    <td className="num">{fmtSize(s.bytes)}</td>
+                    <td>{fmtDate(s.modifiedAt)}</td>
+                    <td>
+                      <button
+                        className="btn-danger"
+                        disabled={busy != null}
+                        onClick={() => void deleteSessionStateFile(s.name, s.inUse)}
+                      >
+                        {busy === `auth:state:${s.name}` ? 'Deleting…' : 'Delete'}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+
         </>
       )}
 

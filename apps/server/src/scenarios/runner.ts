@@ -323,7 +323,7 @@ async function executeStep(ctx: RunContext, step: StepRow): Promise<void> {
           session: ctx.session,
           timeoutMs: 15_000,
         });
-        if (r.exitCode !== 0) throw new Error(`scroll failed: ${r.stderr || r.stdout}`);
+        if (r.exitCode !== 0) throw new Error(`scroll failed: ${(r.stderr || r.stdout).trim() || `(no output, exit code ${r.exitCode} — the browser session likely crashed or was closed mid-run)`}`);
         return;
       }
       if (payload.toBottom) {
@@ -339,7 +339,7 @@ async function executeStep(ctx: RunContext, step: StepRow): Promise<void> {
             session: ctx.session,
             timeoutMs: 15_000,
           });
-          if (r.exitCode !== 0) throw new Error(`scroll failed: ${r.stderr || r.stdout}`);
+          if (r.exitCode !== 0) throw new Error(`scroll failed: ${(r.stderr || r.stdout).trim() || `(no output, exit code ${r.exitCode} — the browser session likely crashed or was closed mid-run)`}`);
           await new Promise((res) => setTimeout(res, waitMs));
         }
         return;
@@ -351,7 +351,7 @@ async function executeStep(ctx: RunContext, step: StepRow): Promise<void> {
         session: ctx.session,
         timeoutMs: 15_000,
       });
-      if (r.exitCode !== 0) throw new Error(`scroll failed: ${r.stderr || r.stdout}`);
+      if (r.exitCode !== 0) throw new Error(`scroll failed: ${(r.stderr || r.stdout).trim() || `(no output, exit code ${r.exitCode} — the browser session likely crashed or was closed mid-run)`}`);
       return;
     }
     case 'wait': {

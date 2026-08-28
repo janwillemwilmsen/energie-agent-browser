@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -535,6 +536,64 @@ export async function storageRoutes(app: FastifyInstance) {
       deleted += 1;
     }
     return { deleted, freedBytes: freed };
+  });
+
+  // Auth & session files: agent-browser's encrypted auth vault
+  // (~/.agent-browser/auth/<name>.json), its persisted session states
+  // (~/.agent-browser/sessions/<name>.json), and the app's own auth files in
+  // dataDir. Listing only — deletion goes through the existing endpoints
+  // (DELETE /api/auth-profiles/:name via the agent-browser CLI, and
+  // DELETE /api/session-states/:name), so vault encryption bookkeeping and
+  // selector overrides stay consistent.
+  app.get('/api/storage/auth', async () => {
+    const abDir = path.join(os.homedir(), '.agent-browser');
+
+    const listJsonFiles = (dir: string) => {
+      const out: { name: string; file: string; bytes: number; modifiedAt: string }[] = [];
+      for (const f of listFiles(dir)) {
+        if (!f.endsWith('.json')) continue;
+        try {
+          const st = fs.statSync(path.join(dir, f));
+          if (!st.isFile()) continue;
+          out.push({
+            name: f.slice(0, -'.json'.length),
+            file: f,
+            bytes: st.size,
+            modifiedAt: st.mtime.toISOString(),
+          });
+        } catch {
+          /* skip */
+        }
+      }
+      out.sort((a, b) => a.name.localeCompare(b.name));
+      return out;
+    };
+
+    // Session names currently bound to a live daemon (mirror of the
+    // session-states route): deleting an in-use state only takes effect after
+    // that daemon restarts.
+    const bound = new Set<string>();
+    for (const f of listFiles(abDir)) {
+      if (!f.endsWith('.session-name')) continue;
+      try {
+        const v = fs.readFileSync(path.join(abDir, f), 'utf-8').trim();
+        if (v) bound.add(v);
+      } catch {
+        /* ignore */
+      }
+    }
+
+    const encryptionKeyExists = fs.existsSync(path.join(abDir, '.encryption-key'));
+
+    return {
+      dir: abDir,
+      profiles: listJsonFiles(path.join(abDir, 'auth')),
+      sessionStates: listJsonFiles(path.join(abDir, 'sessions')).map((s) => ({
+        ...s,
+        inUse: bound.has(s.name),
+      })),
+      encryptionKeyExists,
+    };
   });
 
   // Maintenance actions.
