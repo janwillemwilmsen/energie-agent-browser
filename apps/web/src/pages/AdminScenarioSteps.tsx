@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { api, type Preflight, type Scenario, type ScenarioDetail, type ScenarioStep } from '../lib/api.js';
 import { makeBundle, toPortableScenario } from '../lib/scenarioIO.js';
 
@@ -74,6 +74,10 @@ export function AdminScenarioSteps() {
   const [adding, setAdding] = useState(false);
   const [copied, setCopied] = useState(false);
 
+  // ?scenario=<id> preselects a scenario — used by the "edit raw" link on the
+  // visual ScenarioEditor to jump straight to this page for that scenario.
+  const [searchParams] = useSearchParams();
+
   useEffect(() => {
     api
       .listScenarios()
@@ -84,6 +88,9 @@ export function AdminScenarioSteps() {
       .listPreflights()
       .then(setPreflights)
       .catch(() => undefined);
+    const q = Number(searchParams.get('scenario'));
+    if (Number.isInteger(q) && q > 0) void loadScenario(q);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only preselect
   }, []);
 
   async function loadScenario(id: number) {

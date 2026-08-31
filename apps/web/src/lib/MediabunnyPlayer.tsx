@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { Maximize2, Minimize2 } from 'lucide-react';
 import { ALL_FORMATS, CanvasSink, Input, UrlSource, type InputVideoTrack } from 'mediabunny';
 
 // Canvas-based player built on Mediabunny. agent-browser / Playwright WebM files
@@ -20,6 +21,7 @@ function fmt(t: number): string {
 }
 
 export function MediabunnyPlayer({ src }: { src: string }) {
+  const playerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const inputRef = useRef<Input | null>(null);
   const sinkRef = useRef<CanvasSink | null>(null);
@@ -34,6 +36,7 @@ export function MediabunnyPlayer({ src }: { src: string }) {
   const [duration, setDuration] = useState(0);
   const [current, setCurrent] = useState(0);
   const [playing, setPlaying] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
 
   useEffect(() => {
     // Reset on (re)mount. React 18 StrictMode runs the cleanup once right after
@@ -51,6 +54,57 @@ export function MediabunnyPlayer({ src }: { src: string }) {
       }
     };
   }, []);
+
+  // Poster: decode just the first frame on mount so the card shows a still
+  // instead of a black box. Uses its own short-lived Input that is disposed as
+  // soon as the frame is drawn — the real (seekable) decoder still only spins
+  // up when the user clicks Load.
+  useEffect(() => {
+    let cancelled = false;
+    const input = new Input({ source: new UrlSource(src), formats: ALL_FORMATS });
+    (async () => {
+      try {
+        const track = await input.getPrimaryVideoTrack();
+        if (!track || cancelled || sinkRef.current) return;
+        const el = canvasRef.current;
+        if (el) {
+          el.width = track.displayWidth;
+          el.height = track.displayHeight;
+        }
+        const sink = new CanvasSink(track);
+        const first = await sink.getCanvas(0);
+        // sinkRef check: if the user hit Load meanwhile, the real player owns
+        // the canvas now — don't overwrite its frame with the poster.
+        if (first && !cancelled && !sinkRef.current) draw(first.canvas);
+      } catch {
+        /* no poster — the card just stays black until Load */
+      } finally {
+        try {
+          input.dispose();
+        } catch {
+          /* ignore */
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [src]);
+
+  // Track fullscreen so the toggle button can flip its icon (Esc included).
+  useEffect(() => {
+    const onChange = () => setFullscreen(document.fullscreenElement === playerRef.current);
+    document.addEventListener('fullscreenchange', onChange);
+    return () => document.removeEventListener('fullscreenchange', onChange);
+  }, []);
+
+  function toggleFullscreen() {
+    if (document.fullscreenElement === playerRef.current) {
+      void document.exitFullscreen();
+    } else {
+      void playerRef.current?.requestFullscreen();
+    }
+  }
 
   function draw(canvas: HTMLCanvasElement | OffscreenCanvas) {
     const el = canvasRef.current;
@@ -143,7 +197,7 @@ export function MediabunnyPlayer({ src }: { src: string }) {
   }
 
   return (
-    <div className="mb-player">
+    <div className="mb-player" ref={playerRef}>
       <div className="mb-canvas-wrap">
         <canvas ref={canvasRef} className="mb-canvas" />
         {phase === 'idle' && (
@@ -153,6 +207,18 @@ export function MediabunnyPlayer({ src }: { src: string }) {
         )}
         {phase === 'loading' && <div className="mb-overlay">Decoding…</div>}
         {phase === 'error' && <div className="mb-overlay mb-error">⚠ {error}</div>}
+        <button
+          type="button"
+          className="mb-fs"
+          onClick={toggleFullscreen}
+          title={fullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+        >
+          {fullscreen ? (
+            <Minimize2 size={15} aria-label="Exit fullscreen" />
+          ) : (
+            <Maximize2 size={15} aria-label="Fullscreen" />
+          )}
+        </button>
       </div>
 
       {phase === 'ready' && (

@@ -461,7 +461,16 @@ export function ScenarioEditor() {
 
       <div className="editor-grid scenario-editor">
         <div>
-          <h2>Steps</h2>
+          <h2>
+            Steps{' '}
+            <Link
+              to={`/admin/scenario-steps?scenario=${scenarioId}`}
+              className="steps-raw-link"
+              title="Open this scenario in the raw steps editor (Admin)"
+            >
+              edit raw
+            </Link>
+          </h2>
           <div className="retry-policy">
             <span className="muted">On step failure, retry</span>
             <label>

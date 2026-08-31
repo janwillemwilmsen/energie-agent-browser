@@ -154,7 +154,7 @@ export function Recordings() {
           {visible.map((r) => (
             <article key={r.id} className="rec-card">
               <header className="rec-card-head">
-                <strong>
+                <strong title={r.scenario_name ?? undefined}>
                   {r.scenario_id != null ? (
                     <Link to={`/scenarios/${r.scenario_id}`}>
                       {r.scenario_name ?? `Scenario ${r.scenario_id}`}
@@ -163,17 +163,20 @@ export function Recordings() {
                     r.scenario_name ?? 'Unknown scenario'
                   )}
                 </strong>
-                {r.brand && <span className="tag tag-brand">{r.brand}</span>}
-                {r.type && <span className="tag tag-type">{r.type}</span>}
                 <button
                   className="step-del"
                   title="Delete recording"
                   onClick={() => void remove(r.id)}
-                  style={{ marginLeft: 'auto' }}
                 >
                   🗑
                 </button>
               </header>
+              {(r.brand || r.type) && (
+                <div className="rec-card-tags">
+                  {r.brand && <span className="tag tag-brand">{r.brand}</span>}
+                  {r.type && <span className="tag tag-type">{r.type}</span>}
+                </div>
+              )}
 
               <MediabunnyPlayer src={api.recordingVideoUrl(r.id)} />
 
