@@ -229,9 +229,9 @@ export function AdminScenarioSteps() {
 
       {detail && (
         <>
-          <p className="muted" style={{ marginBottom: 4 }}>
+          <p className="muted" style={{ marginBottom: 8 , marginTop: 8 }}>
             <strong>{detail.name}</strong> · <code>{detail.url}</code> ·{' '}
-            <Link to={`/scenarios/${detail.id}`}>open in visual editor</Link>
+            <button onClick={() => window.location.href = `/scenarios/${detail.id}`}>open in visual editor</button>
           </p>
 
           {rows.length === 0 ? (

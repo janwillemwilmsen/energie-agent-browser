@@ -41,6 +41,7 @@ import { AdminNetwork } from './pages/AdminNetwork.js';
 import { AdminSessionStates } from './pages/AdminSessionStates.js';
 import { AdminAi } from './pages/AdminAi.js';
 import { AdminStorage } from './pages/AdminStorage.js';
+import { AdminEnv } from './pages/AdminEnv.js';
 
 interface NavItem {
   to: string;
@@ -210,6 +211,7 @@ export function App() {
           <Route path="/admin/session-states" element={<AdminSessionStates />} />
           <Route path="/admin/ai" element={<AdminAi />} />
           <Route path="/admin/storage" element={<AdminStorage />} />
+          <Route path="/admin/env" element={<AdminEnv />} />
           <Route path="/preflight" element={<PreflightPage />} />
           <Route path="/schedules" element={<Schedules />} />
           <Route path="/runs" element={<Runs />} />

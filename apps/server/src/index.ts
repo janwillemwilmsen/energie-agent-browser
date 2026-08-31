@@ -23,6 +23,7 @@ import { isAuthenticated } from './auth.js';
 import { pushRoutes } from './routes/push.js';
 import { emailRoutes } from './routes/email.js';
 import { agentTasksRoutes } from './routes/agentTasks.js';
+import { adminEnvRoutes } from './routes/adminEnv.js';
 import { ensurePushConfigured } from './push.js';
 import { startEmailDigestSchedule } from './email.js';
 import { browserlessHealthRoutes } from './routes/browserlessHealth.js';
@@ -105,6 +106,7 @@ async function main() {
   await app.register(pushRoutes);
   await app.register(emailRoutes);
   await app.register(agentTasksRoutes);
+  await app.register(adminEnvRoutes);
   await app.register(browserlessHealthRoutes);
   await app.register(storageRoutes);
   await app.register(screenshotsZipRoutes);

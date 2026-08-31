@@ -649,4 +649,16 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ action }),
     }),
+  getEnv: () =>
+    req<{
+      path: string;
+      exists: boolean;
+      updatedAt: string | null;
+      entries: { key: string; value: string; secret: boolean }[];
+    }>('/api/admin/env'),
+  saveEnv: (entries: { key: string; value: string }[]) =>
+    req<{ ok: boolean; restartRequired: boolean; backupPath: string }>('/api/admin/env', {
+      method: 'PUT',
+      body: JSON.stringify({ entries }),
+    }),
 };
