@@ -100,7 +100,7 @@ export function AdminEnv() {
 
   return (
     <section>
-      <p><Link to="/admin">← Admin</Link></p>
+      <p className="breadcrumb"><Link to="/admin">← Admin</Link></p>
       <h1>Environment variables</h1>
       <p className="muted">
         Edits the server's <code>.env</code> file

@@ -65,7 +65,7 @@ export function AdminSessionStates() {
 
   return (
     <section>
-      <p>
+      <p className="breadcrumb">
         <Link to="/admin">← Admin</Link>
       </p>
       <h1>Session state files</h1>

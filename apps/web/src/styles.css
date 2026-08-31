@@ -158,6 +158,32 @@ body {
 }
 .admin-link:hover { border-color: var(--accent); }
 
+/* "← Admin" breadcrumb back-link at the top of admin sub-pages. A bare <a>
+   renders in default browser blue/purple, which is hard to read on the dark
+   background — style it as a quiet pill (same family as .admin-link) that
+   brightens on hover. */
+.breadcrumb {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 16px;
+}
+.breadcrumb a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: none;
+}
+.breadcrumb a:hover { color: var(--accent); border-color: var(--accent); }
+
 /* Raw scenario-steps editor (Admin → Raw scenario steps). */
 .admin-scenario-pick { display: flex; flex-direction: column; gap: 4px; max-width: 480px; margin: 12px 0; }
 .admin-scenario-pick > span { font-size: 13px; color: var(--muted); }

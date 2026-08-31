@@ -194,7 +194,7 @@ export function AdminScenarioSteps() {
 
   return (
     <section>
-      <p>
+      <p className="breadcrumb">
         <Link to="/admin">← Admin</Link>
       </p>
       <h1>Raw scenario steps</h1>

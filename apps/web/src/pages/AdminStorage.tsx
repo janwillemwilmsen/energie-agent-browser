@@ -366,7 +366,7 @@ export function AdminStorage() {
 
   return (
     <section className="storage-page">
-      <p>
+      <p className="breadcrumb">
         <Link to="/admin">← Admin</Link>
       </p>
       <h1>Storage</h1>

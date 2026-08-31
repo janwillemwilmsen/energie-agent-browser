@@ -37,7 +37,7 @@ export function AdminNetwork() {
 
   return (
     <section>
-      <p>
+      <p className="breadcrumb">
         <Link to="/admin">← Admin</Link>
       </p>
       <h1>Network inspector</h1>

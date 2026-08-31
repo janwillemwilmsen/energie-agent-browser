@@ -119,7 +119,7 @@ export function AdminScenarioIO() {
 
   return (
     <section>
-      <p>
+      <p className="breadcrumb">
         <Link to="/admin">← Admin</Link>
       </p>
       <h1>Export / import scenarios</h1>

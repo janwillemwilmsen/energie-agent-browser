@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api } from '../lib/api.js';
 
 // Admin page for the AI scenario builder: pick which model the "✨ AI task"
@@ -58,6 +59,7 @@ export function AdminAi() {
 
   return (
     <section>
+      <p className="breadcrumb"><Link to="/admin">← Admin</Link></p>
       <h1>AI scenario builder</h1>
       <p className="muted">
         Which model the <strong>✨ AI task</strong> agent uses to build scenario steps (via the
