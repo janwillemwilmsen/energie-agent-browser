@@ -115,7 +115,8 @@ function SortablePreflightStep({
         ⠿
       </button>
       <span className="step-body">
-        <code>{step.kind}</code> {summarize(step)}
+        <code className={`step-kind step-kind-${step.kind}`}>{step.kind}</code>{' '}
+        {summarize(step)}
       </span>
       <button className="step-del" title="Remove step" onClick={onDelete}>
         ×

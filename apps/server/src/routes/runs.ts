@@ -83,7 +83,15 @@ export async function runsRoutes(app: FastifyInstance) {
 
       const { w, h } = ShotQuery.parse(req.query);
       let servePath = filepath;
-      let type = 'image/png';
+      // Screenshots may be png (default), jpg/jpeg, or webp per the step's
+      // configured format — label the original accordingly.
+      const srcExt = path.extname(name).toLowerCase();
+      let type =
+        srcExt === '.jpg' || srcExt === '.jpeg'
+          ? 'image/jpeg'
+          : srcExt === '.webp'
+            ? 'image/webp'
+            : 'image/png';
       if (w) {
         try {
           servePath = await ensureThumb(filepath, { width: w, height: h });

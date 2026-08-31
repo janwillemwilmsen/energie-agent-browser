@@ -98,6 +98,7 @@ export function ScenarioEditor() {
   const [bootstrapping, setBootstrapping] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [aiModalOpen, setAiModalOpen] = useState(false);
+  const [editingStep, setEditingStep] = useState<ScenarioStep | null>(null);
   const [sessionAlive, setSessionAlive] = useState<boolean | null>(null);
   const [playStatus, setPlayStatus] = useState<string | null>(null);
   const [lastRunId, setLastRunId] = useState<number | null>(null);
@@ -537,6 +538,7 @@ export function ScenarioEditor() {
                       idx={idx}
                       total={data.steps.length}
                       savingStep={savingStep}
+                      onEdit={() => setEditingStep(s)}
                       onMoveUp={() => moveStep(s.id, 'up')}
                       onMoveDown={() => moveStep(s.id, 'down')}
                       onDelete={() => deleteStep(s.id)}
@@ -545,6 +547,18 @@ export function ScenarioEditor() {
                 </ol>
               </SortableContext>
             </DndContext>
+          )}
+
+          {editingStep && (
+            <StepEditModal
+              step={editingStep}
+              scenarioId={scenarioId}
+              onClose={() => setEditingStep(null)}
+              onSaved={() => {
+                setEditingStep(null);
+                void reload();
+              }}
+            />
           )}
 
           <div className="actions">
@@ -825,6 +839,7 @@ function SortableStep({
   idx,
   total,
   savingStep,
+  onEdit,
   onMoveUp,
   onMoveDown,
   onDelete,
@@ -833,6 +848,7 @@ function SortableStep({
   idx: number;
   total: number;
   savingStep: boolean;
+  onEdit: () => void;
   onMoveUp: () => void;
   onMoveDown: () => void;
   onDelete: () => void;
@@ -859,8 +875,12 @@ function SortableStep({
         ⠿
       </button>
       <span className="step-body">
-        <code>{step.kind}</code> {summarizeStep(step.kind, p)}
+        <code className={`step-kind step-kind-${step.kind}`}>{step.kind}</code>{' '}
+        {summarizeStep(step.kind, p)}
       </span>
+      <button className="step-move" title="Edit step" onClick={onEdit} disabled={savingStep}>
+        ✎
+      </button>
       <button className="step-move" title="Move up" onClick={onMoveUp} disabled={savingStep || idx === 0}>
         ▲
       </button>
@@ -903,7 +923,7 @@ function summarizeStep(kind: string, p: any): string {
     return `${selectorLabel(s)}${txt ? ` ${JSON.stringify(txt)}` : ''}`;
   }
   if (kind === 'screenshot')
-    return `${p.label ?? 'screenshot'}${p.fullPage ? ' (full)' : ''}${p.viewport === 'mobile' ? ' (mobile)' : ''}${p.annotate ? ' (annotated)' : ''}`;
+    return `${p.label ?? 'screenshot'}${p.fullPage ? ' (full)' : ''}${p.viewport === 'mobile' ? ' (mobile)' : ''}${p.annotate ? ' (annotated)' : ''}${p.format && p.format !== 'png' ? ` (${p.format}${p.quality ? ` q${p.quality}` : ''})` : ''}`;
   if (kind === 'scroll') {
     if (p.selector) return `into view: ${selectorLabel(p.selector)}`;
     if (p.toBottom) return 'to bottom (lazy-load)';
@@ -1304,6 +1324,170 @@ function AiTaskModal({
           <p className="error" style={{ margin: 0 }}>✗ {error ?? 'Task failed.'}</p>
         )}
         {error && status === 'idle' && <p className="error" style={{ margin: 0 }}>{error}</p>}
+      </div>
+    </div>
+  );
+}
+
+// Modal for the ✎ button on a step row. Screenshot steps get friendly fields —
+// label, full page, mobile, annotate, plus output format and quality (smaller
+// files with jpeg/webp) — while every other kind exposes the payload JSON
+// directly. Unknown payload keys are preserved on save.
+function StepEditModal({
+  step,
+  scenarioId,
+  onClose,
+  onSaved,
+}: {
+  step: ScenarioStep;
+  scenarioId: number;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  let initial: any = {};
+  try { initial = JSON.parse(step.payload_json); } catch { /* JSON editor shows the raw text */ }
+  const isScreenshot = step.kind === 'screenshot';
+
+  // Screenshot-friendly fields.
+  const [label, setLabel] = useState(String(initial.label ?? ''));
+  const [fullPage, setFullPage] = useState(initial.fullPage !== false);
+  const [mobile, setMobile] = useState(initial.viewport === 'mobile');
+  const [annotate, setAnnotate] = useState(initial.annotate === true);
+  const [format, setFormat] = useState<string>(
+    initial.format === 'jpeg' || initial.format === 'jpg' ? 'jpeg' : initial.format === 'webp' ? 'webp' : 'png',
+  );
+  const [quality, setQuality] = useState<number>(
+    Number.isFinite(Number(initial.quality)) && Number(initial.quality) > 0 ? Number(initial.quality) : 80,
+  );
+
+  // Raw JSON editor for all other step kinds.
+  const [json, setJson] = useState(() => {
+    try { return JSON.stringify(JSON.parse(step.payload_json), null, 2); } catch { return step.payload_json; }
+  });
+
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function save() {
+    let payload: unknown;
+    if (isScreenshot) {
+      const next: Record<string, unknown> = { ...initial, label: label.trim() || 'screenshot', fullPage };
+      if (mobile) next.viewport = 'mobile'; else delete next.viewport;
+      if (annotate) next.annotate = true; else delete next.annotate;
+      if (format === 'png') {
+        delete next.format;
+        delete next.quality;
+      } else {
+        next.format = format;
+        next.quality = Math.min(100, Math.max(1, Math.round(quality)));
+      }
+      payload = next;
+    } else {
+      try {
+        payload = JSON.parse(json);
+      } catch (e: any) {
+        setError(`Invalid JSON: ${e?.message ?? e}`);
+        return;
+      }
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await api.updateStep(scenarioId, step.id, { position: step.position, kind: step.kind, payload });
+      onSaved();
+    } catch (e: any) {
+      setError(e?.message ?? String(e));
+      setBusy(false);
+    }
+  }
+
+  const col: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: 4, fontSize: 13 };
+  const row: React.CSSProperties = { display: 'flex', gap: 6, alignItems: 'center', fontSize: 13 };
+
+  return (
+    <div
+      style={{
+        position: 'fixed', inset: 0, zIndex: 1000,
+        background: 'rgba(0,0,0,0.55)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+      }}
+      onClick={(e) => { if (e.target === e.currentTarget && !busy) onClose(); }}
+    >
+      <div
+        style={{
+          width: '100%', maxWidth: 480, maxHeight: '85vh', overflow: 'auto',
+          background: 'var(--bg, #1b1b1f)', border: '1px solid var(--border, rgba(127,127,127,0.35))',
+          borderRadius: 12, padding: 20, display: 'flex', flexDirection: 'column', gap: 12,
+        }}
+      >
+        <h2 style={{ margin: 0, fontSize: 18 }}>
+          Edit step <code>{step.kind}</code>
+        </h2>
+        {isScreenshot ? (
+          <>
+            <label style={col}>
+              <span>Label</span>
+              <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="screenshot" />
+            </label>
+            <label style={row}>
+              <input type="checkbox" checked={fullPage} onChange={(e) => setFullPage(e.target.checked)} />
+              Full page (entire scrollable page, not just the viewport)
+            </label>
+            <label style={row}>
+              <input type="checkbox" checked={mobile} onChange={(e) => setMobile(e.target.checked)} />
+              Mobile viewport (switch device, capture, switch back)
+            </label>
+            <label style={row}>
+              <input type="checkbox" checked={annotate} onChange={(e) => setAnnotate(e.target.checked)} />
+              Annotate interactive elements
+            </label>
+            <label style={col}>
+              <span>File format</span>
+              <select value={format} onChange={(e) => setFormat(e.target.value)}>
+                <option value="png">png — lossless, largest files</option>
+                <option value="jpeg">jpeg — small files</option>
+                <option value="webp">webp — smallest files</option>
+              </select>
+            </label>
+            {format !== 'png' && (
+              <label style={col}>
+                <span>Quality: {quality}</span>
+                <input
+                  type="range"
+                  min={1}
+                  max={100}
+                  value={quality}
+                  onChange={(e) => setQuality(Number(e.target.value))}
+                />
+                <span className="muted" style={{ fontSize: 12 }}>
+                  Lower = smaller files; 70–85 is usually visually indistinguishable.
+                </span>
+              </label>
+            )}
+          </>
+        ) : (
+          <label style={col}>
+            <span>Payload JSON</span>
+            <textarea
+              value={json}
+              onChange={(e) => setJson(e.target.value)}
+              rows={10}
+              spellCheck={false}
+              style={{
+                fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                fontSize: 12,
+                resize: 'vertical',
+              }}
+            />
+          </label>
+        )}
+        {error && <p className="error" style={{ margin: 0 }}>{error}</p>}
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <button onClick={onClose} disabled={busy}>Cancel</button>
+          <button onClick={() => void save()} disabled={busy}>
+            {busy ? 'Saving…' : '💾 Save'}
+          </button>
+        </div>
       </div>
     </div>
   );

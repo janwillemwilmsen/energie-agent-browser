@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import { PNG } from 'pngjs';
 import pixelmatch from 'pixelmatch';
+import sharp from 'sharp';
 
 export interface DiffResult {
   status: 'ok' | 'size_mismatch';
@@ -14,30 +15,44 @@ export interface DiffResult {
   note?: string;
 }
 
+interface RawImage {
+  width: number;
+  height: number;
+  data: Buffer;
+}
+
+// Decode any supported screenshot format (png/jpeg/webp) into tightly-packed
+// RGBA. sharp auto-detects the container from the bytes, so the diff pipeline
+// no longer assumes PNG sources.
+async function readRaw(filePath: string): Promise<RawImage> {
+  const { data, info } = await sharp(filePath).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  return { width: info.width, height: info.height, data };
+}
+
 // Extract the top-left w×h RGBA region as a tightly-packed buffer. When the
 // source already matches the target size, the original buffer is returned.
-function cropTopLeft(png: PNG, w: number, h: number): Buffer {
-  if (png.width === w && png.height === h) return png.data;
+function cropTopLeft(img: RawImage, w: number, h: number): Buffer {
+  if (img.width === w && img.height === h) return img.data;
   const out = Buffer.alloc(w * h * 4);
   for (let y = 0; y < h; y++) {
-    const srcStart = y * png.width * 4;
-    png.data.copy(out, y * w * 4, srcStart, srcStart + w * 4);
+    const srcStart = y * img.width * 4;
+    img.data.copy(out, y * w * 4, srcStart, srcStart + w * 4);
   }
   return out;
 }
 
-// Pixel-diff two PNG files, writing the diff image to outPath. When the images
-// differ in size we compare the common top-left overlap and flag the result as
-// 'size_mismatch' (the chosen policy: see what changed above the fold rather
-// than refusing entirely).
-export function diffPngFiles(
+// Pixel-diff two image files (png/jpeg/webp), writing the diff image — always
+// a PNG — to outPath. When the images differ in size we compare the common
+// top-left overlap and flag the result as 'size_mismatch' (the chosen policy:
+// see what changed above the fold rather than refusing entirely).
+export async function diffImageFiles(
   baselinePath: string,
   targetPath: string,
   outPath: string,
   threshold = 0.1,
-): DiffResult {
-  const a = PNG.sync.read(fs.readFileSync(baselinePath));
-  const b = PNG.sync.read(fs.readFileSync(targetPath));
+): Promise<DiffResult> {
+  const a = await readRaw(baselinePath);
+  const b = await readRaw(targetPath);
 
   const w = Math.min(a.width, b.width);
   const h = Math.min(a.height, b.height);
@@ -66,7 +81,8 @@ export function diffPngFiles(
   };
 }
 
-export function readPngSize(filePath: string): { width: number; height: number } {
-  const png = PNG.sync.read(fs.readFileSync(filePath));
-  return { width: png.width, height: png.height };
+export async function readImageSize(filePath: string): Promise<{ width: number; height: number }> {
+  const meta = await sharp(filePath).metadata();
+  if (!meta.width || !meta.height) throw new Error(`could not read image size: ${filePath}`);
+  return { width: meta.width, height: meta.height };
 }

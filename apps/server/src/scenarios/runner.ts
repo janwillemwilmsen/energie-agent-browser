@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import sharp from 'sharp';
 import { config } from '../config.js';
 import { getDb } from '../db/index.js';
 import { run, runJson, closeSession, ensureSession } from '../agentBrowser/driver.js';
@@ -412,11 +413,23 @@ async function executeStep(ctx: RunContext, step: StepRow): Promise<void> {
       // diff view). Otherwise it follows the run's current viewport.
       const mobileShot = payload.viewport === 'mobile';
       const suffix = mobileShot ? 'mobile' : ctx.viewport;
-      // NNN-YYYYMMDD-HHMMSS-label-viewport.png — position stays first (diff sort
+      // Output format + quality (payload.format/payload.quality). png (default)
+      // is lossless; jpeg is captured natively by agent-browser; webp is
+      // captured as png and post-converted with sharp below (the CLI only
+      // supports png/jpeg). Lossy formats cut file size dramatically.
+      const rawFormat = String(payload.format ?? 'png').toLowerCase();
+      const format: 'png' | 'jpeg' | 'webp' =
+        rawFormat === 'jpeg' || rawFormat === 'jpg' ? 'jpeg' : rawFormat === 'webp' ? 'webp' : 'png';
+      const qualityNum = Math.round(Number(payload.quality));
+      const quality = Number.isFinite(qualityNum) ? Math.min(100, Math.max(1, qualityNum)) : 80;
+      const ext = format === 'jpeg' ? 'jpg' : format;
+      // NNN-YYYYMMDD-HHMMSS-label-viewport.<ext> — position stays first (diff sort
       // relies on it); the timestamp block sits between position and label and is
       // stripped by the cross-run slot matchers so screenshots still pair up.
-      const filename = `${step.position.toString().padStart(3, '0')}-${ctx.fileStamp}-${label}-${suffix}.png`;
+      const filename = `${step.position.toString().padStart(3, '0')}-${ctx.fileStamp}-${label}-${suffix}.${ext}`;
       const filepath = path.join(ctx.screenshotDir, filename);
+      // webp: capture a lossless png next to the final path, convert after.
+      const capturePath = format === 'webp' ? `${filepath}.capture.png` : filepath;
       // agent-browser's screenshot default is VIEWPORT-only; --full captures
       // the entire scrollable page. Step payload's `fullPage` defaults to true
       // on the frontend, so most steps end up with --full unless explicitly
@@ -435,13 +448,16 @@ async function executeStep(ctx: RunContext, step: StepRow): Promise<void> {
         await sleep(50);
       }
 
-      const args = ['screenshot'];
+      // Global flags must precede the subcommand (run() only prepends --session).
+      const args: string[] = [];
+      if (format === 'jpeg') args.push('--screenshot-format', 'jpeg', '--screenshot-quality', String(quality));
+      args.push('screenshot');
       if (fullPage) args.push('--full');
       if (annotate) args.push('--annotate');
-      args.push(filepath);
+      args.push(capturePath);
       appendLog(
         ctx,
-        `screenshot${fullPage ? ' (full)' : ' (viewport)'}${mobileShot ? ' (mobile)' : ''}${annotate ? ' (annotated)' : ''} → ${filename}`,
+        `screenshot${fullPage ? ' (full)' : ' (viewport)'}${mobileShot ? ' (mobile)' : ''}${annotate ? ' (annotated)' : ''}${format !== 'png' ? ` (${format} q${quality})` : ''} → ${filename}`,
       );
       // Chrome refuses to capture while a navigation is mid-flight (the new
       // document has no layout yet): "Cannot take screenshot with 0 width".
@@ -457,6 +473,11 @@ async function executeStep(ctx: RunContext, step: StepRow): Promise<void> {
         r = await run(args, { session: ctx.session, timeoutMs: 60_000 });
       }
       if (r.exitCode !== 0) throw new Error(`screenshot failed: ${r.stderr || r.stdout}`);
+      if (format === 'webp') {
+        // agent-browser can't emit webp — convert the png capture and drop it.
+        await sharp(capturePath).webp({ quality }).toFile(filepath);
+        fs.rmSync(capturePath, { force: true });
+      }
       ctx.screenshots.push(filename);
       // The annotate legend is on stdout — keep it in the run log so the labels
       // are interpretable later.

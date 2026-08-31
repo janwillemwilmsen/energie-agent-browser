@@ -405,9 +405,39 @@ code { background: rgba(255,255,255,0.06); padding: 2px 4px; border-radius: 3px;
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 4px 0;
+  padding: 4px 6px;
+  margin: 0 -6px;
+  border-radius: 6px;
+  transition: background 0.12s ease;
 }
+.step-list li:hover { background: rgba(255, 255, 255, 0.06); }
 .step-list .step-body { flex: 1; }
+/* Colored badge per step kind, so the different action types are
+   distinguishable at a glance. */
+.step-kind {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 12px;
+  background: rgba(148, 163, 184, 0.15); /* fallback for unknown kinds */
+  color: var(--muted);
+}
+.step-kind-navigate { background: rgba(56, 189, 248, 0.16); color: #38bdf8; }
+.step-kind-click { background: rgba(251, 191, 36, 0.16); color: #fbbf24; }
+.step-kind-type { background: rgba(167, 139, 250, 0.16); color: #a78bfa; }
+.step-kind-fill { background: rgba(192, 132, 252, 0.16); color: #c084fc; }
+.step-kind-select { background: rgba(244, 114, 182, 0.16); color: #f472b6; }
+.step-kind-check,
+.step-kind-uncheck { background: rgba(251, 146, 60, 0.16); color: #fb923c; }
+.step-kind-scroll { background: rgba(45, 212, 191, 0.16); color: #2dd4bf; }
+.step-kind-screenshot { background: rgba(74, 222, 128, 0.16); color: #4ade80; }
+.step-kind-wait { background: rgba(148, 163, 184, 0.16); color: #94a3b8; }
+.step-kind-evaluate { background: rgba(248, 113, 113, 0.16); color: #f87171; }
+.step-kind-record_start,
+.step-kind-record_stop { background: rgba(232, 121, 249, 0.16); color: #e879f9; }
+.step-kind-close { background: rgba(148, 163, 184, 0.16); color: #94a3b8; }
+/* Preflight-only kind. */
+.step-kind-auth-login { background: rgba(250, 204, 21, 0.16); color: #facc15; }
 .step-list .step-drag {
   background: transparent;
   color: var(--muted);

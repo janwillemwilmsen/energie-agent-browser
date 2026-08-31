@@ -4,7 +4,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { config } from '../config.js';
 import { getDb } from '../db/index.js';
-import { diffPngFiles, readPngSize } from '../diff/pixelDiff.js';
+import { diffImageFiles, readImageSize } from '../diff/pixelDiff.js';
 
 interface ArtifactRow {
   id: number;
@@ -58,9 +58,16 @@ function absPath(rel: string): string {
 }
 
 function viewportFromSlot(slot: string): string | null {
-  const base = slot.replace(/\.png$/i, '');
+  const base = slot.replace(/\.(png|jpe?g|webp)$/i, '');
   const idx = base.lastIndexOf('-');
   return idx >= 0 ? base.slice(idx + 1) : null;
+}
+
+// Screenshots may be png (default), jpg/jpeg, or webp depending on the step's
+// configured format.
+function imageMime(filePath: string): string {
+  const ext = path.extname(filePath).toLowerCase();
+  return ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' : ext === '.webp' ? 'image/webp' : 'image/png';
 }
 
 function getArtifact(id: number): ArtifactRow | undefined {
@@ -70,7 +77,11 @@ function getArtifact(id: number): ArtifactRow | undefined {
 // Copy a run screenshot into artifact-owned storage so the comparison survives
 // deletion of the source run. Deduped by (source_run_id, label) so repeated
 // comparisons reuse the same copy.
-function materializeRunScreenshot(runId: number, slot: string, scenarioId: number | null): ArtifactRow {
+async function materializeRunScreenshot(
+  runId: number,
+  slot: string,
+  scenarioId: number | null,
+): Promise<ArtifactRow> {
   const db = getDb();
   const existing = db
     .prepare("SELECT * FROM artifacts WHERE kind='run_screenshot' AND source_run_id = ? AND label = ?")
@@ -82,7 +93,7 @@ function materializeRunScreenshot(runId: number, slot: string, scenarioId: numbe
   if (!fs.existsSync(src)) {
     throw Object.assign(new Error(`screenshot not found: run ${runId} / ${safeSlot}`), { statusCode: 404 });
   }
-  const size = readPngSize(src);
+  const size = await readImageSize(src);
   const info = db
     .prepare(
       `INSERT INTO artifacts (kind, file_path, scenario_id, source_run_id, label, viewport, width, height)
@@ -90,14 +101,17 @@ function materializeRunScreenshot(runId: number, slot: string, scenarioId: numbe
     )
     .run(scenarioId, runId, safeSlot, viewportFromSlot(safeSlot), size.width, size.height);
   const id = Number(info.lastInsertRowid);
-  const rel = `${DIFF_DIR}/${id}.png`;
+  // Keep the source extension — the copy is byte-for-byte, so naming a jpeg
+  // copy ".png" would mislabel it.
+  const srcExt = path.extname(safeSlot).toLowerCase() || '.png';
+  const rel = `${DIFF_DIR}/${id}${srcExt}`;
   fs.mkdirSync(absPath(DIFF_DIR), { recursive: true });
   fs.copyFileSync(src, absPath(rel));
   db.prepare('UPDATE artifacts SET file_path = ? WHERE id = ?').run(rel, id);
   return getArtifact(id)!;
 }
 
-function resolveRef(ref: z.infer<typeof ArtifactRef>, scenarioId: number | null): ArtifactRow {
+async function resolveRef(ref: z.infer<typeof ArtifactRef>, scenarioId: number | null): Promise<ArtifactRow> {
   if ('artifactId' in ref) {
     const a = getArtifact(ref.artifactId);
     if (!a) throw Object.assign(new Error(`artifact ${ref.artifactId} not found`), { statusCode: 404 });
@@ -111,12 +125,12 @@ function resolveRef(ref: z.infer<typeof ArtifactRef>, scenarioId: number | null)
 
 // Run the pixel diff for two resolved artifacts, persist the diff image as a
 // new artifact, and insert the comparison row. Returns the comparison id.
-function createComparison(
+async function createComparison(
   baseline: ArtifactRow,
   target: ArtifactRow,
   scenarioId: number | null,
   threshold: number,
-): number {
+): Promise<number> {
   const db = getDb();
   // Insert diff artifact row first to get its id (→ stable file path).
   const diffInfo = db
@@ -129,7 +143,7 @@ function createComparison(
   const diffRel = `${DIFF_DIR}/${diffArtifactId}.png`;
   fs.mkdirSync(absPath(DIFF_DIR), { recursive: true });
 
-  const result = diffPngFiles(
+  const result = await diffImageFiles(
     absPath(baseline.file_path),
     absPath(target.file_path),
     absPath(diffRel),
@@ -197,7 +211,7 @@ export async function diffsRoutes(app: FastifyInstance) {
     // Artifacts are written once at comparison time and never mutated (a new
     // comparison creates new artifact rows) — safe to cache forever.
     reply.header('Cache-Control', 'public, max-age=31536000, immutable');
-    reply.type('image/png');
+    reply.type(imageMime(a.file_path));
     return reply.send(fs.createReadStream(abs));
   });
 
@@ -223,9 +237,9 @@ export async function diffsRoutes(app: FastifyInstance) {
   app.post('/api/comparisons', async (req, reply) => {
     const body = CreateComparison.parse(req.body);
     try {
-      const baseline = resolveRef(body.baseline, body.scenarioId ?? null);
-      const target = resolveRef(body.target, body.scenarioId ?? null);
-      const id = createComparison(baseline, target, body.scenarioId ?? null, body.threshold);
+      const baseline = await resolveRef(body.baseline, body.scenarioId ?? null);
+      const target = await resolveRef(body.target, body.scenarioId ?? null);
+      const id = await createComparison(baseline, target, body.scenarioId ?? null, body.threshold);
       const row = getDb().prepare('SELECT * FROM comparisons WHERE id = ?').get(id) as ComparisonRow;
       return reply.code(201).send(enrichComparison(row));
     } catch (e: any) {
@@ -257,9 +271,11 @@ export async function diffsRoutes(app: FastifyInstance) {
     // The leading NNN- prefix is `step.position`, which shifts whenever the
     // scenario is edited (inserting a step bumps every later position), and the
     // optional YYYYMMDD-HHMMSS block is the per-run creation stamp. Strip both
-    // and pair on the stable suffix — `<label>-<viewport>.png` — so the same
-    // logical screenshot still matches across runs (incl. older, un-stamped ones).
-    const canonical = (slot: string): string => slot.replace(/^\d+-(?:\d{8}-\d{6}-)?/, '');
+    // — plus the extension, which changes when the step's format setting does —
+    // and pair on the stable `<label>-<viewport>` suffix so the same logical
+    // screenshot still matches across runs (incl. older, un-stamped ones).
+    const canonical = (slot: string): string =>
+      slot.replace(/^\d+-(?:\d{8}-\d{6}-)?/, '').replace(/\.(png|jpe?g|webp)$/i, '');
     const targetByKey = new Map<string, string>();
     for (const t of targetSlots) {
       const k = canonical(t);
@@ -274,9 +290,9 @@ export async function diffsRoutes(app: FastifyInstance) {
       const targetSlot = targetByKey.get(key);
       if (!targetSlot) continue;
       try {
-        const baseline = materializeRunScreenshot(body.baselineRunId, slot, scenarioId);
-        const target = materializeRunScreenshot(body.targetRunId, targetSlot, scenarioId);
-        const id = createComparison(baseline, target, scenarioId, body.threshold);
+        const baseline = await materializeRunScreenshot(body.baselineRunId, slot, scenarioId);
+        const target = await materializeRunScreenshot(body.targetRunId, targetSlot, scenarioId);
+        const id = await createComparison(baseline, target, scenarioId, body.threshold);
         const row = db.prepare('SELECT * FROM comparisons WHERE id = ?').get(id) as ComparisonRow;
         created.push(enrichComparison(row));
         matched.push(slot);

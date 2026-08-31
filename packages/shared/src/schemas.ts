@@ -89,6 +89,12 @@ const StepScreenshot = z.object({
   viewport: z.enum(['mobile']).optional(),
   // Overlay numbered labels on interactive elements (agent-browser --annotate).
   annotate: z.boolean().optional(),
+  // Output format. png (default) is lossless; jpeg/webp are lossy but much
+  // smaller. jpeg is captured natively by agent-browser; webp is post-converted
+  // server-side with sharp.
+  format: z.enum(['png', 'jpeg', 'webp']).optional(),
+  // Lossy quality 1-100 (jpeg/webp only; ignored for png). Default 80.
+  quality: z.number().int().min(1).max(100).optional(),
 });
 const StepWait = z.object({
   kind: z.literal('wait'),
