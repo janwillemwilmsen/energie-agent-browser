@@ -51,3 +51,7 @@ _Avoid_: daemon, connection, tab
 **Step executor**:
 The single place that carries out a Step against a Browser, including selector resolution with implicit wait, fallbacks, and per-Step retries. Scenario runs, Preflight replay, the Preflight recorder, and the AI scenario agent all go through it.
 _Avoid_: runner (that is the Scenario-level orchestration), executor (ambiguous)
+
+**Step editor**:
+The single place Steps are added, picked from a snapshot, edited, reordered and removed, used by the Scenario editor and the Preflight page. Persistence sits behind its Step store seam: one adapter writes each Scenario Step through the server, the other keeps a Preflight's Steps in a draft saved with the Preflight.
+_Avoid_: step list, step form

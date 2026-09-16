@@ -22,6 +22,8 @@ export interface AddStepControlsProps {
   authProfiles?: AuthProfilesCapability;
   /** A reason the add controls are disabled (shown as the buttons' title). */
   disabledReason?: string | null;
+  /** Whether a `wait` may target a selector (Preflight waits are time-only). Default true. */
+  selectorWait?: boolean;
   onError?: (message: string) => void;
   /** Extra page-specific buttons rendered after the step buttons. */
   children?: ReactNode;
@@ -36,12 +38,13 @@ const SELECTOR_KINDS = ['click', 'fill', 'type', 'select', 'check', 'uncheck', '
 
 export function AddStepControls(props: AddStepControlsProps) {
   const { store, kinds, defaultUrl, authProfiles, disabledReason, onError, children } = props;
+  const selectorWait = props.selectorWait ?? true;
   const allowed = new Set(kinds);
   const disabled = store.busy || !!disabledReason;
   const title = (t?: string) => disabledReason ?? t;
   const add = (kind: string, payload: Record<string, unknown>) => void store.add(kind, payload);
 
-  const selectorKinds = SELECTOR_KINDS.filter((k) => allowed.has(k));
+  const selectorKinds = SELECTOR_KINDS.filter((k) => allowed.has(k) && (k !== 'wait' || selectorWait));
 
   function addBySelector() {
     // Precise targeting when several elements share a role+name: any

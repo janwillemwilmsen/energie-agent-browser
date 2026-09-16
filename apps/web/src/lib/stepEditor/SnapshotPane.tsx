@@ -12,11 +12,14 @@ export interface SnapshotPaneProps {
   session: string;
   /** When given, adds a "Snapshot <url>" button that navigates there first. */
   defaultUrl?: string;
+  /** Whether a node may be picked as a `wait` target. Default true. */
+  selectorWait?: boolean;
   onError?: (message: string) => void;
 }
 
 export function SnapshotPane(props: SnapshotPaneProps) {
   const { store, kinds, session, defaultUrl, onError } = props;
+  const selectorWait = props.selectorWait ?? true;
   const allowed = new Set(kinds);
   const [tree, setTree] = useState<A11yTree | null>(null);
   const [snapshotting, setSnapshotting] = useState(false);
@@ -90,7 +93,7 @@ export function SnapshotPane(props: SnapshotPaneProps) {
           }
           onPickCheck={allowed.has('check') ? (s) => add('check', { selector: s }) : undefined}
           onPickUncheck={allowed.has('uncheck') ? (s) => add('uncheck', { selector: s }) : undefined}
-          onPickWait={allowed.has('wait') ? (s) => add('wait', { selector: s }) : undefined}
+          onPickWait={allowed.has('wait') && selectorWait ? (s) => add('wait', { selector: s }) : undefined}
           onPickScroll={allowed.has('scroll') ? (s) => add('scroll', { selector: s }) : undefined}
         />
       )}

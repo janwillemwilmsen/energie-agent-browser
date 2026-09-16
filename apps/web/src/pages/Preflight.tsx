@@ -1,31 +1,8 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
-import {
-  DndContext,
-  closestCenter,
-  KeyboardSensor,
-  PointerSensor,
-  useSensor,
-  useSensors,
-  type DragEndEvent,
-} from '@dnd-kit/core';
-import {
-  SortableContext,
-  arrayMove,
-  sortableKeyboardCoordinates,
-  useSortable,
-  verticalListSortingStrategy,
-} from '@dnd-kit/sortable';
-import { CSS } from '@dnd-kit/utilities';
-import {
-  api,
-  type A11yTree,
-  type AuthProfile,
-  type Preflight,
-  type PreflightStep,
-  type SelectorStrategy,
-} from '../lib/api.js';
+import { PreflightStep as PreflightStepSchema } from '@eab/shared';
+import { api, type AuthProfile, type Preflight, type PreflightStep } from '../lib/api.js';
+import { AddStepControls, SnapshotPane, StepList, useDraftStepStore } from '../lib/stepEditor/index.js';
 import { PreviewStream } from '../lib/screencast.js';
-import { SnapshotPicker } from '../lib/SnapshotPicker.js';
 
 // The /preflight page works against the same `default` daemon scenarios use,
 // bound to whichever preflight's --session-name the user is editing. Binding
@@ -33,6 +10,9 @@ import { SnapshotPicker } from '../lib/SnapshotPicker.js';
 // switches the daemon onto that name and loads its saved state. Matches
 // PREFLIGHT_RECORDER_SESSION on the server.
 const RECORDER_SESSION = 'default';
+
+// The Step kinds a Preflight may contain, straight from the shared schema.
+const PREFLIGHT_KINDS = PreflightStepSchema.options.map((o) => o.shape.kind.value);
 
 interface Draft {
   id: number | null;
@@ -66,65 +46,6 @@ function coerceInt(v: string): number {
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
-// Human label for a selector: role "name", plus the locator / ordinal
-// when present so you can see at a glance how a step will be targeted.
-function selectorLabel(s: SelectorStrategy): string {
-  const base = s.role || s.name ? `${s.role} "${s.name}"` : '';
-  const extra = s.locator ? `${s.locator}` : typeof s.ordinal === 'number' ? `#${s.ordinal}` : '';
-  return [base, extra].filter(Boolean).join(' ');
-}
-
-function summarize(step: PreflightStep): string {
-  if (step.kind === 'navigate') return `→ ${step.url}`;
-  if (step.kind === 'wait') return `${step.ms}ms`;
-  if (step.kind === 'click') return selectorLabel(step.selector);
-  if (step.kind === 'type')
-    return `${selectorLabel(step.selector)} ${JSON.stringify(step.text)}`;
-  if (step.kind === 'select')
-    return `${selectorLabel(step.selector)} → ${JSON.stringify(step.value)}`;
-  if (step.kind === 'auth-login') return `🔐 auth profile "${step.name}"`;
-  return '';
-}
-
-// One draggable row in the preflight step list. Mirrors the /scenarios editor
-// (drag handle + delete); reordering is handled by the parent's onStepDragEnd.
-function SortablePreflightStep({
-  id,
-  step,
-  onDelete,
-}: {
-  id: number;
-  step: PreflightStep;
-  onDelete: () => void;
-}) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
-  const style: React.CSSProperties = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.5 : 1,
-  };
-  return (
-    <li ref={setNodeRef} style={style}>
-      <button
-        className="step-drag"
-        title="Drag to reorder"
-        aria-label="Drag to reorder"
-        {...attributes}
-        {...listeners}
-      >
-        ⠿
-      </button>
-      <span className="step-body">
-        <code className={`step-kind step-kind-${step.kind}`}>{step.kind}</code>{' '}
-        {summarize(step)}
-      </span>
-      <button className="step-del" title="Remove step" onClick={onDelete}>
-        ×
-      </button>
-    </li>
-  );
-}
-
 export function PreflightPage() {
   const [preflights, setPreflights] = useState<Preflight[]>([]);
   const [draft, setDraft] = useState<Draft>(emptyDraft());
@@ -138,17 +59,9 @@ export function PreflightPage() {
   // show a hint like "Browser: bound to acme-login".
   const [boundTo, setBoundTo] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null); // shorthand for an in-flight action
-  const [tree, setTree] = useState<A11yTree | null>(null);
-  const [snapshotting, setSnapshotting] = useState(false);
   const [replaying, setReplaying] = useState(false);
   const [authProfiles, setAuthProfiles] = useState<AuthProfile[]>([]);
   const [showAuthForm, setShowAuthForm] = useState(false);
-  const sensors = useSensors(
-    // Small drag threshold so a click on the handle still registers as a click.
-    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
-  );
-
   async function reloadAuthProfiles() {
     try {
       setAuthProfiles(await api.listAuthProfiles());
@@ -235,7 +148,6 @@ export function PreflightPage() {
 
   async function startNew() {
     setDraft(emptyDraft());
-    setTree(null);
     setError(null);
     setShowSaved(false);
   }
@@ -258,7 +170,6 @@ export function PreflightPage() {
       retryWaitAfterMs: p.retry_wait_after_ms,
       restartOnFailure: p.restart_on_failure,
     });
-    setTree(null);
     try {
       setBusy('Loading browser state…');
       const r = await api.startPreflightRecorder(p.name);
@@ -355,34 +266,6 @@ export function PreflightPage() {
     }
   }
 
-  function removeStep(idx: number) {
-    setDraft((d) => ({ ...d, steps: d.steps.filter((_, i) => i !== idx) }));
-  }
-
-  // Preflight steps are a plain array saved as JSON on "Save preflight" (no
-  // per-step API like scenarios), so reordering is a local array move.
-  function onStepDragEnd(event: DragEndEvent) {
-    const { active, over } = event;
-    if (!over || active.id === over.id) return;
-    const from = Number(active.id);
-    const to = Number(over.id);
-    if (Number.isNaN(from) || Number.isNaN(to)) return;
-    setDraft((d) => ({ ...d, steps: arrayMove(d.steps, from, to) }));
-  }
-
-  async function takeSnapshot() {
-    setError(null);
-    setSnapshotting(true);
-    try {
-      const res = await api.snapshot({ session: RECORDER_SESSION, compact: true });
-      setTree(res.tree);
-    } catch (e: any) {
-      setError(e?.message ?? String(e));
-    } finally {
-      setSnapshotting(false);
-    }
-  }
-
   async function replay() {
     if (draft.id == null) {
       setError('Save the preflight first, then replay.');
@@ -402,24 +285,18 @@ export function PreflightPage() {
     }
   }
 
-  function onPickClick(sel: SelectorStrategy) {
-    void addStep({ kind: 'click', selector: sel });
-  }
-  function onPickType(sel: SelectorStrategy) {
-    const text = prompt('Type what?');
-    if (text == null) return;
-    void addStep({ kind: 'type', selector: sel, text });
-  }
-  function onPickSelect(sel: SelectorStrategy, value?: string) {
-    // A pick from an option row arrives with the value pre-filled; a pick from
-    // the combobox row itself asks for the label.
-    const v = value ?? prompt('Select which option? (option label, e.g. "1 persoon")');
-    if (v == null || !v.trim()) return;
-    void addStep({ kind: 'select', selector: sel, value: v.trim() });
-  }
-
   const haveName = draft.name.trim().length > 0;
   const stepActionDisabled = !haveName || (nameIsTakenLocally && draft.id == null);
+
+  // Steps live in the draft and are saved with the preflight; adding one also
+  // runs it live (addStep above), so the editor module appends through it.
+  const stepStore = useDraftStepStore<PreflightStep>({
+    steps: draft.steps,
+    setSteps: (updater) => setDraft((d) => ({ ...d, steps: updater(d.steps) })),
+    busy: busy != null,
+    onAdd: addStep,
+    onError: setError,
+  });
 
   return (
     <section>
@@ -596,140 +473,29 @@ export function PreflightPage() {
             Applied when this preflight runs as a whole — on <strong>Replay (clean)</strong> and as the
             preflight prefix of any scenario that uses it. Remember to <strong>Save</strong> after changing.
           </p>
-          {draft.steps.length === 0 ? (
-            <p className="muted">
-              No steps yet. Add a navigate step, then snapshot the page and pick nodes
-              to click or type into. Every action runs live against the browser bound
-              to <code>{draft.name || '<name>'}</code>, so cookies and localStorage
-              accumulate as you go.
-            </p>
-          ) : (
-            <DndContext
-              sensors={sensors}
-              collisionDetection={closestCenter}
-              onDragEnd={onStepDragEnd}
-            >
-              <SortableContext
-                items={draft.steps.map((_, idx) => idx)}
-                strategy={verticalListSortingStrategy}
-              >
-                <ol className="step-list">
-                  {draft.steps.map((s, idx) => (
-                    <SortablePreflightStep
-                      key={idx}
-                      id={idx}
-                      step={s}
-                      onDelete={() => removeStep(idx)}
-                    />
-                  ))}
-                </ol>
-              </SortableContext>
-            </DndContext>
-          )}
+          <StepList
+            store={stepStore}
+            empty={
+              <>
+                No steps yet. Add a navigate step, then snapshot the page and pick nodes
+                to click or type into. Every action runs live against the browser bound
+                to <code>{draft.name || '<name>'}</code>, so cookies and localStorage
+                accumulate as you go.
+              </>
+            }
+          />
 
-          <div className="actions">
-            <button
-              onClick={() => {
-                const url = prompt('Navigate to URL?');
-                if (url) void addStep({ kind: 'navigate', url });
-              }}
-              disabled={stepActionDisabled}
-              title={stepActionDisabled ? 'Set a name first' : undefined}
-            >
-              + navigate
-            </button>
-            <button
-              onClick={() => {
-                // Precise targeting when several elements share a role+name:
-                // any agent-browser locator, handed to the CLI verbatim.
-                const locator = prompt(
-                  'Locator (agent-browser syntax):\n' +
-                    '  #id   .class   div > button   [data-testid="x"]   text=Submit   xpath=//button[@type="submit"]',
-                );
-                if (locator == null || !locator.trim()) return;
-                if (locator.trim().startsWith('@')) {
-                  alert(
-                    '"@eN" is a snapshot ref, not a selector: agent-browser renumbers elements on every snapshot/navigation, so it cannot be replayed later.\n' +
-                      'Use the click/type buttons on the snapshot row instead (they re-find the element by role + name each run), or enter a stable locator (#id, [data-testid=…], CSS, text=, xpath=).',
-                  );
-                  return;
-                }
-                const action = (prompt('Action? click / type / select', 'click') ?? '')
-                  .trim()
-                  .toLowerCase();
-                const selector: SelectorStrategy = { role: '', name: '', locator: locator.trim() };
-                if (action === 'click') {
-                  void addStep({ kind: 'click', selector });
-                } else if (action === 'type') {
-                  const text = prompt('Type what?');
-                  if (text != null) void addStep({ kind: 'type', selector, text });
-                } else if (action === 'select') {
-                  const value = prompt('Select which option? (option label)');
-                  if (value != null && value.trim()) void addStep({ kind: 'select', selector, value: value.trim() });
-                } else {
-                  alert('Unknown action');
-                }
-              }}
-              disabled={stepActionDisabled}
-              title={
-                stepActionDisabled
-                  ? 'Set a name first'
-                  : 'Add a step that targets an element by a precise locator (#id, CSS, [data-testid], text=, xpath=) instead of role+name'
-              }
-            >
-              + by selector…
-            </button>
-            <button
-              onClick={() => {
-                const raw = prompt('Wait how many milliseconds?', '1000');
-                if (raw == null) return;
-                const ms = Number(raw);
-                if (!Number.isFinite(ms) || ms <= 0) {
-                  alert('Must be a positive integer');
-                  return;
-                }
-                void addStep({ kind: 'wait', ms: Math.floor(ms) });
-              }}
-              disabled={stepActionDisabled}
-              title={stepActionDisabled ? 'Set a name first' : undefined}
-            >
-              + wait (ms)
-            </button>
-            {/* Auth login step: replaces the manual click-email/type/click-pw/
-                type/click-submit sequence with a single encrypted-credential
-                step. If no profiles exist yet, the button opens the create
-                form; otherwise it picks from the saved profiles. */}
-            <button
-              onClick={() => {
-                if (authProfiles.length === 0) {
-                  setShowAuthForm(true);
-                  return;
-                }
-                const choice = prompt(
-                  'Which auth profile? Available: ' +
-                    authProfiles.map((p) => p.name).join(', ') +
-                    '\n\n(type one of the names above, or leave blank to manage profiles)',
-                );
-                if (choice == null) return;
-                const trimmed = choice.trim();
-                if (!trimmed) {
-                  setShowAuthForm(true);
-                  return;
-                }
-                const exists = authProfiles.some((p) => p.name === trimmed);
-                if (!exists) {
-                  setError(`No auth profile named "${trimmed}". Manage profiles below.`);
-                  setShowAuthForm(true);
-                  return;
-                }
-                void addStep({ kind: 'auth-login', name: trimmed });
-              }}
-              disabled={stepActionDisabled}
-              title={stepActionDisabled ? 'Set a name first' : 'Single-step encrypted login using a saved auth profile'}
-            >
-              + auth login
-            </button>
-          </div>
+          <AddStepControls
+            store={stepStore}
+            kinds={PREFLIGHT_KINDS}
+            selectorWait={false}
+            disabledReason={stepActionDisabled ? 'Set a name first' : null}
+            authProfiles={{
+              names: authProfiles.map((p) => p.name),
+              onManage: () => setShowAuthForm(true),
+            }}
+            onError={setError}
+          />
         </div>
 
         <div className="pf-snapshot">
@@ -739,19 +505,14 @@ export function PreflightPage() {
             a node to add that step. Picking sends the action live against the browser;
             cookies land in <code>{draft.name || '<name>'}</code> automatically.
           </p>
-          <div className="actions">
-            <button onClick={takeSnapshot} disabled={snapshotting}>
-              {snapshotting ? 'Snapshotting…' : 'Snapshot current page'}
-            </button>
-          </div>
-          {tree && (
-            <SnapshotPicker
-              tree={tree}
-              onPickClick={onPickClick}
-              onPickType={onPickType}
-              onPickSelect={onPickSelect}
-            />
-          )}
+          <SnapshotPane
+            key={draft.id ?? 'new'}
+            store={stepStore}
+            kinds={PREFLIGHT_KINDS}
+            selectorWait={false}
+            session={RECORDER_SESSION}
+            onError={setError}
+          />
         </div>
 
         <div className="pf-preview">
