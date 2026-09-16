@@ -1,11 +1,9 @@
 import crypto from 'node:crypto';
 import { getDb } from '../db/index.js';
 import { getSetting, setSetting } from '../settings.js';
-import { run, runJson, ensureSession, restartSession } from '../agentBrowser/driver.js';
+import { restartSession } from '../agentBrowser/driver.js';
 import { cliBrowser } from '../agentBrowser/cliBrowser.js';
-import { parseSnapshotText } from '../agentBrowser/parser.js';
-import { resolveSelector } from '../scenarios/selector.js';
-import { isOptionSelector, execSelectOptionFallback } from '../scenarios/selectFallback.js';
+import { executeStep, parseStep, type StepContext } from '../scenarios/stepExecutor.js';
 import type { A11yNode, A11yTree, SelectorStrategy } from '@eab/shared';
 
 // LLM-driven scenario builder. Given a natural-language prompt, an agent loop
@@ -117,13 +115,9 @@ async function chatCompletion(model: string, messages: ChatMessage[]): Promise<s
 }
 
 // --- Perception -------------------------------------------------------------------
-async function snapshotTree(session: string): Promise<A11yTree> {
-  const data = await runJson<{ origin: string; snapshot: string }>(
-    ['snapshot', '--compact'],
-    { session, timeoutMs: 30_000 },
-  );
-  return parseSnapshotText(data.snapshot ?? '', data.origin ?? '');
-}
+// Everything the agent does to the page goes through the shared 'default'
+// session, via the same Browser seam the Step executor uses.
+const browser = cliBrowser(SESSION);
 
 // Flatten the tree into a compact "role \"name\"" listing the model can pick
 // selectors from. Interactive/content roles only, deduped, capped — the model
@@ -287,75 +281,20 @@ function summarizeAction(a: AgentAction): string {
   }
 }
 
-// --- Live execution (mirrors runner.ts semantics, without a RunContext) --------------
-const SELECTOR_WAIT_MS = 12_000;
-const SELECTOR_POLL_MS = 300;
+// --- Live execution ---------------------------------------------------------------
+// The action is turned into the Step it will be saved as, and that Step is run
+// through the Step executor — so what the agent tries live is exactly what a
+// later scenario run will do (same implicit wait, same fallbacks). Kinds that
+// only make sense inside a scenario run (screenshot, recording) are skipped
+// live: perception comes from snapshots, and the step is captured on every
+// future run, which is its purpose.
+const LIVE_SKIPPED_KINDS = new Set(['screenshot', 'record_start', 'record_stop']);
 
-async function resolveWithWait(session: string, selector: SelectorStrategy): Promise<string> {
-  const deadline = Date.now() + SELECTOR_WAIT_MS;
-  let lastErr: Error | null = null;
-  for (;;) {
-    try {
-      const tree = await snapshotTree(session);
-      return resolveSelector(selector, tree);
-    } catch (e: any) {
-      lastErr = e;
-      if (Date.now() >= deadline) throw lastErr;
-      await new Promise((r) => setTimeout(r, SELECTOR_POLL_MS));
-    }
-  }
-}
-
-async function executeAction(session: string, action: AgentAction): Promise<void> {
-  switch (action.kind) {
-    case 'navigate': {
-      const r = await run(['open', action.url], { session, timeoutMs: 60_000 });
-      if (r.exitCode !== 0) throw new Error(`navigate failed: ${r.stderr || r.stdout}`);
-      return;
-    }
-    case 'click':
-    case 'fill':
-    case 'type':
-    case 'select': {
-      const ref = await resolveWithWait(session, action.selector);
-      if (action.kind === 'select' && isOptionSelector(action.selector)) {
-        await execSelectOptionFallback(cliBrowser(session), action.selector, action.value);
-        return;
-      }
-      const args: string[] = [action.kind, ref];
-      if (action.kind === 'fill' || action.kind === 'select') args.push(action.value);
-      if (action.kind === 'type') args.push(action.text);
-      const r = await run(args, { session, timeoutMs: 30_000 });
-      if (r.exitCode !== 0) throw new Error(`${action.kind} failed: ${r.stderr || r.stdout}`);
-      return;
-    }
-    case 'scroll': {
-      if (action.toBottom) {
-        for (let i = 0; i < 15; i++) {
-          const r = await run(['scroll', 'down', '800'], { session, timeoutMs: 15_000 });
-          if (r.exitCode !== 0) throw new Error(`scroll failed: ${r.stderr || r.stdout}`);
-          await new Promise((res) => setTimeout(res, 400));
-        }
-        return;
-      }
-      const dy = Number(action.dy ?? 800);
-      const r = await run(['scroll', dy >= 0 ? 'down' : 'up', String(Math.abs(dy))], {
-        session,
-        timeoutMs: 15_000,
-      });
-      if (r.exitCode !== 0) throw new Error(`scroll failed: ${r.stderr || r.stdout}`);
-      return;
-    }
-    case 'wait':
-      await new Promise((r) => setTimeout(r, action.ms));
-      return;
-    case 'screenshot':
-      // No live side effect — the step is captured on every future run, which
-      // is its purpose. (Perception comes from snapshots, not screenshots.)
-      return;
-    case 'done':
-      return;
-  }
+async function executeAction(action: AgentAction, log: (line: string) => void): Promise<void> {
+  const saved = actionToStep(action);
+  if (!saved || LIVE_SKIPPED_KINDS.has(saved.kind)) return;
+  const ctx: StepContext = { browser, log };
+  await executeStep(ctx, parseStep(saved.kind, saved.payload));
 }
 
 // Persist an executed action as a scenario_steps row using the exact payload
@@ -416,7 +355,7 @@ async function runLoop(job: AgentJob): Promise<void> {
     let pageDesc = '';
     let url = '';
     try {
-      const tree = await snapshotTree(SESSION);
+      const tree = await browser.snapshot();
       url = tree.url || '(unknown)';
       pageDesc = describePage(tree);
     } catch (e: any) {
@@ -465,7 +404,7 @@ async function runLoop(job: AgentJob): Promise<void> {
 
     // Act.
     try {
-      await executeAction(SESSION, action);
+      await executeAction(action, (line) => job.log.push(`  ${line}`));
       consecutiveFailures = 0;
       history.push(summarizeAction(action));
     } catch (e: any) {
