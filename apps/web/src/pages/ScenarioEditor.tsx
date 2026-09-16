@@ -1,36 +1,16 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import {
-  DndContext,
-  closestCenter,
-  KeyboardSensor,
-  PointerSensor,
-  useSensor,
-  useSensors,
-  type DragEndEvent,
-} from '@dnd-kit/core';
-import {
-  SortableContext,
-  arrayMove,
-  sortableKeyboardCoordinates,
-  useSortable,
-  verticalListSortingStrategy,
-} from '@dnd-kit/sortable';
-import { CSS } from '@dnd-kit/utilities';
-import {
-  api,
-  type A11yTree,
-  type Preflight,
-  type ScenarioDetail,
-  type ScenarioStep,
-  type SelectorStrategy,
-} from '../lib/api.js';
-import { readStepRow } from '../lib/steps.js';
-import { SnapshotPicker } from '../lib/SnapshotPicker.js';
+import { StepKind } from '@eab/shared';
+import { api, type Preflight, type ScenarioDetail } from '../lib/api.js';
+import { AddStepControls, SnapshotPane, StepList, useServerStepStore } from '../lib/stepEditor/index.js';
 import { PreviewStream } from '../lib/screencast.js';
 import { TerminalShell, type TerminalShellHandle } from '../lib/TerminalShell.js';
 
 const SESSION = 'default';
+
+// Every Scenario Step kind the visual editor offers. `evaluate` is left to the
+// admin raw editor and the AI builder.
+const SCENARIO_KINDS = StepKind.options.filter((k) => k !== 'evaluate');
 
 interface MetaDraft {
   name: string;
@@ -83,14 +63,10 @@ export function ScenarioEditor() {
   const scenarioId = Number(id);
   const [data, setData] = useState<ScenarioDetail | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [tree, setTree] = useState<A11yTree | null>(null);
-  const [snapshotting, setSnapshotting] = useState(false);
-  const [savingStep, setSavingStep] = useState(false);
   const [previewActive, setPreviewActive] = useState(false);
   const [bootstrapping, setBootstrapping] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [aiModalOpen, setAiModalOpen] = useState(false);
-  const [editingStep, setEditingStep] = useState<ScenarioStep | null>(null);
   const [sessionAlive, setSessionAlive] = useState<boolean | null>(null);
   const [playStatus, setPlayStatus] = useState<string | null>(null);
   const [lastRunId, setLastRunId] = useState<number | null>(null);
@@ -99,12 +75,6 @@ export function ScenarioEditor() {
   const [metaSavedAt, setMetaSavedAt] = useState<number | null>(null);
   const [preflights, setPreflights] = useState<Preflight[]>([]);
   const termRef = useRef<TerminalShellHandle | null>(null);
-
-  const sensors = useSensors(
-    // A small drag threshold so a click on the handle still works as a click.
-    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
-  );
 
   useEffect(() => {
     api.sessionStatus(SESSION).then((s) => setSessionAlive(s.alive)).catch(() => undefined);
@@ -125,85 +95,13 @@ export function ScenarioEditor() {
     reload();
   }, [scenarioId]);
 
-  async function takeSnapshot(useUrl: boolean, interactiveOnly = false) {
-    if (!data) return;
-    setErr(null);
-    setSnapshotting(true);
-    try {
-      const res = await api.snapshot({
-        url: useUrl ? data.url : undefined,
-        session: SESSION,
-        compact: true,
-        interactiveOnly,
-      });
-      setTree(res.tree);
-    } catch (e: any) {
-      setErr(e.message);
-    } finally {
-      setSnapshotting(false);
-    }
-  }
-
-  async function onStepDragEnd(event: DragEndEvent) {
-    const { active, over } = event;
-    if (!data || !over || active.id === over.id) return;
-    const ids = data.steps.map((s) => s.id);
-    const from = ids.indexOf(Number(active.id));
-    const to = ids.indexOf(Number(over.id));
-    if (from === -1 || to === -1) return;
-    const newSteps = arrayMove(data.steps, from, to);
-    setData({ ...data, steps: newSteps }); // optimistic
-    setSavingStep(true);
-    try {
-      await api.reorderSteps(scenarioId, newSteps.map((s) => s.id));
-    } catch (e: any) {
-      setErr(e.message);
-      await reload(); // revert to server truth
-    } finally {
-      setSavingStep(false);
-    }
-  }
-
-  async function moveStep(stepId: number, direction: 'up' | 'down') {
-    if (!data) return;
-    setSavingStep(true);
-    try {
-      await api.moveStep(scenarioId, stepId, direction);
-      await reload();
-    } catch (e: any) {
-      setErr(e.message);
-    } finally {
-      setSavingStep(false);
-    }
-  }
-
-  async function deleteStep(stepId: number) {
-    if (!data) return;
-    if (!confirm('Delete this step?')) return;
-    setSavingStep(true);
-    try {
-      await api.deleteStep(scenarioId, stepId);
-      await reload();
-    } catch (e: any) {
-      setErr(e.message);
-    } finally {
-      setSavingStep(false);
-    }
-  }
-
-  async function addStep(kind: string, payload: Record<string, unknown>) {
-    if (!data) return;
-    setSavingStep(true);
-    try {
-      const position = data.steps.length;
-      await api.addStep(scenarioId, { position, kind, payload });
-      await reload();
-    } catch (e: any) {
-      setErr(e.message);
-    } finally {
-      setSavingStep(false);
-    }
-  }
+  // Steps persist through the per-step API; the editor module drives it.
+  const stepStore = useServerStepStore({
+    scenarioId,
+    steps: data?.steps ?? [],
+    reload,
+    onError: setErr,
+  });
 
   async function saveRetry(
     patch: Partial<{
@@ -508,195 +406,17 @@ export function ScenarioEditor() {
               <span>times</span>
             </label>
           </div>
-          {data.steps.length === 0 ? (
-            <p className="muted">
-              No steps yet. Take a snapshot, then click any node to add a step.
-            </p>
-          ) : (
-            <DndContext
-              sensors={sensors}
-              collisionDetection={closestCenter}
-              onDragEnd={onStepDragEnd}
-            >
-              <SortableContext
-                items={data.steps.map((s) => s.id)}
-                strategy={verticalListSortingStrategy}
-              >
-                <ol className="step-list">
-                  {data.steps.map((s, idx) => (
-                    <SortableStep
-                      key={s.id}
-                      step={s}
-                      idx={idx}
-                      total={data.steps.length}
-                      savingStep={savingStep}
-                      onEdit={() => setEditingStep(s)}
-                      onMoveUp={() => moveStep(s.id, 'up')}
-                      onMoveDown={() => moveStep(s.id, 'down')}
-                      onDelete={() => deleteStep(s.id)}
-                    />
-                  ))}
-                </ol>
-              </SortableContext>
-            </DndContext>
-          )}
+          <StepList
+            store={stepStore}
+            empty="No steps yet. Take a snapshot, then click any node to add a step."
+          />
 
-          {editingStep && (
-            <StepEditModal
-              step={editingStep}
-              scenarioId={scenarioId}
-              onClose={() => setEditingStep(null)}
-              onSaved={() => {
-                setEditingStep(null);
-                void reload();
-              }}
-            />
-          )}
-
-          <div className="actions">
-            <button onClick={() => addStep('navigate', { url: data.url })} disabled={savingStep}>
-              + navigate ({data.url})
-            </button>
-            <button
-              onClick={() => {
-                // Precise targeting when several elements share a role+name:
-                // any agent-browser locator, handed to the CLI verbatim.
-                const locator = prompt(
-                  'Locator (agent-browser syntax):\n' +
-                    '  #id   .class   div > button   [data-testid="x"]   text=Submit   xpath=//button[@type="submit"]',
-                );
-                if (locator == null || !locator.trim()) return;
-                if (locator.trim().startsWith('@')) {
-                  alert(
-                    '"@eN" is a snapshot ref, not a selector: agent-browser renumbers elements on every snapshot/navigation, so it cannot be replayed later.\n' +
-                      'Use the click/type buttons on the snapshot row instead (they re-find the element by role + name each run), or enter a stable locator (#id, [data-testid=…], CSS, text=, xpath=).',
-                  );
-                  return;
-                }
-                const action = (prompt(
-                  'Action? click / fill / type / check / uncheck / wait / scroll',
-                  'click',
-                ) ?? '').trim().toLowerCase();
-                if (!['click', 'fill', 'type', 'check', 'uncheck', 'wait', 'scroll'].includes(action)) {
-                  alert('Unknown action');
-                  return;
-                }
-                const selector: SelectorStrategy = { role: '', name: '', locator: locator.trim() };
-                if (action === 'fill') {
-                  const value = prompt('Fill with?');
-                  if (value == null) return;
-                  addStep('fill', { selector, value });
-                } else if (action === 'type') {
-                  const text = prompt('Type what?');
-                  if (text == null) return;
-                  addStep('type', { selector, text });
-                } else {
-                  addStep(action, { selector });
-                }
-              }}
-              disabled={savingStep}
-              title="Add a step that targets an element by a precise locator (#id, CSS, [data-testid], text=, xpath=) instead of role+name"
-            >
-              + by selector…
-            </button>
-            <button
-              onClick={() =>
-                addStep('screenshot', {
-                  label: `step-${data.steps.length}`,
-                  fullPage: true,
-                })
-              }
-              disabled={savingStep}
-            >
-              + screenshot (full page)
-            </button>
-            <button
-              onClick={() =>
-                addStep('screenshot', {
-                  label: `step-${data.steps.length}`,
-                  fullPage: false,
-                })
-              }
-              disabled={savingStep}
-            >
-              + screenshot (viewport)
-            </button>
-            <button
-              onClick={() =>
-                addStep('screenshot', {
-                  label: `step-${data.steps.length}`,
-                  fullPage: true,
-                  viewport: 'mobile',
-                })
-              }
-              disabled={savingStep}
-              title="Switch to the mobile device, capture a full-page screenshot, then restore the viewport"
-            >
-              + screenshot (mobile)
-            </button>
-            <button
-              onClick={() =>
-                addStep('screenshot', {
-                  label: `step-${data.steps.length}`,
-                  fullPage: true,
-                  annotate: true,
-                })
-              }
-              disabled={savingStep}
-              title="Full-page screenshot with numbered labels overlaid on interactive elements (legend in the run log)"
-            >
-              + screenshot (annotated)
-            </button>
-            <button
-              onClick={() => addStep('scroll', { toBottom: true })}
-              disabled={savingStep}
-              title="Scroll the page to the bottom in strides so lazy-loaded images fire"
-            >
-              + scroll to bottom
-            </button>
-            <button
-              onClick={() => addStep('scroll', { toTop: true })}
-              disabled={savingStep}
-              title="Jump back to the top of the page (useful before targeting a header element)"
-            >
-              + scroll to top
-            </button>
-            <button
-              onClick={() => {
-                const raw = prompt('Wait how many milliseconds?', '1000');
-                if (raw == null) return;
-                const ms = Number(raw);
-                if (!Number.isFinite(ms) || ms <= 0) {
-                  alert('Must be a positive integer');
-                  return;
-                }
-                addStep('wait', { ms: Math.floor(ms) });
-              }}
-              disabled={savingStep}
-            >
-              + wait (ms)
-            </button>
-            <button
-              onClick={() => addStep('record_start', {})}
-              disabled={savingStep}
-              title="Start a video recording from this point in the scenario (drag to position; saved to the Recordings page)"
-            >
-              + ⏺ start recording
-            </button>
-            <button
-              onClick={() => addStep('record_stop', {})}
-              disabled={savingStep}
-              title="Stop the video recording and save it"
-            >
-              + ⏹ stop recording
-            </button>
-            <button
-              onClick={() => addStep('close', {})}
-              disabled={savingStep}
-              title="Close the browser session (agent-browser close) — useful as a final step to end the scenario cleanly"
-            >
-              + ✕ close session
-            </button>
+          <AddStepControls
+            store={stepStore}
+            kinds={SCENARIO_KINDS}
+            defaultUrl={data.url}
+            onError={setErr}
+          >
             <button onClick={runNow} disabled={data.steps.length === 0}>
               ▶ Run now
             </button>
@@ -706,7 +426,7 @@ export function ScenarioEditor() {
             >
               ✨ AI task
             </button>
-          </div>
+          </AddStepControls>
         </div>
 
         {aiModalOpen && (
@@ -753,48 +473,13 @@ export function ScenarioEditor() {
           <PreviewStream session={SESSION} active={previewActive} />
 
           <h2 style={{ marginTop: 24 }}>Snapshot</h2>
-          <div className="actions">
-            <button onClick={() => takeSnapshot(true)} disabled={snapshotting}>
-              {snapshotting ? 'Snapshotting…' : `Snapshot ${data.url}`}
-            </button>
-            <button onClick={() => takeSnapshot(false)} disabled={snapshotting}>
-              Snapshot current page
-            </button>
-            <button
-              onClick={() => takeSnapshot(false, true)}
-              disabled={snapshotting}
-              title="Snapshot current page, interactive elements only (-i)"
-            >
-              Snapshot interactive (-i)
-            </button>
-          </div>
-          {tree && (
-            <SnapshotPicker
-              tree={tree}
-              onPickClick={(strategy) => addStep('click', { selector: strategy })}
-              onPickType={(strategy) => {
-                const text = prompt('Type what?');
-                if (text != null) addStep('type', { selector: strategy, text });
-              }}
-              onPickFill={(strategy) => {
-                const value = prompt('Fill with?');
-                if (value != null) addStep('fill', { selector: strategy, value });
-              }}
-              onPickSelect={(strategy, value) => {
-                // A pick from an option row arrives with the value pre-filled;
-                // a pick from the combobox row itself asks for the label.
-                const v =
-                  value ?? prompt('Select which option? (option label, e.g. "1 persoon")');
-                if (v != null && v.trim()) {
-                  addStep('select', { selector: strategy, value: v.trim() });
-                }
-              }}
-              onPickCheck={(strategy) => addStep('check', { selector: strategy })}
-              onPickUncheck={(strategy) => addStep('uncheck', { selector: strategy })}
-              onPickWait={(strategy) => addStep('wait', { selector: strategy })}
-              onPickScroll={(strategy) => addStep('scroll', { selector: strategy })}
-            />
-          )}
+          <SnapshotPane
+            store={stepStore}
+            kinds={SCENARIO_KINDS}
+            session={SESSION}
+            defaultUrl={data.url}
+            onError={setErr}
+          />
         </div>
       </div>
 
@@ -826,117 +511,9 @@ export function ScenarioEditor() {
   );
 }
 
-function SortableStep({
-  step,
-  idx,
-  total,
-  savingStep,
-  onEdit,
-  onMoveUp,
-  onMoveDown,
-  onDelete,
-}: {
-  step: ScenarioStep;
-  idx: number;
-  total: number;
-  savingStep: boolean;
-  onEdit: () => void;
-  onMoveUp: () => void;
-  onMoveDown: () => void;
-  onDelete: () => void;
-}) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id: step.id,
-  });
-  const read = readStepRow(step);
-  const style: React.CSSProperties = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.5 : 1,
-  };
-  return (
-    <li ref={setNodeRef} style={style}>
-      <button
-        className="step-drag"
-        title="Drag to reorder"
-        aria-label="Drag to reorder"
-        {...attributes}
-        {...listeners}
-      >
-        ⠿
-      </button>
-      <span className="step-body">
-        <code className={`step-kind step-kind-${step.kind}`}>{step.kind}</code>{' '}
-        {read.ok ? (
-          summarizeStep(step.kind, read.payload)
-        ) : (
-          <span className="error" title="Edit the payload JSON with ✎, or delete the step">
-            invalid step — {read.error}
-          </span>
-        )}
-      </span>
-      <button className="step-move" title="Edit step" onClick={onEdit} disabled={savingStep}>
-        ✎
-      </button>
-      <button className="step-move" title="Move up" onClick={onMoveUp} disabled={savingStep || idx === 0}>
-        ▲
-      </button>
-      <button
-        className="step-move"
-        title="Move down"
-        onClick={onMoveDown}
-        disabled={savingStep || idx === total - 1}
-      >
-        ▼
-      </button>
-      <button className="step-del" title="Delete step" onClick={onDelete} disabled={savingStep}>
-        ×
-      </button>
-    </li>
-  );
-}
-
 function clampInt(v: string): number {
   const n = Math.floor(Number(v));
   return Number.isFinite(n) && n > 0 ? n : 0;
-}
-
-// Human label for a selector: role "name", plus the locator / ordinal
-// when present so you can see at a glance how a step will be targeted.
-function selectorLabel(s: any): string {
-  const base = s?.role || s?.name ? `${s.role ?? ''} "${s.name ?? ''}"` : '';
-  const extra = s?.locator ? `${s.locator}` : typeof s?.ordinal === 'number' ? `#${s.ordinal}` : '';
-  return [base, extra].filter(Boolean).join(' ');
-}
-
-function summarizeStep(kind: string, p: any): string {
-  if (kind === 'navigate') return `→ ${p.url ?? ''}`;
-  if (
-    kind === 'click' || kind === 'type' || kind === 'fill' || kind === 'select' ||
-    kind === 'check' || kind === 'uncheck'
-  ) {
-    const s = p.selector ?? {};
-    const txt = p.text ?? p.value ?? '';
-    return `${selectorLabel(s)}${txt ? ` ${JSON.stringify(txt)}` : ''}`;
-  }
-  if (kind === 'screenshot')
-    return `${p.label ?? 'screenshot'}${p.fullPage ? ' (full)' : ''}${p.viewport === 'mobile' ? ' (mobile)' : ''}${p.annotate ? ' (annotated)' : ''}${p.format && p.format !== 'png' ? ` (${p.format}${p.quality ? ` q${p.quality}` : ''})` : ''}`;
-  if (kind === 'scroll') {
-    if (p.selector) return `into view: ${selectorLabel(p.selector)}`;
-    if (p.toBottom) return 'to bottom (lazy-load)';
-    if (p.toTop) return 'to top';
-    const dy = Number(p.dy ?? 0);
-    if (dy) return `${dy > 0 ? 'down' : 'up'} ${Math.abs(dy)}px`;
-    return '';
-  }
-  if (kind === 'wait') {
-    if (p.selector) return `for ${selectorLabel(p.selector)}`;
-    return `${p.ms ?? 0}ms`;
-  }
-  if (kind === 'record_start') return '⏺ start video recording';
-  if (kind === 'record_stop') return '⏹ stop video recording';
-  if (kind === 'close') return '✕ close browser session';
-  return JSON.stringify(p);
 }
 
 // Modal for the "✨ AI task" button: the user describes a task, the server's
@@ -1170,170 +747,6 @@ function AiTaskModal({
           <p className="error" style={{ margin: 0 }}>✗ {error ?? 'Task failed.'}</p>
         )}
         {error && status === 'idle' && <p className="error" style={{ margin: 0 }}>{error}</p>}
-      </div>
-    </div>
-  );
-}
-
-// Modal for the ✎ button on a step row. Screenshot steps get friendly fields —
-// label, full page, mobile, annotate, plus output format and quality (smaller
-// files with jpeg/webp) — while every other kind exposes the payload JSON
-// directly. Unknown payload keys are preserved on save.
-function StepEditModal({
-  step,
-  scenarioId,
-  onClose,
-  onSaved,
-}: {
-  step: ScenarioStep;
-  scenarioId: number;
-  onClose: () => void;
-  onSaved: () => void;
-}) {
-  let initial: any = {};
-  try { initial = JSON.parse(step.payload_json); } catch { /* JSON editor shows the raw text */ }
-  const isScreenshot = step.kind === 'screenshot';
-
-  // Screenshot-friendly fields.
-  const [label, setLabel] = useState(String(initial.label ?? ''));
-  const [fullPage, setFullPage] = useState(initial.fullPage !== false);
-  const [mobile, setMobile] = useState(initial.viewport === 'mobile');
-  const [annotate, setAnnotate] = useState(initial.annotate === true);
-  const [format, setFormat] = useState<string>(
-    initial.format === 'jpeg' || initial.format === 'jpg' ? 'jpeg' : initial.format === 'webp' ? 'webp' : 'png',
-  );
-  const [quality, setQuality] = useState<number>(
-    Number.isFinite(Number(initial.quality)) && Number(initial.quality) > 0 ? Number(initial.quality) : 80,
-  );
-
-  // Raw JSON editor for all other step kinds.
-  const [json, setJson] = useState(() => {
-    try { return JSON.stringify(JSON.parse(step.payload_json), null, 2); } catch { return step.payload_json; }
-  });
-
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function save() {
-    let payload: unknown;
-    if (isScreenshot) {
-      const next: Record<string, unknown> = { ...initial, label: label.trim() || 'screenshot', fullPage };
-      if (mobile) next.viewport = 'mobile'; else delete next.viewport;
-      if (annotate) next.annotate = true; else delete next.annotate;
-      if (format === 'png') {
-        delete next.format;
-        delete next.quality;
-      } else {
-        next.format = format;
-        next.quality = Math.min(100, Math.max(1, Math.round(quality)));
-      }
-      payload = next;
-    } else {
-      try {
-        payload = JSON.parse(json);
-      } catch (e: any) {
-        setError(`Invalid JSON: ${e?.message ?? e}`);
-        return;
-      }
-    }
-    setBusy(true);
-    setError(null);
-    try {
-      await api.updateStep(scenarioId, step.id, { position: step.position, kind: step.kind, payload });
-      onSaved();
-    } catch (e: any) {
-      setError(e?.message ?? String(e));
-      setBusy(false);
-    }
-  }
-
-  const col: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: 4, fontSize: 13 };
-  const row: React.CSSProperties = { display: 'flex', gap: 6, alignItems: 'center', fontSize: 13 };
-
-  return (
-    <div
-      style={{
-        position: 'fixed', inset: 0, zIndex: 1000,
-        background: 'rgba(0,0,0,0.55)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
-      }}
-      onClick={(e) => { if (e.target === e.currentTarget && !busy) onClose(); }}
-    >
-      <div
-        style={{
-          width: '100%', maxWidth: 480, maxHeight: '85vh', overflow: 'auto',
-          background: 'var(--bg, #1b1b1f)', border: '1px solid var(--border, rgba(127,127,127,0.35))',
-          borderRadius: 12, padding: 20, display: 'flex', flexDirection: 'column', gap: 12,
-        }}
-      >
-        <h2 style={{ margin: 0, fontSize: 18 }}>
-          Edit step <code>{step.kind}</code>
-        </h2>
-        {isScreenshot ? (
-          <>
-            <label style={col}>
-              <span>Label</span>
-              <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="screenshot" />
-            </label>
-            <label style={row}>
-              <input type="checkbox" checked={fullPage} onChange={(e) => setFullPage(e.target.checked)} />
-              Full page (entire scrollable page, not just the viewport)
-            </label>
-            <label style={row}>
-              <input type="checkbox" checked={mobile} onChange={(e) => setMobile(e.target.checked)} />
-              Mobile viewport (switch device, capture, switch back)
-            </label>
-            <label style={row}>
-              <input type="checkbox" checked={annotate} onChange={(e) => setAnnotate(e.target.checked)} />
-              Annotate interactive elements
-            </label>
-            <label style={col}>
-              <span>File format</span>
-              <select value={format} onChange={(e) => setFormat(e.target.value)}>
-                <option value="png">png — lossless, largest files</option>
-                <option value="jpeg">jpeg — small files</option>
-                <option value="webp">webp — smallest files</option>
-              </select>
-            </label>
-            {format !== 'png' && (
-              <label style={col}>
-                <span>Quality: {quality}</span>
-                <input
-                  type="range"
-                  min={1}
-                  max={100}
-                  value={quality}
-                  onChange={(e) => setQuality(Number(e.target.value))}
-                />
-                <span className="muted" style={{ fontSize: 12 }}>
-                  Lower = smaller files; 70–85 is usually visually indistinguishable.
-                </span>
-              </label>
-            )}
-          </>
-        ) : (
-          <label style={col}>
-            <span>Payload JSON</span>
-            <textarea
-              value={json}
-              onChange={(e) => setJson(e.target.value)}
-              rows={10}
-              spellCheck={false}
-              style={{
-                fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-                fontSize: 12,
-                resize: 'vertical',
-              }}
-            />
-          </label>
-        )}
-        {error && <p className="error" style={{ margin: 0 }}>{error}</p>}
-        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-          <button onClick={onClose} disabled={busy}>Cancel</button>
-          <button onClick={() => void save()} disabled={busy}>
-            {busy ? 'Saving…' : '💾 Save'}
-          </button>
-        </div>
       </div>
     </div>
   );
