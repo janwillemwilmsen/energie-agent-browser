@@ -1,4 +1,4 @@
-import { run } from '../agentBrowser/driver.js';
+import type { Browser } from './stepExecutor.js';
 import type { SelectorStrategy } from '@eab/shared';
 
 // Fallback path for `select` steps whose selector targets an `option` node
@@ -46,13 +46,13 @@ function buildSelectOptionJs(label: string, ordinal: number): string {
 }
 
 export async function execSelectOptionFallback(
-  session: string,
+  browser: Browser,
   selector: SelectorStrategy,
   value: string,
 ): Promise<void> {
   const label = (value || selector.name).trim();
   const js = buildSelectOptionJs(label, selector.ordinal ?? 0);
-  const r = await run(['eval', js], { session, timeoutMs: 15_000 });
+  const r = await browser.run(['eval', js], { timeoutMs: 15_000 });
   if (r.exitCode !== 0) {
     throw new Error(`select (option fallback) failed: ${r.stderr || r.stdout}`);
   }

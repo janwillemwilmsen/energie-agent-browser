@@ -13,7 +13,16 @@ import {
   persistSessionState,
   PREFLIGHT_RECORDER_SESSION,
 } from '../agentBrowser/driver.js';
-import { executePreflightStep, executePreflightSteps } from '../scenarios/preflightExecutor.js';
+import { cliBrowser } from '../agentBrowser/cliBrowser.js';
+import { getAuthSelectors } from '../authSelectors.js';
+import { executeStep, executeSteps, parseStep, type StepContext } from '../scenarios/stepExecutor.js';
+
+// The recorder and Replay both drive the shared recorder session through the
+// Step executor, so a preflight step behaves exactly as it will inside a
+// scenario run. No artifacts/recorder: preflights don't screenshot or record.
+function recorderStepContext(log: (line: string) => void = () => {}): StepContext {
+  return { browser: cliBrowser(PREFLIGHT_RECORDER_SESSION), log, authSelectors: getAuthSelectors };
+}
 
 
 function activeByName(name: string) {
@@ -214,7 +223,7 @@ export async function preflightsRoutes(app: FastifyInstance) {
   app.post('/api/preflights/recorder/exec-step', async (req, reply) => {
     const { step } = ExecStepBody.parse(req.body);
     try {
-      await executePreflightStep(PREFLIGHT_RECORDER_SESSION, step);
+      await executeStep(recorderStepContext(), step);
       return { ok: true };
     } catch (e: any) {
       return reply.code(400).send({ ok: false, error: e?.message ?? String(e) });
@@ -250,6 +259,10 @@ export async function preflightsRoutes(app: FastifyInstance) {
     } catch {
       return reply.code(500).send({ error: 'bad_steps_json' });
     }
+    const indexed = steps.map((s, i) => {
+      const { kind, ...payload } = s as { kind: string };
+      return { position: i + 1, step: parseStep(kind, payload) };
+    });
 
     const policy = {
       retries: Math.max(0, row.retries ?? 0),
@@ -260,7 +273,7 @@ export async function preflightsRoutes(app: FastifyInstance) {
 
     // Whole-run restart loop: each attempt resets to a truly blank browser
     // (wipe persisted state, fresh daemon) and re-runs every step. Per-step
-    // retries are handled inside executePreflightSteps via `policy`.
+    // retries are handled inside executeSteps via `policy`.
     let lastErr: any = null;
     for (let attempt = 0; attempt <= maxRestarts; attempt++) {
       try {
@@ -282,7 +295,7 @@ export async function preflightsRoutes(app: FastifyInstance) {
             clearPersistedSessionState(row.name);
           },
         });
-        await executePreflightSteps(PREFLIGHT_RECORDER_SESSION, steps, undefined, policy);
+        await executeSteps(recorderStepContext(), indexed, policy);
 
         // Replay completed → persist the freshly-built state to disk. This is
         // the ONE place (along with the Save preflight handler) that's allowed

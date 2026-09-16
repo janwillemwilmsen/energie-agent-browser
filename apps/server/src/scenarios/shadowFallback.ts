@@ -1,4 +1,4 @@
-import { run } from '../agentBrowser/driver.js';
+import type { Browser } from './stepExecutor.js';
 
 // agent-browser (0.34) resolves CSS / text= / xpath= locators with a plain DOM
 // query, which stops at shadow-root boundaries. Web-component pages (ing.nl,
@@ -122,7 +122,7 @@ function parseEvalOutput(stdout: string): FallbackResult | null {
 }
 
 export async function runLocatorFallback(
-  session: string,
+  browser: Browser,
   action: FallbackAction,
   locator: string,
   value?: string,
@@ -132,7 +132,7 @@ export async function runLocatorFallback(
   if (!css) {
     return { ok: false, reason: 'only CSS locators can be deep-queried (not text=/xpath=/refs)' };
   }
-  const r = await run(['eval', buildScript(css, action, value)], { session, timeoutMs });
+  const r = await browser.run(['eval', buildScript(css, action, value)], { timeoutMs });
   if (r.exitCode !== 0) {
     return { ok: false, reason: `eval failed: ${(r.stderr || r.stdout).trim().slice(0, 200)}` };
   }
@@ -141,7 +141,7 @@ export async function runLocatorFallback(
 
 // Poll the deep query until the element exists (for `wait` steps with a locator).
 export async function waitForLocatorFallback(
-  session: string,
+  browser: Browser,
   locator: string,
   timeoutMs = 30_000,
   pollMs = 500,
@@ -149,7 +149,7 @@ export async function waitForLocatorFallback(
   const deadline = Date.now() + timeoutMs;
   let last: FallbackResult = { ok: false, reason: 'not attempted' };
   while (Date.now() < deadline) {
-    last = await runLocatorFallback(session, 'exists', locator);
+    last = await runLocatorFallback(browser, 'exists', locator);
     if (last.ok) return last;
     if (last.reason && /only CSS|invalid CSS/.test(last.reason)) return last; // no point polling
     await new Promise((r) => setTimeout(r, pollMs));

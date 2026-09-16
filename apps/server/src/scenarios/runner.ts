@@ -1,20 +1,27 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import sharp from 'sharp';
 import { config } from '../config.js';
 import { getDb } from '../db/index.js';
-import { run, runJson, closeSession, ensureSession } from '../agentBrowser/driver.js';
-import { parseSnapshotText } from '../agentBrowser/parser.js';
-import { resolveSelector } from './selector.js';
-import { isOptionSelector, execSelectOptionFallback } from './selectFallback.js';
-import { isElementNotFound, runLocatorFallback, waitForLocatorFallback } from './shadowFallback.js';
-import { executePreflightSteps } from './preflightExecutor.js';
+import { closeSession, ensureSession } from '../agentBrowser/driver.js';
+import { cliBrowser } from '../agentBrowser/cliBrowser.js';
+import { getAuthSelectors } from '../authSelectors.js';
+import {
+  applyViewport,
+  executeSteps,
+  parseStep,
+  type IndexedStep,
+  type RetryPolicy,
+  type StepContext,
+} from './stepExecutor.js';
 import { StreamRecorder } from './streamRecorder.js';
 import { notifyScenarioFailure, notifyScenarioSuccess } from '../push.js';
 import { notifyRunResultEmail } from '../email.js';
-import type { PreflightStep, SelectorStrategy, ViewportPreset } from '@eab/shared';
+import type { ViewportPreset } from '@eab/shared';
 
-const MOBILE_DEVICE = 'iPhone 14';
+// Scenario-run orchestration: loads the Scenario and its Preflight, creates the
+// Run row, binds the browser session, applies the Preflight, runs the Steps per
+// viewport with whole-run restarts, persists the outcome and notifies. The
+// Steps themselves are carried out by the Step executor (stepExecutor.ts).
 
 // Holds the in-flight video recording for a run. Recording is bracketed by
 // `record_start` / `record_stop` steps, so a run may have zero, one, or several
@@ -25,6 +32,8 @@ interface RecordingHolder {
   absPath: string | null;
   relPath: string | null;
   index: number;
+  /** The run's file stamp; clip filenames share it with the screenshots. */
+  fileStamp: string;
 }
 
 interface StepRow {
@@ -52,15 +61,7 @@ interface RunContext {
   runId: number;
   session: string;
   scenario: ScenarioRow;
-  viewport: 'desktop' | 'mobile';
-  screenshotDir: string;
-  // Compact local-time stamp (YYYYMMDD-HHMMSS) of when the run started, embedded
-  // into every screenshot filename so the file carries its own creation date.
-  // Shared across the whole run (and reused on restart) so re-attempts overwrite
-  // rather than leaving orphan files behind.
-  fileStamp: string;
   log: string[];
-  screenshots: string[];
   recording: RecordingHolder;
 }
 
@@ -80,10 +81,6 @@ function fileStamp(d: Date): string {
   );
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 function appendLog(ctx: { runId: number; log: string[] }, line: string): void {
   const stamped = `[${nowIso()}] ${line}`;
   ctx.log.push(stamped);
@@ -96,59 +93,6 @@ function appendLog(ctx: { runId: number; log: string[] }, line: string): void {
   } catch {
     /* ignore */
   }
-}
-
-async function snapshotTree(session: string) {
-  const data = await runJson<{ origin: string; snapshot: string }>(
-    ['snapshot', '--compact'],
-    { session, timeoutMs: 30_000 },
-  );
-  return parseSnapshotText(data.snapshot ?? '', data.origin ?? '');
-}
-
-async function applyViewport(ctx: RunContext): Promise<void> {
-  if (ctx.viewport === 'mobile') {
-    appendLog(ctx, `> set device "${MOBILE_DEVICE}"`);
-    await run(['set', 'device', MOBILE_DEVICE], { session: ctx.session, timeoutMs: 15_000 });
-    appendLog(ctx, `< set device ok`);
-  } else {
-    appendLog(ctx, `> set viewport 1440x900`);
-    await run(['set', 'viewport', '1440', '900'], { session: ctx.session, timeoutMs: 15_000 });
-    appendLog(ctx, `< set viewport ok`);
-  }
-}
-
-// Chrome's CDP error for "the frame has no layout yet" — seen when a screenshot
-// is requested while a navigation is still committing / before first paint.
-function isPageNotReadyError(stderr: string, stdout: string): boolean {
-  const s = `${stderr}\n${stdout}`;
-  return /Cannot take screenshot with 0 (width|height)/i.test(s) ||
-    /Unable to capture screenshot/i.test(s);
-}
-
-const SCREENSHOT_NOT_READY_RETRIES = 6;
-
-// Best-effort `wait --load load`: returns as soon as the current document has
-// fired `load` (immediately if it already has). Never throws — a timeout just
-// means we proceed and let the next command report a real error.
-async function waitForLoad(session: string, timeoutMs: number): Promise<void> {
-  try {
-    await run(['wait', '--load', 'load'], { session, timeoutMs });
-  } catch {
-    /* ignore */
-  }
-}
-
-// After a click that may have started a navigation (link to another page or
-// site), let the new document load before the next step. `wait --load` is
-// cheap when nothing is navigating, so this adds no noticeable delay to
-// ordinary in-page clicks. Best-effort: never fails the step.
-async function settleAfterInteraction(ctx: RunContext): Promise<void> {
-  // A navigation triggered by the click needs a beat to actually start
-  // before the load-state wait can see it; the first screenshot retry above
-  // covers the (rare) case where it starts even later.
-  await sleep(150);
-  await waitForLoad(ctx.session, 10_000);
 }
 
 // Begin a recording at this point in the step sequence. Best-effort: a failure
@@ -167,7 +111,7 @@ async function startRecordingStep(ctx: RunContext): Promise<void> {
     .slice(0, 60);
   ctx.recording.index += 1;
   const suffix = ctx.recording.index > 1 ? `-${ctx.recording.index}` : '';
-  const file = `${ctx.fileStamp}-${safeName}${suffix}.webm`;
+  const file = `${ctx.recording.fileStamp}-${safeName}${suffix}.webm`;
   ctx.recording.absPath = path.join(recDirAbs, file);
   ctx.recording.relPath = `recordings/${ctx.scenario.id}/${file}`;
   ctx.recording.recorder = await StreamRecorder.start({
@@ -185,12 +129,7 @@ async function startRecordingStep(ctx: RunContext): Promise<void> {
 
 // Stop the open recording (if any) and register the saved webm. Used by the
 // `record_stop` step and by the run-level finalizer for an unclosed recording.
-async function stopRecordingStep(ctx: {
-  recording: RecordingHolder;
-  scenario: ScenarioRow;
-  runId: number;
-  log: string[];
-}): Promise<void> {
+async function stopRecordingStep(ctx: RunContext): Promise<void> {
   const rec = ctx.recording.recorder;
   if (!rec) return;
   ctx.recording.recorder = null;
@@ -206,334 +145,9 @@ async function stopRecordingStep(ctx: {
         `INSERT INTO recordings (scenario_id, run_id, file_path, size_bytes) VALUES (?, ?, ?, ?)`,
       )
       .run(ctx.scenario.id, ctx.runId, relPath, size);
-    appendLog(
-      { runId: ctx.runId, log: ctx.log },
-      `recording saved (${Math.round(size / 1024)} KB, ${frames} frames)`,
-    );
+    appendLog(ctx, `recording saved (${Math.round(size / 1024)} KB, ${frames} frames)`);
   } else {
-    appendLog({ runId: ctx.runId, log: ctx.log }, `recording produced no file (non-fatal)`);
-  }
-}
-
-async function executeStep(ctx: RunContext, step: StepRow): Promise<void> {
-  const payload = JSON.parse(step.payload_json);
-
-  switch (step.kind) {
-    case 'record_start':
-      await startRecordingStep(ctx);
-      return;
-    case 'record_stop':
-      await stopRecordingStep(ctx);
-      return;
-    case 'close': {
-      // Tear down the browser session (agent-browser close). A later step that
-      // talks to the browser will re-bootstrap the session on demand via run().
-      appendLog(ctx, 'close browser session');
-      await closeSession(ctx.session).catch((e: any) =>
-        appendLog(ctx, `close failed (non-fatal): ${e?.message ?? e}`),
-      );
-      appendLog(ctx, 'browser session closed');
-      return;
-    }
-    case 'navigate': {
-      const url = String(payload.url);
-      appendLog(ctx, `navigate ${url}`);
-      const r = await run(['open', url], { session: ctx.session, timeoutMs: 60_000 });
-      if (r.exitCode !== 0) throw new Error(`navigate failed: ${r.stderr || r.stdout}`);
-      return;
-    }
-    case 'click':
-    case 'type':
-    case 'fill':
-    case 'select':
-    // check/uncheck are the state-aware checkbox actions: no-ops when the box
-    // is already in the desired state, unlike a blind click toggle.
-    case 'check':
-    case 'uncheck': {
-      const selector = payload.selector as SelectorStrategy;
-      // A raw locator ("#id", "[data-testid=…]", "text=…", "xpath=…", any
-      // CSS) goes to agent-browser verbatim — it resolves and auto-waits for
-      // the element itself, so no snapshot/a11y resolution (and no ambiguity).
-      const ref = selector.locator?.trim()
-        ? selector.locator.trim()
-        : resolveSelector(selector, await snapshotTree(ctx.session));
-      // A select step whose selector targets the OPTION (not the dropdown)
-      // means the a11y tree had no ref-addressable combobox (e.g. Chromium's
-      // MenuListPopup shape) — set the parent <select> via the JS fallback.
-      if (step.kind === 'select' && !selector.locator && isOptionSelector(selector)) {
-        appendLog(ctx, `select (option fallback) ${JSON.stringify(String(payload.value ?? ''))}`);
-        await execSelectOptionFallback(ctx.session, selector, String(payload.value ?? ''));
-        return;
-      }
-      const args = [step.kind, ref];
-      if (step.kind === 'type') args.push(String(payload.text ?? ''));
-      // 'select' picks an option in a native <select> by label/value — the
-      // selector targets the combobox itself (options have no box model).
-      if (step.kind === 'fill' || step.kind === 'select') args.push(String(payload.value ?? ''));
-      appendLog(ctx, `${step.kind} ${ref}`);
-      const r = await run(args, { session: ctx.session, timeoutMs: 30_000 });
-      if (r.exitCode !== 0) {
-        // CSS/text/xpath locators don't pierce shadow DOM in agent-browser;
-        // retry in-page via a deep query over open shadow roots.
-        if (selector.locator && isElementNotFound(r.stderr, r.stdout)) {
-          const value =
-            step.kind === 'type' ? String(payload.text ?? '')
-            : step.kind === 'fill' || step.kind === 'select' ? String(payload.value ?? '')
-            : undefined;
-          appendLog(ctx, `${step.kind}: locator not found by CLI — trying shadow-DOM fallback`);
-          const fb = await runLocatorFallback(ctx.session, step.kind, selector.locator, value);
-          if (fb.ok) {
-            appendLog(ctx, `${step.kind} ${selector.locator} via shadow-DOM fallback (<${fb.tag}>)`);
-            return;
-          }
-          throw new Error(
-            `${step.kind} failed: ${(r.stderr || r.stdout).trim()} — shadow-DOM fallback also failed: ${fb.reason}`,
-          );
-        }
-        throw new Error(`${step.kind} failed: ${r.stderr || r.stdout}`);
-      }
-      // A click may have kicked off a navigation (e.g. a link to another
-      // site). Give the new document a moment to load so the next step
-      // doesn't race it — see settleAfterInteraction.
-      if (step.kind === 'click') await settleAfterInteraction(ctx);
-      return;
-    }
-    case 'scroll': {
-      // A scroll step carrying a selector means "scroll this element into
-      // view" — resolve the selector against a fresh snapshot, like click.
-      if (payload.selector) {
-        const sel = payload.selector as SelectorStrategy;
-        const ref = sel.locator?.trim()
-          ? sel.locator.trim()
-          : resolveSelector(sel, await snapshotTree(ctx.session));
-        appendLog(ctx, `scroll into view ${ref}`);
-        const r = await run(['scrollintoview', ref], { session: ctx.session, timeoutMs: 30_000 });
-        if (r.exitCode !== 0) {
-          if (sel.locator && isElementNotFound(r.stderr, r.stdout)) {
-            const fb = await runLocatorFallback(ctx.session, 'scrollintoview', sel.locator);
-            if (fb.ok) { appendLog(ctx, `scrolled into view via shadow-DOM fallback`); return; }
-            throw new Error(`scroll into view failed: ${(r.stderr || r.stdout).trim()} — shadow-DOM fallback also failed: ${fb.reason}`);
-          }
-          throw new Error(`scroll into view failed: ${r.stderr || r.stdout}`);
-        }
-        return;
-      }
-      if (payload.toTop) {
-        appendLog(ctx, `scroll to top`);
-        const r = await run(['scroll', 'up', '100000'], {
-          session: ctx.session,
-          timeoutMs: 15_000,
-        });
-        if (r.exitCode !== 0) throw new Error(`scroll failed: ${(r.stderr || r.stdout).trim() || `(no output, exit code ${r.exitCode} — the browser session likely crashed or was closed mid-run)`}`);
-        return;
-      }
-      if (payload.toBottom) {
-        // Mirrors agent-browser's documented infinite-scroll pattern
-        // (skill-data/core/templates/capture-workflow.sh): repeated scroll+wait
-        // so IntersectionObserver-based lazy loaders fire on each stride.
-        const stridePx = 800;
-        const waitMs = 600;
-        const iterations = 15;
-        appendLog(ctx, `scroll to bottom (${iterations} × ${stridePx}px)`);
-        for (let i = 0; i < iterations; i++) {
-          const r = await run(['scroll', 'down', String(stridePx)], {
-            session: ctx.session,
-            timeoutMs: 15_000,
-          });
-          if (r.exitCode !== 0) throw new Error(`scroll failed: ${(r.stderr || r.stdout).trim() || `(no output, exit code ${r.exitCode} — the browser session likely crashed or was closed mid-run)`}`);
-          await new Promise((res) => setTimeout(res, waitMs));
-        }
-        return;
-      }
-      const dy = Number(payload.dy ?? 400);
-      const direction = dy >= 0 ? 'down' : 'up';
-      appendLog(ctx, `scroll ${direction} ${Math.abs(dy)}`);
-      const r = await run(['scroll', direction, String(Math.abs(dy))], {
-        session: ctx.session,
-        timeoutMs: 15_000,
-      });
-      if (r.exitCode !== 0) throw new Error(`scroll failed: ${(r.stderr || r.stdout).trim() || `(no output, exit code ${r.exitCode} — the browser session likely crashed or was closed mid-run)`}`);
-      return;
-    }
-    case 'wait': {
-      if (payload.selector) {
-        // Poll for the element to appear. We deliberately do NOT pre-snapshot
-        // and resolve to an `@eN` ref — refs are bound to a single snapshot
-        // and go stale the instant the DOM mutates (which is exactly what
-        // we're waiting for in the first place). agent-browser's `wait --text`
-        // polls the live page for a substring match, which is what the user
-        // actually means by "wait for the button labelled X".
-        const sel = payload.selector as SelectorStrategy;
-        const locator = sel.locator?.trim();
-        const text = sel.name?.trim();
-        if (!locator && !text) {
-          throw new Error('wait: selector has no locator or name/text to wait for');
-        }
-        // A raw locator waits for that exact element (`wait <selector>`);
-        // otherwise fall back to the text-substring poll described above.
-        appendLog(ctx, locator ? `wait for ${locator}` : `wait for text "${text}" (${sel.role})`);
-        const r = await run(locator ? ['wait', locator] : ['wait', '--text', text!], {
-          session: ctx.session,
-          timeoutMs: 35_000,
-        });
-        if (r.exitCode !== 0) {
-          if (locator) {
-            // The CLI's selector wait can't see into shadow DOM — poll a deep
-            // query over open shadow roots instead before giving up.
-            const fb = await waitForLocatorFallback(ctx.session, locator);
-            if (fb.ok) { appendLog(ctx, `wait satisfied via shadow-DOM fallback`); return; }
-          }
-          throw new Error(
-            `wait failed (exit=${r.exitCode}): ${r.stderr.trim() || r.stdout.trim() || 'no output — element did not appear within agent-browser default timeout'}`,
-          );
-        }
-        return;
-      }
-      const ms = Number(payload.ms ?? 1000);
-      appendLog(ctx, `wait ${ms}ms`);
-      const r = await run(['wait', String(ms)], { session: ctx.session, timeoutMs: ms + 10_000 });
-      if (r.exitCode !== 0) {
-        throw new Error(
-          `wait failed (exit=${r.exitCode}): ${r.stderr.trim() || r.stdout.trim() || 'no output'}`,
-        );
-      }
-      return;
-    }
-    case 'evaluate': {
-      const js = String(payload.js ?? '');
-      appendLog(ctx, `eval ${js.slice(0, 60)}…`);
-      const r = await run(['eval', js], { session: ctx.session, timeoutMs: 30_000 });
-      if (r.exitCode !== 0) throw new Error(`eval failed: ${r.stderr || r.stdout}`);
-      return;
-    }
-    case 'screenshot': {
-      const label = String(payload.label ?? `step-${step.position}`).replace(/[^a-z0-9._-]/gi, '_');
-      // A 'mobile' shot captures at the mobile device regardless of the run's
-      // viewport, so it gets the 'mobile' suffix (and pairs across runs in the
-      // diff view). Otherwise it follows the run's current viewport.
-      const mobileShot = payload.viewport === 'mobile';
-      const suffix = mobileShot ? 'mobile' : ctx.viewport;
-      // Output format + quality (payload.format/payload.quality). png (default)
-      // is lossless; jpeg is captured natively by agent-browser; webp is
-      // captured as png and post-converted with sharp below (the CLI only
-      // supports png/jpeg). Lossy formats cut file size dramatically.
-      const rawFormat = String(payload.format ?? 'png').toLowerCase();
-      const format: 'png' | 'jpeg' | 'webp' =
-        rawFormat === 'jpeg' || rawFormat === 'jpg' ? 'jpeg' : rawFormat === 'webp' ? 'webp' : 'png';
-      const qualityNum = Math.round(Number(payload.quality));
-      const quality = Number.isFinite(qualityNum) ? Math.min(100, Math.max(1, qualityNum)) : 80;
-      const ext = format === 'jpeg' ? 'jpg' : format;
-      // NNN-YYYYMMDD-HHMMSS-label-viewport.<ext> — position stays first (diff sort
-      // relies on it); the timestamp block sits between position and label and is
-      // stripped by the cross-run slot matchers so screenshots still pair up.
-      const filename = `${step.position.toString().padStart(3, '0')}-${ctx.fileStamp}-${label}-${suffix}.${ext}`;
-      const filepath = path.join(ctx.screenshotDir, filename);
-      // webp: capture a lossless png next to the final path, convert after.
-      const capturePath = format === 'webp' ? `${filepath}.capture.png` : filepath;
-      // agent-browser's screenshot default is VIEWPORT-only; --full captures
-      // the entire scrollable page. Step payload's `fullPage` defaults to true
-      // on the frontend, so most steps end up with --full unless explicitly
-      // opted out.
-      const fullPage = payload.fullPage !== false;
-      // --annotate overlays numbered labels on interactive elements and prints
-      // a legend (label [N] -> @eN role/name) to stdout.
-      const annotate = payload.annotate === true;
-
-      if (mobileShot) {
-        // Let the current layout settle, switch to the mobile device, let the
-        // responsive reflow happen, then capture.
-        await sleep(50);
-        appendLog(ctx, `> set device "${MOBILE_DEVICE}" (mobile screenshot)`);
-        await run(['set', 'device', MOBILE_DEVICE], { session: ctx.session, timeoutMs: 15_000 });
-        await sleep(50);
-      }
-
-      // Global flags must precede the subcommand (run() only prepends --session).
-      const args: string[] = [];
-      if (format === 'jpeg') args.push('--screenshot-format', 'jpeg', '--screenshot-quality', String(quality));
-      args.push('screenshot');
-      if (fullPage) args.push('--full');
-      if (annotate) args.push('--annotate');
-      args.push(capturePath);
-      appendLog(
-        ctx,
-        `screenshot${fullPage ? ' (full)' : ' (viewport)'}${mobileShot ? ' (mobile)' : ''}${annotate ? ' (annotated)' : ''}${format !== 'png' ? ` (${format} q${quality})` : ''} → ${filename}`,
-      );
-      // Chrome refuses to capture while a navigation is mid-flight (the new
-      // document has no layout yet): "Cannot take screenshot with 0 width".
-      // That's a transient state — typically the step right after a click
-      // that navigated to another site, and more likely in a freshly
-      // (re)started browser where the new renderer is slow to come up. Wait
-      // for the load state and retry a few times before giving up.
-      let r = await run(args, { session: ctx.session, timeoutMs: 60_000 });
-      for (let attempt = 1; r.exitCode !== 0 && isPageNotReadyError(r.stderr, r.stdout) && attempt <= SCREENSHOT_NOT_READY_RETRIES; attempt++) {
-        appendLog(ctx, `screenshot: page not ready yet (${(r.stderr || r.stdout).trim().split('\n')[0]}) — waiting for load and retrying (${attempt}/${SCREENSHOT_NOT_READY_RETRIES})`);
-        await sleep(500);
-        await waitForLoad(ctx.session, 10_000);
-        r = await run(args, { session: ctx.session, timeoutMs: 60_000 });
-      }
-      if (r.exitCode !== 0) throw new Error(`screenshot failed: ${r.stderr || r.stdout}`);
-      if (format === 'webp') {
-        // agent-browser can't emit webp — convert the png capture and drop it.
-        await sharp(capturePath).webp({ quality }).toFile(filepath);
-        fs.rmSync(capturePath, { force: true });
-      }
-      ctx.screenshots.push(filename);
-      // The annotate legend is on stdout — keep it in the run log so the labels
-      // are interpretable later.
-      if (annotate && r.stdout.trim()) appendLog(ctx, r.stdout.trim());
-
-      if (mobileShot) {
-        // Restore the run's viewport so following steps run as before.
-        await sleep(50);
-        await applyViewport(ctx);
-      }
-      return;
-    }
-    default:
-      appendLog(ctx, `skipping unknown step kind: ${step.kind}`);
-  }
-}
-
-// Run one step, re-attempting on failure per the scenario's retry policy:
-// pause `retry_wait_before_ms` before each retry, and `retry_wait_after_ms`
-// after a retry that finally succeeds. Throws if all attempts fail.
-async function executeStepWithRetries(ctx: RunContext, step: StepRow): Promise<void> {
-  const retries = Math.max(0, ctx.scenario.retries ?? 0);
-  const waitBefore = Math.max(0, ctx.scenario.retry_wait_before_ms ?? 0);
-  const waitAfter = Math.max(0, ctx.scenario.retry_wait_after_ms ?? 0);
-
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    try {
-      await executeStep(ctx, step);
-      if (attempt > 0 && waitAfter > 0) {
-        appendLog(ctx, `retry: waiting ${waitAfter}ms after success`);
-        await sleep(waitAfter);
-      }
-      return;
-    } catch (e: any) {
-      if (attempt >= retries) throw e;
-      appendLog(
-        ctx,
-        `step #${step.position} (${step.kind}) failed: ${e.message} — retry ${attempt + 1}/${retries}`,
-      );
-      if (waitBefore > 0) {
-        appendLog(ctx, `retry: waiting ${waitBefore}ms before re-attempt`);
-        await sleep(waitBefore);
-      }
-    }
-  }
-}
-
-async function runOnce(
-  ctx: RunContext,
-  steps: StepRow[],
-  afterStep?: (step: StepRow) => Promise<void>,
-): Promise<void> {
-  await applyViewport(ctx);
-  for (const step of steps) {
-    await executeStepWithRetries(ctx, step);
-    if (afterStep) await afterStep(step);
+    appendLog(ctx, `recording produced no file (non-fatal)`);
   }
 }
 
@@ -571,11 +185,11 @@ export async function executeScenario(
   // login flow fresh. Soft-deleted preflights resolve to null here and the
   // scenario degrades to running with no preflight.
   let preflightName: string | null = null;
-  let preflightSteps: PreflightStep[] = [];
+  let preflightStepsJson = '[]';
   // The preflight carries its own retry/restart policy (configured on the
   // /preflight page). Per-step retries apply to every attempt; restarts re-run
   // the whole preflight after resetting the browser connection.
-  let preflightPolicy = { retries: 0, retryWaitBeforeMs: 0, retryWaitAfterMs: 0 };
+  let preflightPolicy: RetryPolicy = { retries: 0, retryWaitBeforeMs: 0, retryWaitAfterMs: 0 };
   let preflightRestarts = 0;
   if (scenario.preflight_id != null) {
     const pf = db
@@ -596,8 +210,7 @@ export async function executeScenario(
       | undefined;
     if (pf) {
       preflightName = pf.name;
-      try { preflightSteps = JSON.parse(pf.steps_json) as PreflightStep[]; }
-      catch { preflightSteps = []; }
+      preflightStepsJson = pf.steps_json;
       preflightPolicy = {
         retries: Math.max(0, pf.retries ?? 0),
         retryWaitBeforeMs: Math.max(0, pf.retry_wait_before_ms ?? 0),
@@ -607,7 +220,7 @@ export async function executeScenario(
     }
   }
 
-  const steps = db
+  const stepRows = db
     .prepare('SELECT * FROM scenario_steps WHERE scenario_id = ? ORDER BY position')
     .all(scenarioId) as StepRow[];
 
@@ -633,17 +246,65 @@ export async function executeScenario(
   // All work uses the shared `default` session — the user bootstraps it once
   // from any Terminal/Editor tab and every run + the live preview share it.
   const session = 'default';
+  const browser = cliBrowser(session);
   const maxRestarts = Math.max(0, scenario.restart_on_failure ?? 0);
   // Video recording is opened/closed by `record_start` / `record_stop` steps;
   // this holder is shared across viewports and restart attempts so a recording
   // started in one survives into the next.
-  const recording: RecordingHolder = { recorder: null, absPath: null, relPath: null, index: 0 };
+  const recording: RecordingHolder = {
+    recorder: null, absPath: null, relPath: null, index: 0, fileStamp: runFileStamp,
+  };
+  const ctx: RunContext = { runId, session, scenario, log, recording };
+  const scenarioPolicy: RetryPolicy = {
+    retries: Math.max(0, scenario.retries ?? 0),
+    retryWaitBeforeMs: Math.max(0, scenario.retry_wait_before_ms ?? 0),
+    retryWaitAfterMs: Math.max(0, scenario.retry_wait_after_ms ?? 0),
+  };
+
+  // Finish the run as failed before any Step ran (bad step data, preflight
+  // failure). The normal path at the bottom handles everything else.
+  const finishFailedEarly = (reason: string): number => {
+    appendLog(ctx, reason);
+    db.prepare(
+      `UPDATE runs SET status = 'failed', finished_at = CURRENT_TIMESTAMP,
+                       log_text = ?, screenshot_paths_json = ? WHERE id = ?`,
+    ).run(log.join('\n'), JSON.stringify([]), runId);
+    void notifyScenarioFailure({ id: scenario.id, name: scenario.name }, runId);
+    void notifyRunResultEmail({ id: scenario.id, name: scenario.name }, runId, 'failed');
+    return runId;
+  };
+
+  // Parse every Step up front so a malformed one fails the run here, with a
+  // precise message, instead of mid-flight in the browser.
+  let steps: IndexedStep[];
+  let preflightSteps: IndexedStep[];
+  try {
+    steps = stepRows.map((row) => {
+      try {
+        return { position: row.position, step: parseStep(row.kind, JSON.parse(row.payload_json)) };
+      } catch (e: any) {
+        throw new Error(`scenario step #${row.position}: ${e?.message ?? e}`);
+      }
+    });
+    let rawPreflight: unknown[] = [];
+    try { rawPreflight = JSON.parse(preflightStepsJson); } catch { rawPreflight = []; }
+    preflightSteps = rawPreflight.map((raw, i) => {
+      const { kind, ...payload } = (raw ?? {}) as { kind?: string };
+      try {
+        return { position: i + 1, step: parseStep(String(kind ?? ''), payload) };
+      } catch (e: any) {
+        throw new Error(`preflight "${preflightName}" step #${i + 1}: ${e?.message ?? e}`);
+      }
+    });
+  } catch (e: any) {
+    return finishFailedEarly(`invalid step data — ${e?.message ?? e}`);
+  }
 
   // "Reset & play": restart the daemon up front so the run starts with an
   // empty cookie jar regardless of preflight mode. (Steps-mode preflights
   // restart below anyway; this covers no-preflight and cookies-mode runs.)
   if (opts.freshSession) {
-    appendLog({ runId, log }, 'fresh session requested — restarting browser');
+    appendLog(ctx, 'fresh session requested — restarting browser');
     await closeSession(session).catch(() => undefined);
   }
 
@@ -665,11 +326,18 @@ export async function executeScenario(
   const useCookiesOnly = scenario.preflight_mode === 'cookies';
   async function applyPreflight(name: string): Promise<void> {
     appendLog(
-      { runId, log },
+      ctx,
       useCookiesOnly
         ? `preflight "${name}": loading saved cookies (mode=cookies, steps skipped)`
         : `preflight "${name}": binding daemon + executing ${preflightSteps.length} step(s)`,
     );
+    // Preflight Steps have no artifacts or recorder: a screenshot inside a
+    // preflight is not a thing.
+    const preflightCtx: StepContext = {
+      browser,
+      log: (msg) => appendLog(ctx, '  ' + msg),
+      authSelectors: getAuthSelectors,
+    };
     // Whole-preflight restart loop. Unlike Replay, a scenario run does NOT wipe
     // persisted state between attempts — the preflight re-runs its login flow
     // fresh anyway; we only reset the browser connection so a hung/flaky daemon
@@ -679,7 +347,7 @@ export async function executeScenario(
       try {
         if (attempt > 0) {
           appendLog(
-            { runId, log },
+            ctx,
             `preflight "${name}" failed — resetting browser and restarting (restart ${attempt}/${preflightRestarts})`,
           );
           await closeSession(session).catch(() => undefined);
@@ -688,7 +356,7 @@ export async function executeScenario(
           // Load the persisted state (default ensureSession behavior) and do
           // NOT run the steps.
           await ensureSession(session, { sessionName: name });
-          appendLog({ runId, log }, `preflight "${name}": cookies loaded`);
+          appendLog(ctx, `preflight "${name}": cookies loaded`);
         } else {
           // Fresh-browser guarantee: a daemon reused from a previous run still
           // holds that run's in-memory cookies — ensureSession reuses on a
@@ -709,13 +377,8 @@ export async function executeScenario(
           // navigates (login), and `record start` poisons the next navigation —
           // so we wait and start recording after the scenario's first navigation.
           if (preflightSteps.length > 0) {
-            await executePreflightSteps(
-              session,
-              preflightSteps,
-              (msg) => appendLog({ runId, log }, '  ' + msg),
-              preflightPolicy,
-            );
-            appendLog({ runId, log }, `preflight "${name}": ok`);
+            await executeSteps(preflightCtx, preflightSteps, preflightPolicy);
+            appendLog(ctx, `preflight "${name}": ok`);
           }
         }
         return;
@@ -733,15 +396,7 @@ export async function executeScenario(
       // Hard-fail the run: scenarios that depend on the preflight (e.g. a
       // logged-in scenario) can't usefully run without it. Better to surface
       // the preflight error in the run log than silently hit the login page.
-      appendLog({ runId, log }, `preflight "${preflightName}" failed: ${e.message}`);
-      const screenshotPathsJson = JSON.stringify([]);
-      db.prepare(
-        `UPDATE runs SET status = 'failed', finished_at = CURRENT_TIMESTAMP,
-                         log_text = ?, screenshot_paths_json = ? WHERE id = ?`,
-      ).run(log.join('\n'), screenshotPathsJson, runId);
-      void notifyScenarioFailure({ id: scenario.id, name: scenario.name }, runId);
-      void notifyRunResultEmail({ id: scenario.id, name: scenario.name }, runId, 'failed');
-      return runId;
+      return finishFailedEarly(`preflight "${preflightName}" failed: ${e.message}`);
     }
   }
 
@@ -751,7 +406,7 @@ export async function executeScenario(
   for (let attempt = 0; attempt <= maxRestarts; attempt++) {
     if (attempt > 0) {
       appendLog(
-        { runId, log },
+        ctx,
         `run failed — resetting browser connection and restarting (restart ${attempt}/${maxRestarts})`,
       );
       try {
@@ -765,11 +420,11 @@ export async function executeScenario(
         } else {
           await ensureSession(session);
         }
-        appendLog({ runId, log }, 'browser connection reset; re-running scenario from the top');
+        appendLog(ctx, 'browser connection reset; re-running scenario from the top');
       } catch (e: any) {
         // Preflight/connection reset failed — this attempt can't usefully run
         // the scenario steps, so skip straight to the next restart (if any).
-        appendLog({ runId, log }, `restart reset failed: ${e.message}`);
+        appendLog(ctx, `restart reset failed: ${e.message}`);
         status = 'failed';
         continue;
       }
@@ -780,20 +435,20 @@ export async function executeScenario(
     status = 'success';
 
     for (const viewport of viewports) {
-      const ctx: RunContext = {
-        runId,
-        session,
-        scenario,
-        viewport,
-        screenshotDir,
-        fileStamp: runFileStamp,
-        log,
-        screenshots,
-        recording,
+      const stepCtx: StepContext = {
+        browser,
+        log: (line) => appendLog(ctx, line),
+        artifacts: { screenshotDir, fileStamp: runFileStamp, viewport, screenshots },
+        recorder: {
+          start: () => startRecordingStep(ctx),
+          stop: () => stopRecordingStep(ctx),
+        },
+        authSelectors: getAuthSelectors,
       };
       appendLog(ctx, `=== viewport: ${viewport} ===`);
       try {
-        await runOnce(ctx, steps);
+        await applyViewport(browser, viewport, stepCtx.log);
+        await executeSteps(stepCtx, steps, scenarioPolicy);
       } catch (e: any) {
         status = 'failed';
         appendLog(ctx, `ERROR: ${e.message}`);
@@ -807,7 +462,7 @@ export async function executeScenario(
   // A recording left open (a `record_start` without a matching `record_stop`,
   // or a run that failed mid-recording) is finalized here so the partial clip
   // is still saved.
-  await stopRecordingStep({ recording, scenario, runId, log });
+  await stopRecordingStep(ctx);
 
   db.prepare(
     `UPDATE runs

@@ -48,6 +48,13 @@ export const StepKind = z.enum([
 ]);
 export type StepKind = z.infer<typeof StepKind>;
 
+export const AuthProfileName = z
+  .string()
+  .trim()
+  .min(1)
+  .max(64)
+  .regex(/^[A-Za-z0-9._-]+$/, 'use letters, digits, dot, dash, underscore only');
+
 const StepNavigate = z.object({ kind: z.literal('navigate'), url: z.string().url() });
 const StepClick = z.object({ kind: z.literal('click'), selector: SelectorStrategy });
 const StepType = z.object({
@@ -72,8 +79,9 @@ const StepUncheck = z.object({ kind: z.literal('uncheck'), selector: SelectorStr
 const StepScroll = z.object({
   kind: z.literal('scroll'),
   selector: SelectorStrategy.optional(),
-  dx: z.number().default(0),
-  dy: z.number().default(0),
+  dx: z.number().optional(),
+  // Pixels to scroll; the Step executor defaults to 400 when absent.
+  dy: z.number().optional(),
   // When true, the runner loops `scroll down` calls with short pauses to
   // trigger IntersectionObserver-based lazy loaders, instead of using dy/dx.
   toBottom: z.boolean().optional(),
@@ -82,7 +90,8 @@ const StepScroll = z.object({
 });
 const StepScreenshot = z.object({
   kind: z.literal('screenshot'),
-  label: z.string().default('screenshot'),
+  // Falls back to `step-<position>` when absent.
+  label: z.string().optional(),
   fullPage: z.boolean().default(true),
   // When 'mobile', the runner temporarily switches to the mobile device,
   // captures, then restores the run's viewport.
@@ -106,7 +115,14 @@ const StepEvaluate = z.object({ kind: z.literal('evaluate'), js: z.string() });
 const StepRecordStart = z.object({ kind: z.literal('record_start') });
 const StepRecordStop = z.object({ kind: z.literal('record_stop') });
 const StepClose = z.object({ kind: z.literal('close') });
+// Single-form login via agent-browser's encrypted Auth Vault. The username +
+// password live in ~/.agent-browser/auth/<name>.json (AES-GCM encrypted), so
+// credentials never appear in a step payload. Only Preflights may contain this
+// kind today: the scenario_steps CHECK constraint (and StepKind) exclude it.
+const StepAuthLogin = z.object({ kind: z.literal('auth-login'), name: AuthProfileName });
 
+// Every Step kind the Step executor understands — Scenario steps AND Preflight
+// steps. StepKind above is the narrower set a Scenario may store.
 export const StepPayload = z.discriminatedUnion('kind', [
   StepNavigate,
   StepClick,
@@ -122,6 +138,7 @@ export const StepPayload = z.discriminatedUnion('kind', [
   StepRecordStart,
   StepRecordStop,
   StepClose,
+  StepAuthLogin,
 ]);
 export type StepPayload = z.infer<typeof StepPayload>;
 
@@ -187,13 +204,9 @@ export const PreflightName = z
 // Auth-profile name doubles as agent-browser's auth subcommand argument and
 // the filename under ~/.agent-browser/auth/. Same charset constraint as
 // PreflightName so it's safe in a CLI arg and on disk.
-export const AuthProfileName = z
-  .string()
-  .trim()
-  .min(1)
-  .max(64)
-  .regex(/^[A-Za-z0-9._-]+$/, 'use letters, digits, dot, dash, underscore only');
 
+// The subset of StepPayload a Preflight may contain, validated at the preflight
+// write seam. Every PreflightStep is a valid StepPayload.
 export const PreflightStep = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('navigate'), url: z.string().url() }),
   z.object({ kind: z.literal('wait'), ms: z.number().int().positive() }),

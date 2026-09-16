@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { getDb } from '../db/index.js';
 import { getSetting, setSetting } from '../settings.js';
 import { run, runJson, ensureSession, restartSession } from '../agentBrowser/driver.js';
+import { cliBrowser } from '../agentBrowser/cliBrowser.js';
 import { parseSnapshotText } from '../agentBrowser/parser.js';
 import { resolveSelector } from '../scenarios/selector.js';
 import { isOptionSelector, execSelectOptionFallback } from '../scenarios/selectFallback.js';
@@ -318,7 +319,7 @@ async function executeAction(session: string, action: AgentAction): Promise<void
     case 'select': {
       const ref = await resolveWithWait(session, action.selector);
       if (action.kind === 'select' && isOptionSelector(action.selector)) {
-        await execSelectOptionFallback(session, action.selector, action.value);
+        await execSelectOptionFallback(cliBrowser(session), action.selector, action.value);
         return;
       }
       const args: string[] = [action.kind, ref];
