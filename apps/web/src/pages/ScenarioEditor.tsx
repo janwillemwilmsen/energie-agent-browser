@@ -19,7 +19,6 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import {
   api,
-  type A11yNode,
   type A11yTree,
   type Preflight,
   type ScenarioDetail,
@@ -27,6 +26,7 @@ import {
   type SelectorStrategy,
 } from '../lib/api.js';
 import { readStepRow } from '../lib/steps.js';
+import { SnapshotPicker } from '../lib/SnapshotPicker.js';
 import { PreviewStream } from '../lib/screencast.js';
 import { TerminalShell, type TerminalShellHandle } from '../lib/TerminalShell.js';
 
@@ -769,7 +769,7 @@ export function ScenarioEditor() {
             </button>
           </div>
           {tree && (
-            <TreeView
+            <SnapshotPicker
               tree={tree}
               onPickClick={(strategy) => addStep('click', { selector: strategy })}
               onPickType={(strategy) => {
@@ -937,157 +937,6 @@ function summarizeStep(kind: string, p: any): string {
   if (kind === 'record_stop') return '⏹ stop video recording';
   if (kind === 'close') return '✕ close browser session';
   return JSON.stringify(p);
-}
-
-function flatten(
-  node: A11yNode,
-  depth: number,
-  ancestors: A11yNode[],
-): { node: A11yNode; depth: number; ancestors: A11yNode[] }[] {
-  const out: { node: A11yNode; depth: number; ancestors: A11yNode[] }[] = [];
-  if (node.role !== 'root') out.push({ node, depth, ancestors });
-  for (const child of node.children) {
-    out.push(...flatten(child, depth + 1, [...ancestors, node]));
-  }
-  return out;
-}
-
-function buildStrategy(node: A11yNode, ancestors: A11yNode[], siblings: A11yNode[]): SelectorStrategy {
-  const strategy: SelectorStrategy = { role: node.role, name: node.name };
-  const sameRoleName = siblings.filter((s) => s.role === node.role && s.name === node.name);
-  if (sameRoleName.length > 1) {
-    strategy.ordinal = sameRoleName.indexOf(node);
-  }
-  const landmarkRoles = new Set([
-    'navigation', 'main', 'banner', 'contentinfo', 'complementary', 'region', 'form',
-  ]);
-  const path: { role: string; name: string }[] = [];
-  for (const a of ancestors) {
-    if (landmarkRoles.has(a.role) && a.name) path.push({ role: a.role, name: a.name });
-  }
-  if (path.length) strategy.ancestorPath = path;
-  return strategy;
-}
-
-// Roles where agent-browser's `select <ref> <value>` applies — the native
-// <select> element itself. Its `option` children are NOT clickable (a closed
-// dropdown's options have no box model), so an option row instead gets a
-// `select` button that targets its parent dropdown with the option's label
-// pre-filled as the value.
-const SELECT_ROLES = new Set(['combobox', 'listbox']);
-
-// Roles where agent-browser's state-aware `check` / `uncheck` apply. Preferred
-// over `click` for checkboxes: click toggles blindly, check/uncheck assert the
-// desired end state (no-op when already there). Radios can only be checked —
-// unchecking happens by checking a sibling — so they get no uncheck button.
-const CHECKABLE_ROLES = new Set(['checkbox', 'switch']);
-
-// Nearest dropdown ancestor of an option node (index into `ancestors`), or -1.
-function nearestSelectAncestor(ancestors: A11yNode[]): number {
-  for (let i = ancestors.length - 1; i >= 0; i--) {
-    if (SELECT_ROLES.has(ancestors[i]!.role)) return i;
-  }
-  return -1;
-}
-
-function TreeView({
-  tree,
-  onPickClick,
-  onPickType,
-  onPickFill,
-  onPickSelect,
-  onPickCheck,
-  onPickUncheck,
-  onPickWait,
-  onPickScroll,
-}: {
-  tree: A11yTree;
-  onPickClick: (s: SelectorStrategy) => void;
-  onPickType: (s: SelectorStrategy) => void;
-  onPickFill: (s: SelectorStrategy) => void;
-  onPickSelect: (s: SelectorStrategy, value?: string) => void;
-  onPickCheck: (s: SelectorStrategy) => void;
-  onPickUncheck: (s: SelectorStrategy) => void;
-  onPickWait: (s: SelectorStrategy) => void;
-  onPickScroll: (s: SelectorStrategy) => void;
-}) {
-  const flat = useMemo(() => flatten(tree.root, 0, []), [tree]);
-  const allNodes = useMemo(() => flat.map((x) => x.node), [flat]);
-
-  return (
-    <ul className="a11y-tree">
-      {flat.map((entry, idx) => {
-        const { node, depth, ancestors } = entry;
-        const strategy = node.ref ? buildStrategy(node, ancestors, allNodes) : null;
-        return (
-          <li key={idx} style={{ paddingLeft: depth * 14 }}>
-            <span className="role">{node.role}</span>
-            {node.name && <span className="name">"{node.name}"</span>}
-            {node.ref && <span className="ref">{node.ref}</span>}
-            {strategy && (
-              <span className="picker">
-                <button onClick={() => onPickClick(strategy)}>click</button>
-                <button onClick={() => onPickType(strategy)}>type</button>
-                <button onClick={() => onPickFill(strategy)}>fill</button>
-                {SELECT_ROLES.has(node.role) && (
-                  <button
-                    onClick={() => onPickSelect(strategy)}
-                    title="Pick an option in this dropdown by its label"
-                  >
-                    select
-                  </button>
-                )}
-                {node.role === 'option' &&
-                  (() => {
-                    // Prefer targeting the ref-addressable dropdown ancestor
-                    // (combobox/listbox). When the a11y tree exposes none
-                    // (e.g. Chromium's MenuListPopup shape), store the OPTION
-                    // itself — the runner then sets the parent <select> via a
-                    // JS fallback instead of the ref-based CLI command.
-                    const i = nearestSelectAncestor(ancestors);
-                    const target =
-                      i === -1
-                        ? strategy
-                        : buildStrategy(ancestors[i]!, ancestors.slice(0, i), allNodes);
-                    return (
-                      <button
-                        onClick={() => onPickSelect(target, node.name)}
-                        title="Select this option in its dropdown"
-                      >
-                        select
-                      </button>
-                    );
-                  })()}
-                {(CHECKABLE_ROLES.has(node.role) || node.role === 'radio') && (
-                  <button
-                    onClick={() => onPickCheck(strategy)}
-                    title="Check this box (state-aware: no-op when already checked — prefer over click)"
-                  >
-                    check
-                  </button>
-                )}
-                {CHECKABLE_ROLES.has(node.role) && (
-                  <button
-                    onClick={() => onPickUncheck(strategy)}
-                    title="Uncheck this box (state-aware: no-op when already unchecked — prefer over click)"
-                  >
-                    uncheck
-                  </button>
-                )}
-                <button onClick={() => onPickWait(strategy)}>wait</button>
-                <button
-                  onClick={() => onPickScroll(strategy)}
-                  title="Scroll this element into view"
-                >
-                  scrollIntoView
-                </button>
-              </span>
-            )}
-          </li>
-        );
-      })}
-    </ul>
-  );
 }
 
 // Modal for the "✨ AI task" button: the user describes a task, the server's

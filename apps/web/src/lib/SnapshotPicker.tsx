@@ -43,6 +43,12 @@ function buildStrategy(
 // button that targets their parent dropdown with the label pre-filled.
 const SELECT_ROLES = new Set(['combobox', 'listbox']);
 
+// Roles where agent-browser's state-aware `check` / `uncheck` apply. Preferred
+// over `click` for checkboxes: click toggles blindly, check/uncheck assert the
+// desired end state (no-op when already there). Radios can only be checked —
+// unchecking happens by checking a sibling — so they get no uncheck button.
+const CHECKABLE_ROLES = new Set(['checkbox', 'switch']);
+
 // Nearest dropdown ancestor of an option node (index into `ancestors`), or -1.
 function nearestSelectAncestor(ancestors: A11yNode[]): number {
   for (let i = ancestors.length - 1; i >= 0; i--) {
@@ -57,13 +63,17 @@ export interface SnapshotPickerProps {
   onPickType?: (s: SelectorStrategy) => void;
   onPickFill?: (s: SelectorStrategy) => void;
   onPickSelect?: (s: SelectorStrategy, value?: string) => void;
+  onPickCheck?: (s: SelectorStrategy) => void;
+  onPickUncheck?: (s: SelectorStrategy) => void;
   onPickWait?: (s: SelectorStrategy) => void;
   onPickScroll?: (s: SelectorStrategy) => void;
 }
 
 export function SnapshotPicker(props: SnapshotPickerProps) {
-  const { tree, onPickClick, onPickType, onPickFill, onPickSelect, onPickWait, onPickScroll } =
-    props;
+  const {
+    tree, onPickClick, onPickType, onPickFill, onPickSelect, onPickCheck, onPickUncheck,
+    onPickWait, onPickScroll,
+  } = props;
   const flat = useMemo(() => flatten(tree.root, 0, []), [tree]);
   const allNodes = useMemo(() => flat.map((x) => x.node), [flat]);
 
@@ -118,6 +128,22 @@ export function SnapshotPicker(props: SnapshotPickerProps) {
                       </button>
                     );
                   })()}
+                {onPickCheck && (CHECKABLE_ROLES.has(node.role) || node.role === 'radio') && (
+                  <button
+                    onClick={() => onPickCheck(strategy)}
+                    title="Check this box (state-aware: no-op when already checked — prefer over click)"
+                  >
+                    check
+                  </button>
+                )}
+                {onPickUncheck && CHECKABLE_ROLES.has(node.role) && (
+                  <button
+                    onClick={() => onPickUncheck(strategy)}
+                    title="Uncheck this box (state-aware: no-op when already unchecked — prefer over click)"
+                  >
+                    uncheck
+                  </button>
+                )}
                 {onPickWait && (
                   <button onClick={() => onPickWait(strategy)}>wait</button>
                 )}
