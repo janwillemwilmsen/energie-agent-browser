@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
+import { StepKind, safeParseScenarioStepPayload } from '@eab/shared';
 import { api, type Preflight, type Scenario, type ScenarioDetail, type ScenarioStep } from '../lib/api.js';
 import { makeBundle, toPortableScenario } from '../lib/scenarioIO.js';
 
@@ -10,24 +11,9 @@ import { makeBundle, toPortableScenario } from '../lib/scenarioIO.js';
 // tweaking a payload field the UI doesn't surface, or just understanding what a
 // scenario actually stores.
 
-// Mirrors the DB CHECK constraint on scenario_steps.kind. Editing a step to any
-// other value would be rejected by the server, so we constrain the picker.
-const STEP_KINDS = [
-  'navigate',
-  'click',
-  'type',
-  'fill',
-  'select',
-  'check',
-  'uncheck',
-  'scroll',
-  'screenshot',
-  'wait',
-  'evaluate',
-  'record_start',
-  'record_stop',
-  'close',
-] as const;
+// The kinds a Scenario may store, from the shared schema (which mirrors the DB
+// CHECK constraint on scenario_steps.kind).
+const STEP_KINDS: readonly string[] = StepKind.options;
 
 interface EditRow {
   id: number;
@@ -114,13 +100,18 @@ export function AdminScenarioSteps() {
   }
 
   async function saveRow(row: EditRow) {
-    // Validate the payload JSON client-side so we give a precise error instead
-    // of a generic 400 from the server.
+    // Validate client-side with the same schema the server applies, so the
+    // error names the field before a request is made.
     let payload: unknown;
     try {
       payload = JSON.parse(row.payload);
     } catch (e: any) {
       patchRow(row.id, { error: `Invalid JSON: ${e?.message ?? e}`, msg: null });
+      return;
+    }
+    const checked = safeParseScenarioStepPayload(row.kind, payload);
+    if (!checked.ok) {
+      patchRow(row.id, { error: checked.error, msg: null });
       return;
     }
     const position = Number(row.position);
@@ -207,8 +198,8 @@ export function AdminScenarioSteps() {
       <h1>Raw scenario steps</h1>
       <p className="muted">
         Inspect and hand-edit the underlying step rows — position, kind, and the raw{' '}
-        <code>payload_json</code>. Changes save straight to the database. There is no
-        validation beyond well-formed JSON and a valid step kind, so edit with care.
+        <code>payload_json</code>. Changes save straight to the database after passing the
+        same step schema every other editor and the runner use, so edit with care.
       </p>
 
       <label className="admin-scenario-pick">
@@ -275,7 +266,7 @@ export function AdminScenarioSteps() {
                           </option>
                         ))}
                         {/* Surface an unexpected stored kind so it's visible/saveable. */}
-                        {!STEP_KINDS.includes(row.kind as (typeof STEP_KINDS)[number]) && (
+                        {!STEP_KINDS.includes(row.kind) && (
                           <option value={row.kind}>{row.kind} (unknown)</option>
                         )}
                       </select>

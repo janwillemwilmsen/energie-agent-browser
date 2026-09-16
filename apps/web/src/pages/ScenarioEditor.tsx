@@ -24,19 +24,11 @@ import {
   type Preflight,
   type ScenarioDetail,
   type ScenarioStep,
+  type SelectorStrategy,
 } from '../lib/api.js';
+import { readStepRow } from '../lib/steps.js';
 import { PreviewStream } from '../lib/screencast.js';
 import { TerminalShell, type TerminalShellHandle } from '../lib/TerminalShell.js';
-
-interface SelectorStrategy {
-  role: string;
-  name: string;
-  ordinal?: number;
-  ancestorPath?: { role: string; name: string }[];
-  // Raw agent-browser locator (#id, .class, css, [data-testid=…], text=…,
-  // xpath=…); when set the server targets it directly (no a11y resolution).
-  locator?: string;
-}
 
 const SESSION = 'default';
 
@@ -856,8 +848,7 @@ function SortableStep({
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: step.id,
   });
-  let p: any = {};
-  try { p = JSON.parse(step.payload_json); } catch {}
+  const read = readStepRow(step);
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
     transition,
@@ -876,7 +867,13 @@ function SortableStep({
       </button>
       <span className="step-body">
         <code className={`step-kind step-kind-${step.kind}`}>{step.kind}</code>{' '}
-        {summarizeStep(step.kind, p)}
+        {read.ok ? (
+          summarizeStep(step.kind, read.payload)
+        ) : (
+          <span className="error" title="Edit the payload JSON with ✎, or delete the step">
+            invalid step — {read.error}
+          </span>
+        )}
       </span>
       <button className="step-move" title="Edit step" onClick={onEdit} disabled={savingStep}>
         ✎

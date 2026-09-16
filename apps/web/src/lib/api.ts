@@ -1,3 +1,5 @@
+import type { A11yTree, PreflightStep, ScenarioStep } from '@eab/shared';
+
 export interface EmailRecipient {
   id: number;
   email: string;
@@ -62,25 +64,19 @@ export interface PreflightRetryPolicy {
   restart_on_failure?: number;
 }
 
-export interface SelectorStrategy {
-  role: string;
-  name: string;
-  textContains?: string;
-  ordinal?: number;
-  ancestorPath?: { role: string; name: string }[];
-  // Raw agent-browser locator (#id, .class, css, [data-testid=…], text=…,
-  // xpath=…). When set, the server targets it directly instead of resolving
-  // role/name against the accessibility tree.
-  locator?: string;
-}
-
-export type PreflightStep =
-  | { kind: 'navigate'; url: string }
-  | { kind: 'wait'; ms: number }
-  | { kind: 'click'; selector: SelectorStrategy }
-  | { kind: 'type'; selector: SelectorStrategy; text: string }
-  | { kind: 'select'; selector: SelectorStrategy; value: string }
-  | { kind: 'auth-login'; name: string };
+// Step vocabulary and the accessibility-tree shapes are owned by the shared
+// package (the same schemas the server validates with); re-exported here so
+// pages keep one import path.
+export type {
+  A11yNode,
+  A11yTree,
+  PreflightStep,
+  ScenarioStep,
+  ScenarioStepPayload,
+  SelectorStrategy,
+  StepKind,
+  StepPayload,
+} from '@eab/shared';
 
 export interface AuthProfile {
   name: string;
@@ -96,14 +92,6 @@ export interface ScenarioCard extends Scenario {
   latest_run_started_at: string | null;
   latest_run_status: 'queued' | 'running' | 'success' | 'failed' | null;
   latest_screenshot: string | null;
-}
-
-export interface ScenarioStep {
-  id: number;
-  scenario_id: number;
-  position: number;
-  kind: string;
-  payload_json: string;
 }
 
 export type ScenarioDetail = Scenario & { steps: ScenarioStep[] };
@@ -206,19 +194,6 @@ export interface BrowserlessHealth {
   };
 }
 
-export interface A11yNode {
-  ref: string;
-  role: string;
-  name: string;
-  value?: string;
-  text?: string;
-  children: A11yNode[];
-}
-export interface A11yTree {
-  root: A11yNode;
-  capturedAt: string;
-  url: string;
-}
 export interface SnapshotResponse {
   tree: A11yTree;
   raw: { origin: string; refs: Record<string, { role: string; name: string }>; snapshot: string };

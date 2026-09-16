@@ -1,4 +1,4 @@
-import { StepKind } from '@eab/shared';
+import { safeParseScenarioStepPayload } from '@eab/shared';
 import { api, type Preflight, type ScenarioDetail } from './api.js';
 
 // Portable, environment-independent representation of a scenario, used to copy
@@ -95,11 +95,6 @@ export function parsePortable(text: string): PortableScenario[] {
   return arr.map((s, i) => validateScenario(s, i));
 }
 
-// Derived from the shared StepKind enum so new step kinds (record_start,
-// record_stop, close, …) are accepted by the importer automatically instead of
-// drifting out of sync with a second hardcoded list.
-const KINDS = new Set<string>(StepKind.options);
-
 function validateScenario(s: any, idx: number): PortableScenario {
   const where = `scenario[${idx}]`;
   if (!s || typeof s !== 'object') throw new Error(`${where} is not an object`);
@@ -109,10 +104,14 @@ function validateScenario(s: any, idx: number): PortableScenario {
   if (!['desktop', 'mobile', 'both'].includes(vp))
     throw new Error(`${where}.viewport_preset must be desktop|mobile|both`);
   const steps = Array.isArray(s.steps) ? s.steps : [];
+  // Every step is checked against the shared schema here, before the first
+  // request, so a bad file fails whole instead of leaving a half-imported
+  // scenario behind when the server rejects step N.
   const outSteps: PortableStep[] = steps.map((st: any, j: number) => {
     if (!st || typeof st !== 'object') throw new Error(`${where}.steps[${j}] is not an object`);
-    if (typeof st.kind !== 'string' || !KINDS.has(st.kind))
-      throw new Error(`${where}.steps[${j}].kind "${st.kind}" is not a valid step kind`);
+    if (typeof st.kind !== 'string') throw new Error(`${where}.steps[${j}].kind is required`);
+    const checked = safeParseScenarioStepPayload(st.kind, st.payload ?? {});
+    if (!checked.ok) throw new Error(`${where}.steps[${j}]: ${checked.error}`);
     return {
       position: Number.isInteger(st.position) ? st.position : j,
       kind: st.kind,
