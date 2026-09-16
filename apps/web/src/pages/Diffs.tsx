@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { parseSlot } from '@eab/shared';
 import { api, type Artifact, type Comparison } from '../lib/api.js';
 
 function pct(ratio: number | null): string {
@@ -16,8 +17,7 @@ function statusClass(status: Comparison['status']): string {
 // screenshots sort in scenario step order.
 function slotPosition(c: Comparison): number {
   const label = c.baseline?.label ?? c.target?.label ?? c.diff?.label ?? '';
-  const m = /^(\d+)/.exec(label);
-  return m ? Number(m[1]) : Number.MAX_SAFE_INTEGER;
+  return parseSlot(label)?.position ?? Number.MAX_SAFE_INTEGER;
 }
 
 interface DiffGroup {

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { slotDisplayLabel, slotKey } from '@eab/shared';
 import { api, type Run, type Scenario } from '../lib/api.js';
 
 export function ScenarioTimeline() {
@@ -141,10 +142,10 @@ function buildMatrix(runs: Run[]): Matrix {
     }
     const map = new Map<string, string>();
     for (const filename of shots) {
-      // Strip the leading position (and per-run timestamp) so screenshots with
-      // the same label/viewport from different runs share a row.
-      const key = stripPosition(filename);
-      const label = labelFromFilename(filename);
+      // Screenshots with the same label + viewport share a row across runs,
+      // whatever their position, stamp or format (the slot protocol's key).
+      const key = slotKey(filename);
+      const label = slotDisplayLabel(filename);
       if (!rowMap.has(key)) rowMap.set(key, label);
       map.set(key, filename);
     }
@@ -156,23 +157,6 @@ function buildMatrix(runs: Run[]): Matrix {
     .sort((a, b) => a.key.localeCompare(b.key));
 
   return { rows, byRun };
-}
-
-// Strip the leading position and the optional per-run YYYYMMDD-HHMMSS stamp.
-// "003-20260606-143025-checkout-mobile.png" -> "checkout-mobile.png"
-// "003-checkout-mobile.png" (older, un-stamped)  -> "checkout-mobile.png"
-const SLOT_PREFIX_RE = /^\d+-(?:\d{8}-\d{6}-)?/;
-
-function stripPosition(filename: string): string {
-  return filename.replace(SLOT_PREFIX_RE, '');
-}
-
-function labelFromFilename(filename: string): string {
-  // "003-20260606-143025-checkout-mobile.png" -> "checkout (mobile)"
-  const base = filename.replace(/\.png$/i, '').replace(SLOT_PREFIX_RE, '');
-  const m = base.match(/^(.+)-(desktop|mobile)$/);
-  if (m) return `${m[1]} (${m[2]})`;
-  return base;
 }
 
 function formatDate(iso: string): string {

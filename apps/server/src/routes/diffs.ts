@@ -4,6 +4,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { config } from '../config.js';
 import { getDb } from '../db/index.js';
+import { slotKey, slotViewport } from '@eab/shared';
 import { diffImageFiles, readImageSize } from '../diff/pixelDiff.js';
 
 interface ArtifactRow {
@@ -57,12 +58,6 @@ function absPath(rel: string): string {
   return path.join(DATA, rel);
 }
 
-function viewportFromSlot(slot: string): string | null {
-  const base = slot.replace(/\.(png|jpe?g|webp)$/i, '');
-  const idx = base.lastIndexOf('-');
-  return idx >= 0 ? base.slice(idx + 1) : null;
-}
-
 // Screenshots may be png (default), jpg/jpeg, or webp depending on the step's
 // configured format.
 function imageMime(filePath: string): string {
@@ -99,7 +94,7 @@ async function materializeRunScreenshot(
       `INSERT INTO artifacts (kind, file_path, scenario_id, source_run_id, label, viewport, width, height)
        VALUES ('run_screenshot', '', ?, ?, ?, ?, ?, ?)`,
     )
-    .run(scenarioId, runId, safeSlot, viewportFromSlot(safeSlot), size.width, size.height);
+    .run(scenarioId, runId, safeSlot, slotViewport(safeSlot), size.width, size.height);
   const id = Number(info.lastInsertRowid);
   // Keep the source extension — the copy is byte-for-byte, so naming a jpeg
   // copy ".png" would mislabel it.
@@ -268,14 +263,10 @@ export async function diffsRoutes(app: FastifyInstance) {
     const baseSlots = parse(baseRun.screenshot_paths_json);
     const targetSlots = parse(targetRun.screenshot_paths_json);
 
-    // The leading NNN- prefix is `step.position`, which shifts whenever the
-    // scenario is edited (inserting a step bumps every later position), and the
-    // optional YYYYMMDD-HHMMSS block is the per-run creation stamp. Strip both
-    // — plus the extension, which changes when the step's format setting does —
-    // and pair on the stable `<label>-<viewport>` suffix so the same logical
-    // screenshot still matches across runs (incl. older, un-stamped ones).
-    const canonical = (slot: string): string =>
-      slot.replace(/^\d+-(?:\d{8}-\d{6}-)?/, '').replace(/\.(png|jpe?g|webp)$/i, '');
+    // Pair on the stable cross-run key (`<label>-<viewport>`; see the slot
+    // protocol in @eab/shared) so the same logical screenshot still matches
+    // across runs even when its position, stamp or format changed.
+    const canonical = slotKey;
     const targetByKey = new Map<string, string>();
     for (const t of targetSlots) {
       const k = canonical(t);

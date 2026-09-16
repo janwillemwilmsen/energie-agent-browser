@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import sharp from 'sharp';
+import { encodeSlot } from '@eab/shared';
 import type { A11yNode, A11yTree, SelectorStrategy, StepPayload } from '@eab/shared';
 import type { AuthSelectors } from '../authSelectors.js';
 import { resolveSelector } from './selector.js';
@@ -538,7 +539,7 @@ async function screenshot(
 ): Promise<void> {
   const { browser, log } = ctx;
   const artifacts = requireArtifacts(ctx, step.kind);
-  const label = (step.label ?? `step-${position}`).replace(/[^a-z0-9._-]/gi, '_');
+  const label = step.label ?? `step-${position}`;
   // A 'mobile' shot captures at the mobile device regardless of the run's
   // viewport, so it gets the 'mobile' suffix (and pairs across runs in the
   // diff view). Otherwise it follows the run's current viewport.
@@ -549,10 +550,9 @@ async function screenshot(
   const format = step.format ?? 'png';
   const quality = step.quality ?? 80;
   const ext = format === 'jpeg' ? 'jpg' : format;
-  // NNN-YYYYMMDD-HHMMSS-label-viewport.<ext> — position stays first (diff sort
-  // relies on it); the timestamp block sits between position and label and is
-  // stripped by the cross-run slot matchers so screenshots still pair up.
-  const filename = `${position.toString().padStart(3, '0')}-${artifacts.fileStamp}-${label}-${suffix}.${ext}`;
+  // The slot filename protocol (see @eab/shared slots.ts): position first,
+  // then the run's stamp, label and viewport; the cross-run key is label+viewport.
+  const filename = encodeSlot({ position, stamp: artifacts.fileStamp, label, viewport: suffix, ext });
   const filepath = path.join(artifacts.screenshotDir, filename);
   const capturePath = format === 'webp' ? `${filepath}.capture.png` : filepath;
   // agent-browser's screenshot default is VIEWPORT-only; --full captures the
