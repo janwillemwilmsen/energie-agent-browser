@@ -156,7 +156,7 @@ function ScenarioCardView({ card }: { card: ScenarioCard }) {
   // box — instead of the multi-MB full-page original.
   const thumb =
     card.latest_run_id != null && card.latest_screenshot
-      ? `/api/runs/${card.latest_run_id}/screenshots/${encodeURIComponent(card.latest_screenshot)}?w=480&h=300`
+      ? api.runScreenshotUrl(card.latest_run_id, card.latest_screenshot, { w: 480, h: 300 })
       : null;
 
   // The card body links to the timeline; the cog is a SIBLING link (nested

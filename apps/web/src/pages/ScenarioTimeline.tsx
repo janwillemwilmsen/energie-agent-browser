@@ -97,12 +97,12 @@ export function ScenarioTimeline() {
                       <td key={r.id} className="timeline-cell">
                         {file ? (
                           <a
-                            href={`/api/runs/${r.id}/screenshots/${encodeURIComponent(file)}`}
+                            href={api.runScreenshotUrl(r.id, file)}
                             target="_blank"
                             rel="noreferrer"
                           >
                             <img
-                              src={`/api/runs/${r.id}/screenshots/${encodeURIComponent(file)}?w=480`}
+                              src={api.runScreenshotUrl(r.id, file, { w: 480 })}
                               alt={`${row.label} from run ${r.id}`}
                               loading="lazy"
                               decoding="async"

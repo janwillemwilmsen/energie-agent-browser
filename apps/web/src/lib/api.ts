@@ -312,7 +312,7 @@ export const api = {
   deleteRun: (id: number) => req<void>(`/api/runs/${id}`, { method: 'DELETE' }),
   deleteAllRuns: () => req<void>('/api/runs', { method: 'DELETE' }),
   deleteRuns: (ids: number[]) =>
-    req<{ deleted: number }>('/api/runs/delete', {
+    req<{ deleted: number; skippedRunning: number }>('/api/runs/delete', {
       method: 'POST',
       body: JSON.stringify({ ids }),
     }),
@@ -584,6 +584,12 @@ export const api = {
       body: JSON.stringify(body),
     }),
   artifactImageUrl: (id: number) => `/api/artifacts/${id}/image`,
+  // A Run's screenshot bytes; `w` (and `h`) ask for a cached WebP thumbnail.
+  // The one place the web builds this URL, so the filename is always encoded.
+  runScreenshotUrl: (runId: number, name: string, size?: { w?: number; h?: number }) => {
+    const q = size?.w ? `?w=${size.w}${size.h ? `&h=${size.h}` : ''}` : '';
+    return `/api/runs/${runId}/screenshots/${encodeURIComponent(name)}${q}`;
+  },
   listSessionStates: () => req<SessionState[]>('/api/session-states'),
   deleteSessionState: (name: string) =>
     req<void>(`/api/session-states/${encodeURIComponent(name)}`, { method: 'DELETE' }),

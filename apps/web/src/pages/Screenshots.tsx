@@ -421,14 +421,14 @@ function ScenarioBlock({
               {screenshots.map((name) => (
                 <a
                   key={name}
-                  href={`/api/runs/${run.id}/screenshots/${name}`}
+                  href={api.runScreenshotUrl(run.id, name)}
                   target="_blank"
                   rel="noreferrer"
                   className="ss-card"
                   title={name + ' (click to open full size)'}
                 >
                   <img
-                    src={`/api/runs/${run.id}/screenshots/${name}?w=480`}
+                    src={api.runScreenshotUrl(run.id, name, { w: 480 })}
                     alt={name}
                     loading="lazy"
                     decoding="async"

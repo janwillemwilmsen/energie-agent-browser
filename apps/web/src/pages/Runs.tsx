@@ -500,13 +500,13 @@ function RunDetail({
             {screenshots.map((name) => (
               <div key={name} className="shot">
                 <a
-                  href={`/api/runs/${run.id}/screenshots/${name}`}
+                  href={api.runScreenshotUrl(run.id, name)}
                   target="_blank"
                   rel="noreferrer"
                   title={`${name} (click to open full size)`}
                 >
                   <img
-                    src={`/api/runs/${run.id}/screenshots/${name}?w=800`}
+                    src={api.runScreenshotUrl(run.id, name, { w: 800 })}
                     alt={name}
                     loading="lazy"
                     decoding="async"
