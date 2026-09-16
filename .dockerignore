@@ -1,0 +1,19 @@
+# Dependencies are installed inside the image (npm ci) — never copy host
+# node_modules: they contain Windows-native binaries (better-sqlite3, node-pty,
+# sharp, agent-browser) that break on Linux.
+node_modules
+**/node_modules
+
+# Local runtime state and secrets stay out of the image.
+data
+.env
+
+# Build output is produced inside the image.
+apps/web/dist
+**/dist
+
+.git
+.claude
+Dockerfile
+docker-compose.yml
+.dockerignore

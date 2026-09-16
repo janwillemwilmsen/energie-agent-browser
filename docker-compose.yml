@@ -1,0 +1,37 @@
+services:
+  app:
+    build: .
+    ports:
+      - "3011:3011"
+    environment:
+      # Runs fully self-contained: local Chromium (installed in the image via
+      # `agent-browser install --with-deps`) instead of remote browserless.
+      BROWSER_MODE: local
+      PORT: "3011"
+      DATA_DIR: /app/data
+      # The SPA is served by the API itself, so same-origin:
+      WEB_ORIGIN: http://localhost:3011
+      # Login gate — override these (or set APP_AUTH_ENABLED: "false"):
+      # APP_AUTH_USER: you@example.com
+      # APP_AUTH_PASS: change-me
+      # Optional integrations:
+      # RESEND_API_KEY: re_...
+      # AI_GATEWAY_API_KEY: vck_...
+    volumes:
+      # SQLite DB, screenshots, recordings, run logs.
+      - eab-data:/app/data
+      # agent-browser session state (persistent profiles, session-name files).
+      # NOTE: the image's baked-in Chrome also lives here
+      # (/root/.agent-browser/browsers/). A named volume copies the image's
+      # content on FIRST use, so this works — but after rebuilding the image
+      # with a newer Chrome, the old volume still wins. Run
+      # `docker volume rm <project>_eab-agent-browser` to pick up the new one.
+      - eab-agent-browser:/root/.agent-browser
+    restart: unless-stopped
+    # Chromium can be shared-memory hungry; the app already passes
+    # --disable-dev-shm-usage, but a bigger /dev/shm doesn't hurt:
+    shm_size: 1gb
+
+volumes:
+  eab-data:
+  eab-agent-browser:

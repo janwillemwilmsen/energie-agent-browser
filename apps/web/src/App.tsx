@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useState } from 'react';
 import { NavLink, Route, Routes, useLocation } from 'react-router-dom';
 import {
   Bell,
+  BookOpen,
   CalendarClock,
   GitCompare,
   House,
@@ -34,6 +35,9 @@ import { Screenshots } from './pages/Screenshots.js';
 const Recordings = lazy(() =>
   import('./pages/Recordings.js').then((m) => ({ default: m.Recordings })),
 );
+// Docs pulls in react-markdown + the markdown content — lazy-load it the same
+// way so that weight only ships when the user opens /docs.
+const Docs = lazy(() => import('./pages/Docs.js').then((m) => ({ default: m.Docs })));
 import { Admin } from './pages/Admin.js';
 import { AdminScenarioSteps } from './pages/AdminScenarioSteps.js';
 import { AdminScenarioIO } from './pages/AdminScenarioIO.js';
@@ -186,6 +190,14 @@ export function App() {
           <Settings size={18} className="nav-icon" aria-hidden />
           {!navCollapsed && <span className="nav-label">Admin</span>}
         </NavLink>
+        <NavLink
+          to="/docs"
+          className={({ isActive }) => `nav-admin${isActive ? ' nav-active' : ''}`}
+          title={navCollapsed ? 'Docs' : undefined}
+        >
+          <BookOpen size={18} className="nav-icon" aria-hidden />
+          {!navCollapsed && <span className="nav-label">Docs</span>}
+        </NavLink>
         <button
           type="button"
           className="nav-admin"
@@ -218,6 +230,8 @@ export function App() {
           <Route path="/notifications" element={<Notifications />} />
           <Route path="/screenshots" element={<Screenshots />} />
           <Route path="/recordings" element={<Recordings />} />
+          <Route path="/docs" element={<Docs />} />
+          <Route path="/docs/:slug" element={<Docs />} />
           <Route path="/diffs" element={<Diffs />} />
         </Routes>
         </Suspense>

@@ -1,0 +1,38 @@
+Building the image
+# From the repo root (the trailing dot = build context)
+docker build -t energie-agent-browser .
+
+# Or via compose (uses the build: section in docker-compose.yml)
+docker compose build
+
+Pushing to a registry
+The image name must be prefixed with where it's going. Pick your registry:
+
+Docker Hub
+docker login                          # username + access token (hub.docker.com → Account Settings → Security)
+
+# Tag with your Docker Hub username and a version
+docker tag energie-agent-browser yourusername/energie-agent-browser:latest
+
+docker push yourusername/energie-agent-browser:latest
+
+GitHub Container Registry (GHCR) — convenient since this is already a git repo:
+# Login with a GitHub PAT that has the write:packages scope
+docker login ghcr.io -u your-github-username    # paste PAT as password
+
+docker tag energie-agent-browser ghcr.io/your-github-username/energie-agent-browser:1.0.0
+docker push ghcr.io/your-github-username/energie-agent-browser:1.0.0
+
+You can also build directly with the full name and skip the separate tag step:
+docker build -t ghcr.io/your-github-username/energie-agent-browser:1.0.0 .
+
+On the server, pull and run it:
+docker pull ghcr.io/your-github-username/energie-agent-browser:1.0.0
+…or point docker-compose.yml at the registry by replacing build: . with image: ghcr.io/your-github-username/energie-agent-browser:1.0.0.
+
+Practical notes for this specific image:
+
+- It's big (~2–3 GB: full bookworm + Chrome + ffmpeg + node_modules) — the first push takes a while; later pushes only upload changed layers.
+- Architecture: your Windows x64 box builds linux/amd64, which matches typical servers. Only if you deploy to ARM (e.g. Raspberry Pi, Graviton) would you need docker buildx build --platform linux/arm64.
+- Secrets are safe to push: .env is excluded by .dockerignore and the Dockerfile only sets non-secret defaults — credentials (APP_AUTH_*, RESEND_API_KEY, browserless token) are supplied at runtime via environment variables, not baked in. Do make the GHCR/Hub repo private anyway, since the image contains your app code.
+- Versioning tip: tag with something traceable, e.g. the git SHA: docker tag energie-agent-browser ghcr.io/you/energie-agent-browser:$(git rev-parse --short HEAD).

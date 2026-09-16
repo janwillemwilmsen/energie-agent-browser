@@ -438,6 +438,94 @@ code { background: rgba(255,255,255,0.06); padding: 2px 4px; border-radius: 3px;
 .step-kind-close { background: rgba(148, 163, 184, 0.16); color: #94a3b8; }
 /* Preflight-only kind. */
 .step-kind-auth-login { background: rgba(250, 204, 21, 0.16); color: #facc15; }
+
+/* Docs (/docs): sidebar of pages + rendered markdown. */
+.docs-layout { display: flex; gap: 24px; align-items: flex-start; }
+.docs-nav {
+  position: sticky;
+  top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 180px;
+}
+.docs-nav a {
+  color: var(--muted);
+  text-decoration: none;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 14px;
+}
+.docs-nav a:hover { color: var(--text); background: rgba(255, 255, 255, 0.05); }
+.docs-nav a.docs-active { color: var(--accent); background: rgba(56, 189, 248, 0.12); }
+.doc-content { flex: 1; min-width: 0; max-width: 760px; line-height: 1.6; }
+.doc-content h1 { margin-top: 0; }
+.doc-content h2 {
+  margin-top: 28px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+.doc-content a { color: var(--accent); }
+.doc-content pre {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  overflow-x: auto;
+}
+.doc-content pre code { background: transparent; padding: 0; }
+.doc-content table { border-collapse: collapse; display: block; overflow-x: auto; }
+.doc-content th,
+.doc-content td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; }
+.doc-content blockquote {
+  margin: 0;
+  padding: 4px 14px;
+  border-left: 3px solid var(--accent);
+  background: rgba(56, 189, 248, 0.06);
+}
+/* Hamburger + backdrop exist only on mobile. */
+.docs-menu-btn { display: none; }
+.docs-backdrop { display: none; }
+@media (max-width: 640px) {
+  .docs-layout { flex-direction: column; }
+  .docs-menu-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    align-self: flex-start;
+    padding: 6px 12px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .docs-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 1000;
+  }
+  /* The sidebar is hidden until the hamburger opens it as a fly-out panel. */
+  .docs-nav { display: none; }
+  .docs-nav.docs-nav-open {
+    display: flex;
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 240px;
+    max-width: 80vw;
+    flex-direction: column;
+    padding: 16px 12px;
+    background: var(--panel);
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    z-index: 1001;
+  }
+}
 .step-list .step-drag {
   background: transparent;
   color: var(--muted);
