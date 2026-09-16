@@ -3,8 +3,8 @@ import { getDb } from '../db/index.js';
 import { getSetting, setSetting } from '../settings.js';
 import { restartSession } from '../agentBrowser/driver.js';
 import { cliBrowser } from '../agentBrowser/cliBrowser.js';
-import { executeStep, parseStep, type StepContext } from '../scenarios/stepExecutor.js';
-import type { A11yNode, A11yTree, SelectorStrategy } from '@eab/shared';
+import { executeStep, type StepContext } from '../scenarios/stepExecutor.js';
+import { parseStepPayload, type A11yNode, type A11yTree, type SelectorStrategy } from '@eab/shared';
 
 // LLM-driven scenario builder. Given a natural-language prompt, an agent loop
 // perceives the page through the same a11y snapshot the SnapshotPicker uses,
@@ -294,7 +294,7 @@ async function executeAction(action: AgentAction, log: (line: string) => void): 
   const saved = actionToStep(action);
   if (!saved || LIVE_SKIPPED_KINDS.has(saved.kind)) return;
   const ctx: StepContext = { browser, log };
-  await executeStep(ctx, parseStep(saved.kind, saved.payload));
+  await executeStep(ctx, parseStepPayload(saved.kind, saved.payload));
 }
 
 // Persist an executed action as a scenario_steps row using the exact payload

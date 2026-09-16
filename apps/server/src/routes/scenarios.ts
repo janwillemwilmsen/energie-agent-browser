@@ -1,6 +1,6 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
-import { ScenarioCreate, ScenarioUpdate, ViewportPreset } from '@eab/shared';
+import { ScenarioCreate, ScenarioUpdate, ViewportPreset, safeParseScenarioStepPayload } from '@eab/shared';
 import { getDb } from '../db/index.js';
 
 function normalizeTag(value: unknown): string | null {
@@ -150,8 +150,25 @@ export async function scenariosRoutes(app: FastifyInstance) {
     payload: z.unknown(),
   });
 
+  // The Step write seam: every Step a Scenario stores must be a valid
+  // ScenarioStepPayload (the same schema the runner and the editor use), so a
+  // malformed Step is a 400 naming the field here, not a mid-run failure.
+  // The payload is stored as sent — validated, not normalized — so keys the
+  // schema doesn't know about survive a round-trip through the editor.
+  function validateStepBody(body: unknown, reply: FastifyReply) {
+    const { position, kind, payload } = StepBody.parse(body);
+    const parsed = safeParseScenarioStepPayload(kind, payload);
+    if (!parsed.ok) {
+      reply.code(400).send({ error: 'validation_error', message: parsed.error, issues: parsed.issues });
+      return null;
+    }
+    return { position, kind, payload };
+  }
+
   app.post<{ Params: { id: string } }>('/api/scenarios/:id/steps', async (req, reply) => {
-    const { position, kind, payload } = StepBody.parse(req.body);
+    const body = validateStepBody(req.body, reply);
+    if (!body) return;
+    const { position, kind, payload } = body;
     const db = getDb();
     const scenario = db
       .prepare('SELECT id FROM scenarios WHERE id = ?')
@@ -171,7 +188,9 @@ export async function scenariosRoutes(app: FastifyInstance) {
   app.put<{ Params: { id: string; stepId: string } }>(
     '/api/scenarios/:id/steps/:stepId',
     async (req, reply) => {
-      const { position, kind, payload } = StepBody.parse(req.body);
+      const body = validateStepBody(req.body, reply);
+      if (!body) return;
+      const { position, kind, payload } = body;
       const db = getDb();
       const info = db
         .prepare(

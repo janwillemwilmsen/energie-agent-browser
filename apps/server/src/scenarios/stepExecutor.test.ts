@@ -1,10 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import type { A11yTree } from '@eab/shared';
+import { parseStepPayload as parseStep, safeParseScenarioStepPayload, safeParseStepPayload, type A11yTree } from '@eab/shared';
 import { parseSnapshotText } from '../agentBrowser/parser.js';
 import {
   executeStep,
   executeSteps,
-  parseStep,
   type Browser,
   type RunResult,
   type StepContext,
@@ -165,6 +164,17 @@ describe('Step executor', () => {
     expect(() => parseStep('navigate', { url: 'not a url' })).toThrow(/invalid navigate step at url/);
     expect(() => parseStep('type', { selector: { role: 'textbox', name: 'Email' } })).toThrow(/invalid type step at text/);
     expect(() => parseStep('teleport', {})).toThrow(/invalid teleport step/);
+    const r = safeParseStepPayload('fill', { selector: { role: 'textbox', name: 'Email' } });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.issues).toEqual([{ path: 'value', message: 'Required' }]);
+  });
+
+  it('accepts auth-login as a Step but not as a Scenario Step', () => {
+    expect(safeParseStepPayload('auth-login', { name: 'acme' }).ok).toBe(true);
+    const r = safeParseScenarioStepPayload('auth-login', { name: 'acme' });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/invalid auth-login step/);
+    expect(safeParseScenarioStepPayload('click', { selector: { role: 'button', name: 'Go' } }).ok).toBe(true);
   });
 
   it('refuses run-only kinds outside a scenario run', async () => {

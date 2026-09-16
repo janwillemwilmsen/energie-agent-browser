@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { PreflightCreate, PreflightUpdate, PreflightStep } from '@eab/shared';
+import { PreflightCreate, PreflightUpdate, PreflightStep, parseStepPayload } from '@eab/shared';
 import { getDb } from '../db/index.js';
 import {
   ensureSession,
@@ -15,7 +15,7 @@ import {
 } from '../agentBrowser/driver.js';
 import { cliBrowser } from '../agentBrowser/cliBrowser.js';
 import { getAuthSelectors } from '../authSelectors.js';
-import { executeStep, executeSteps, parseStep, type StepContext } from '../scenarios/stepExecutor.js';
+import { executeStep, executeSteps, type StepContext } from '../scenarios/stepExecutor.js';
 
 // The recorder and Replay both drive the shared recorder session through the
 // Step executor, so a preflight step behaves exactly as it will inside a
@@ -261,7 +261,7 @@ export async function preflightsRoutes(app: FastifyInstance) {
     }
     const indexed = steps.map((s, i) => {
       const { kind, ...payload } = s as { kind: string };
-      return { position: i + 1, step: parseStep(kind, payload) };
+      return { position: i + 1, step: parseStepPayload(kind, payload) };
     });
 
     const policy = {

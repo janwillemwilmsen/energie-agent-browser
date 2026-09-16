@@ -8,7 +8,6 @@ import { getAuthSelectors } from '../authSelectors.js';
 import {
   applyViewport,
   executeSteps,
-  parseStep,
   type IndexedStep,
   type RetryPolicy,
   type StepContext,
@@ -16,7 +15,7 @@ import {
 import { StreamRecorder } from './streamRecorder.js';
 import { notifyScenarioFailure, notifyScenarioSuccess } from '../push.js';
 import { notifyRunResultEmail } from '../email.js';
-import type { ViewportPreset } from '@eab/shared';
+import { parseStepPayload, type ViewportPreset } from '@eab/shared';
 
 // Scenario-run orchestration: loads the Scenario and its Preflight, creates the
 // Run row, binds the browser session, applies the Preflight, runs the Steps per
@@ -281,7 +280,7 @@ export async function executeScenario(
   try {
     steps = stepRows.map((row) => {
       try {
-        return { position: row.position, step: parseStep(row.kind, JSON.parse(row.payload_json)) };
+        return { position: row.position, step: parseStepPayload(row.kind, JSON.parse(row.payload_json)) };
       } catch (e: any) {
         throw new Error(`scenario step #${row.position}: ${e?.message ?? e}`);
       }
@@ -291,7 +290,7 @@ export async function executeScenario(
     preflightSteps = rawPreflight.map((raw, i) => {
       const { kind, ...payload } = (raw ?? {}) as { kind?: string };
       try {
-        return { position: i + 1, step: parseStep(String(kind ?? ''), payload) };
+        return { position: i + 1, step: parseStepPayload(String(kind ?? ''), payload) };
       } catch (e: any) {
         throw new Error(`preflight "${preflightName}" step #${i + 1}: ${e?.message ?? e}`);
       }

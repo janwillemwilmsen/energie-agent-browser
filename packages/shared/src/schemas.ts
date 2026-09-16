@@ -121,9 +121,10 @@ const StepClose = z.object({ kind: z.literal('close') });
 // kind today: the scenario_steps CHECK constraint (and StepKind) exclude it.
 const StepAuthLogin = z.object({ kind: z.literal('auth-login'), name: AuthProfileName });
 
-// Every Step kind the Step executor understands — Scenario steps AND Preflight
-// steps. StepKind above is the narrower set a Scenario may store.
-export const StepPayload = z.discriminatedUnion('kind', [
+// The Steps a Scenario may store: exactly the kinds in StepKind (and in the
+// scenario_steps CHECK constraint). This is what the scenario write seam
+// validates against.
+export const ScenarioStepPayload = z.discriminatedUnion('kind', [
   StepNavigate,
   StepClick,
   StepType,
@@ -138,6 +139,13 @@ export const StepPayload = z.discriminatedUnion('kind', [
   StepRecordStart,
   StepRecordStop,
   StepClose,
+]);
+export type ScenarioStepPayload = z.infer<typeof ScenarioStepPayload>;
+
+// Every Step kind the Step executor understands — Scenario steps AND Preflight
+// steps (which add auth-login).
+export const StepPayload = z.discriminatedUnion('kind', [
+  ...ScenarioStepPayload.options,
   StepAuthLogin,
 ]);
 export type StepPayload = z.infer<typeof StepPayload>;

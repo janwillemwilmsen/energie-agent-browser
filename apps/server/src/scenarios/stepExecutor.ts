@@ -1,8 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import sharp from 'sharp';
-import { StepPayload } from '@eab/shared';
-import type { A11yNode, A11yTree, SelectorStrategy } from '@eab/shared';
+import type { A11yNode, A11yTree, SelectorStrategy, StepPayload } from '@eab/shared';
 import type { AuthSelectors } from '../authSelectors.js';
 import { resolveSelector } from './selector.js';
 import { isOptionSelector, execSelectOptionFallback } from './selectFallback.js';
@@ -113,22 +112,6 @@ const DEFAULT_TIMING: Timing = {
 };
 
 const SCREENSHOT_NOT_READY_RETRIES = 6;
-
-// --- Parsing --------------------------------------------------------------------
-
-/**
- * Turn a stored row (kind + JSON payload) into a typed Step, or throw a
- * descriptive error. Called once per Step before any browser work starts, so a
- * malformed Step fails at the top of the run rather than mid-flight.
- */
-export function parseStep(kind: string, payload: unknown): StepPayload {
-  const raw = payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : {};
-  const result = StepPayload.safeParse({ ...raw, kind });
-  if (result.success) return result.data;
-  const issue = result.error.issues[0];
-  const where = issue?.path?.length ? ` at ${issue.path.join('.')}` : '';
-  throw new Error(`invalid ${kind} step${where}: ${issue?.message ?? 'does not match schema'}`);
-}
 
 /** One-line human summary of a Step for logs. */
 export function describeStep(step: StepPayload): string {
