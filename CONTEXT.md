@@ -55,3 +55,7 @@ _Avoid_: runner (that is the Scenario-level orchestration), executor (ambiguous)
 **Step editor**:
 The single place Steps are added, picked from a snapshot, edited, reordered and removed, used by the Scenario editor and the Preflight page. Persistence sits behind its Step store seam: one adapter writes each Scenario Step through the server, the other keeps a Preflight's Steps in a draft saved with the Preflight.
 _Avoid_: step list, step form
+
+**Run store**:
+The single owner of Runs and their screenshot directories: a Run and its directory are created together and deleted together, and every reader of Runs, from the runs page to the email digest, goes through it.
+_Avoid_: runs table, runs repo

@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { ScenarioCreate, ScenarioUpdate, ViewportPreset, safeParseScenarioStepPayload } from '@eab/shared';
 import { getDb } from '../db/index.js';
+import { runStore } from '../runs/index.js';
 
 function normalizeTag(value: unknown): string | null {
   if (value == null) return null;
@@ -24,33 +25,14 @@ export async function scenariosRoutes(app: FastifyInstance) {
       .prepare('SELECT * FROM scenarios ORDER BY updated_at DESC')
       .all() as Array<{ id: number }>;
 
-    const latestRunStmt = db.prepare(
-      `SELECT id, started_at, status, screenshot_paths_json
-       FROM runs
-       WHERE scenario_id = ? AND status IN ('success', 'failed')
-       ORDER BY started_at DESC
-       LIMIT 1`,
-    );
-
     return scenarios.map((s) => {
-      const run = latestRunStmt.get(s.id) as
-        | { id: number; started_at: string; status: string; screenshot_paths_json: string }
-        | undefined;
-      let lastShot: string | null = null;
-      if (run) {
-        try {
-          const shots = JSON.parse(run.screenshot_paths_json) as string[];
-          if (Array.isArray(shots) && shots.length > 0) lastShot = shots[shots.length - 1] ?? null;
-        } catch {
-          /* ignore */
-        }
-      }
+      const run = runStore().latestFinishedForScenario(s.id);
       return {
         ...s,
         latest_run_id: run?.id ?? null,
         latest_run_started_at: run?.started_at ?? null,
         latest_run_status: run?.status ?? null,
-        latest_screenshot: lastShot,
+        latest_screenshot: run?.lastScreenshot ?? null,
       };
     });
   });
@@ -73,11 +55,7 @@ export async function scenariosRoutes(app: FastifyInstance) {
     const db = getDb();
     const scenario = db.prepare('SELECT id FROM scenarios WHERE id = ?').get(scenarioId);
     if (!scenario) return reply.code(404).send({ error: 'not_found' });
-    return db
-      .prepare(
-        'SELECT * FROM runs WHERE scenario_id = ? ORDER BY started_at ASC, id ASC',
-      )
-      .all(scenarioId);
+    return runStore().listForScenario(scenarioId);
   });
 
   app.post('/api/scenarios', async (req, reply) => {

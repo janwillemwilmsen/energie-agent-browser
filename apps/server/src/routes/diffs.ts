@@ -6,6 +6,7 @@ import { config } from '../config.js';
 import { getDb } from '../db/index.js';
 import { slotKey, slotViewport } from '@eab/shared';
 import { diffImageFiles, readImageSize } from '../diff/pixelDiff.js';
+import { runStore } from '../runs/index.js';
 
 interface ArtifactRow {
   id: number;
@@ -84,8 +85,8 @@ async function materializeRunScreenshot(
   if (existing && fs.existsSync(absPath(existing.file_path))) return existing;
 
   const safeSlot = path.basename(slot);
-  const src = path.join(DATA, 'screenshots', String(runId), safeSlot);
-  if (!fs.existsSync(src)) {
+  const src = runStore().screenshotPath(runId, safeSlot);
+  if (!src || !fs.existsSync(src)) {
     throw Object.assign(new Error(`screenshot not found: run ${runId} / ${safeSlot}`), { statusCode: 404 });
   }
   const size = await readImageSize(src);
@@ -249,19 +250,9 @@ export async function diffsRoutes(app: FastifyInstance) {
     const body = CompareRuns.parse(req.body);
     const db = getDb();
 
-    const baseRun = db.prepare('SELECT screenshot_paths_json FROM runs WHERE id = ?').get(body.baselineRunId) as
-      | { screenshot_paths_json: string }
-      | undefined;
-    const targetRun = db.prepare('SELECT screenshot_paths_json FROM runs WHERE id = ?').get(body.targetRunId) as
-      | { screenshot_paths_json: string }
-      | undefined;
-    if (!baseRun || !targetRun) return reply.code(404).send({ error: 'run_not_found' });
-
-    const parse = (s: string): string[] => {
-      try { return JSON.parse(s) as string[]; } catch { return []; }
-    };
-    const baseSlots = parse(baseRun.screenshot_paths_json);
-    const targetSlots = parse(targetRun.screenshot_paths_json);
+    const baseSlots = runStore().screenshots(body.baselineRunId);
+    const targetSlots = runStore().screenshots(body.targetRunId);
+    if (!baseSlots || !targetSlots) return reply.code(404).send({ error: 'run_not_found' });
 
     // Pair on the stable cross-run key (`<label>-<viewport>`; see the slot
     // protocol in @eab/shared) so the same logical screenshot still matches

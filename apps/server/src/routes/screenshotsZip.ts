@@ -4,7 +4,7 @@ import { Readable } from 'node:stream';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { config } from '../config.js';
-import { getDb } from '../db/index.js';
+import { parseScreenshots, runStore } from '../runs/index.js';
 
 // Bulk download of run screenshots as a zip (Screenshots page → "Download").
 //
@@ -178,28 +178,20 @@ interface RunRow {
 export async function screenshotsZipRoutes(app: FastifyInstance) {
   app.post('/api/screenshots/zip', async (req, reply) => {
     const { items } = Body.parse(req.body);
-    const db = getDb();
-    const getRun = db.prepare(
-      `SELECT runs.id, runs.scenario_id, runs.started_at, runs.screenshot_paths_json,
-              scenarios.name AS scenario_name
-       FROM runs LEFT JOIN scenarios ON scenarios.id = runs.scenario_id
-       WHERE runs.id = ?`,
-    );
-
     const sources: ZipSource[] = [];
     const used = new Set<string>();
     let totalBytes = 0;
     for (const it of items) {
-      const run = getRun.get(it.runId) as RunRow | undefined;
+      const run = runStore().getWithScenario(it.runId);
       if (!run) continue;
-      let all: string[] = [];
-      try { all = JSON.parse(run.screenshot_paths_json); } catch { /* malformed */ }
+      const all = parseScreenshots(run.screenshot_paths_json);
       const wanted = it.names ? it.names.filter((n) => all.includes(path.basename(n))) : all;
       const day = run.started_at.slice(0, 10);
       const folder = `${safeSegment(run.scenario_name ?? `scenario-${run.scenario_id}`)}/${day}-run${run.id}`;
       for (const n of wanted) {
         const name = path.basename(n); // prevent traversal
-        const abs = path.join(config.dataDir, 'screenshots', String(run.id), name);
+        const abs = runStore().screenshotPath(run.id, name);
+        if (!abs) continue;
         let size: number;
         try {
           const st = fs.statSync(abs);

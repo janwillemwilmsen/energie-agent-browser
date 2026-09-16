@@ -5,6 +5,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { config } from '../config.js';
 import { getDb } from '../db/index.js';
+import { runStore } from '../runs/index.js';
 
 // Admin → Storage. Reports how much disk the SQLite database and the on-disk
 // artifacts (run screenshots, video recordings, diff images, preview/thumb
@@ -184,11 +185,11 @@ function dbReport() {
 }
 
 function groupsReport(): StorageGroup[] {
-  const shots = dirStats(path.join(DATA, 'screenshots'), { skipDirNames: new Set(['thumbs']) });
+  const shots = dirStats(runStore().screenshotsRoot(), { skipDirNames: new Set(['thumbs']) });
   // Thumb caches live in screenshots/<run>/thumbs — count them separately.
   let thumbs: DirStats = { bytes: 0, files: 0 };
-  for (const run of listSubdirs(path.join(DATA, 'screenshots'))) {
-    const t = dirStats(path.join(DATA, 'screenshots', run, 'thumbs'));
+  for (const run of listSubdirs(runStore().screenshotsRoot())) {
+    const t = dirStats(path.join(runStore().screenshotsRoot(), run, 'thumbs'));
     thumbs = { bytes: thumbs.bytes + t.bytes, files: thumbs.files + t.files };
   }
   const rec = dirStats(path.join(DATA, 'recordings'));
@@ -251,12 +252,12 @@ function runsReport(): RunStorageItem[] {
     recBytesByRun.set(r.run_id, r.b);
   }
 
-  const shotsRoot = path.join(DATA, 'screenshots');
+  const shotsRoot = runStore().screenshotsRoot();
   const dirs = new Set(listSubdirs(shotsRoot));
   const out: RunStorageItem[] = [];
 
   for (const r of rows) {
-    const dir = path.join(shotsRoot, String(r.id));
+    const dir = runStore().screenshotDir(r.id);
     const s = dirStats(dir, { skipDirNames: new Set(['thumbs']) });
     const t = dirStats(path.join(dir, 'thumbs'));
     dirs.delete(String(r.id));
@@ -410,9 +411,8 @@ function orphanDiffFiles(): { abs: string; rel: string; bytes: number }[] {
 }
 
 function orphanScreenshotDirs(): { abs: string; runId: number; bytes: number }[] {
-  const db = getDb();
-  const ids = new Set((db.prepare('SELECT id FROM runs').all() as { id: number }[]).map((r) => r.id));
-  const root = path.join(DATA, 'screenshots');
+  const ids = runStore().existingIds();
+  const root = runStore().screenshotsRoot();
   const out: { abs: string; runId: number; bytes: number }[] = [];
   for (const name of listSubdirs(root)) {
     if (!/^\d+$/.test(name)) continue;
@@ -424,16 +424,20 @@ function orphanScreenshotDirs(): { abs: string; runId: number; bytes: number }[]
   return out;
 }
 
-// Delete a set of runs: DB rows + screenshot dirs. Orphan dirs (no row) are
-// removed too. Recordings deliberately survive (same as DELETE /api/runs/:id)
-// unless `withRecordings` is set.
-function deleteRuns(ids: number[], withRecordings: boolean): { deletedRows: number; freedBytes: number } {
+// Delete a set of runs: DB rows + screenshot dirs (the Run store keeps the two
+// together and skips runs still in flight). Orphan dirs (no row) are removed
+// too. Recordings deliberately survive (same as DELETE /api/runs/:id) unless
+// `withRecordings` is set.
+function deleteRuns(
+  ids: number[],
+  withRecordings: boolean,
+): { deletedRows: number; freedBytes: number; skippedRunning: number } {
   const db = getDb();
+  const inFlight = runStore().inFlightIds();
+  const target = ids.filter((id) => !inFlight.has(id));
   let freed = 0;
-  let deletedRows = 0;
-  for (const id of ids) {
-    const dir = path.join(DATA, 'screenshots', String(id));
-    freed += dirStats(dir).bytes;
+  for (const id of target) {
+    freed += dirStats(runStore().screenshotDir(id)).bytes;
     if (withRecordings) {
       const recs = db
         .prepare('SELECT id, file_path FROM recordings WHERE run_id = ?')
@@ -447,10 +451,9 @@ function deleteRuns(ids: number[], withRecordings: boolean): { deletedRows: numb
         db.prepare('DELETE FROM recordings WHERE id = ?').run(r.id);
       }
     }
-    deletedRows += db.prepare('DELETE FROM runs WHERE id = ?').run(id).changes;
-    rmrf(dir);
   }
-  return { deletedRows, freedBytes: freed };
+  const { deleted } = runStore().deleteRuns(target);
+  return { deletedRows: deleted, freedBytes: freed, skippedRunning: ids.length - target.length };
 }
 
 // ---- Routes ----------------------------------------------------------------
@@ -490,15 +493,8 @@ export async function storageRoutes(app: FastifyInstance) {
       withRecordings: z.boolean().default(false),
     });
     const { ids, withRecordings } = Body.parse(req.body);
-    // Never delete a run that's still going — its screenshots are being written.
-    const running = new Set(
-      (getDb().prepare("SELECT id FROM runs WHERE status IN ('running','queued')").all() as { id: number }[]).map(
-        (r) => r.id,
-      ),
-    );
-    const target = ids.filter((id) => !running.has(id));
-    const res = deleteRuns(target, withRecordings);
-    return { ...res, skippedRunning: ids.length - target.length };
+    // Runs still going are skipped by the store — their screenshots are being written.
+    return deleteRuns(ids, withRecordings);
   });
 
   // Delete recordings by row id and/or orphan file path.
@@ -608,7 +604,7 @@ export async function storageRoutes(app: FastifyInstance) {
 
     switch (action) {
       case 'thumbs': {
-        const root = path.join(DATA, 'screenshots');
+        const root = runStore().screenshotsRoot();
         for (const run of listSubdirs(root)) {
           const t = path.join(root, run, 'thumbs');
           const s = dirStats(t);

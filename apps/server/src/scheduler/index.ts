@@ -1,7 +1,7 @@
 import cron from 'node-cron';
 import PQueue from 'p-queue';
 import { getDb } from '../db/index.js';
-import { executeScenario } from '../scenarios/runner.js';
+import { startRun } from '../scenarios/runner.js';
 
 interface ScheduleRow {
   id: number;
@@ -41,7 +41,8 @@ function enqueueChain(scenarioIds: number[], scheduleId: number): void {
       // Scenarios can be deleted after the schedule was created; skip quietly.
       if (!db.prepare('SELECT 1 FROM scenarios WHERE id = ?').get(scenarioId)) continue;
       try {
-        await executeScenario(scenarioId);
+        const status = await startRun(scenarioId).finished;
+        if (status === 'failed') failed += 1;
       } catch (e: any) {
         failed += 1;
         // eslint-disable-next-line no-console

@@ -13,6 +13,7 @@ import {
   type StepContext,
 } from './stepExecutor.js';
 import { StreamRecorder } from './streamRecorder.js';
+import { runStore, type RunStatus } from '../runs/index.js';
 import { notifyScenarioFailure, notifyScenarioSuccess } from '../push.js';
 import { notifyRunResultEmail } from '../email.js';
 import { parseStepPayload, type ViewportPreset } from '@eab/shared';
@@ -86,9 +87,7 @@ function appendLog(ctx: { runId: number; log: string[] }, line: string): void {
   // eslint-disable-next-line no-console
   console.log(`run#${ctx.runId} ${stamped}`);
   try {
-    getDb()
-      .prepare('UPDATE runs SET log_text = ? WHERE id = ?')
-      .run(ctx.log.join('\n'), ctx.runId);
+    runStore().appendLog(ctx.runId, ctx.log.join('\n'));
   } catch {
     /* ignore */
   }
@@ -150,7 +149,7 @@ async function stopRecordingStep(ctx: RunContext): Promise<void> {
   }
 }
 
-export interface ExecuteScenarioOptions {
+export interface StartRunOptions {
   /**
    * Restart the browser session before the run so it starts with an empty
    * cookie jar / storage ("Reset & play"). Steps-mode preflights already get
@@ -161,10 +160,18 @@ export interface ExecuteScenarioOptions {
   freshSession?: boolean;
 }
 
-export async function executeScenario(
-  scenarioId: number,
-  opts: ExecuteScenarioOptions = {},
-): Promise<number> {
+export interface StartedRun {
+  /** The Run row exists (status running) by the time startRun returns. */
+  runId: number;
+  /** Resolves with the final status; never rejects. */
+  finished: Promise<RunStatus>;
+}
+
+/**
+ * Start a Scenario run. Loads the Scenario, Preflight and Steps and creates
+ * the Run synchronously, then carries the run out in the background.
+ */
+export function startRun(scenarioId: number, opts: StartRunOptions = {}): StartedRun {
   const db = getDb();
   const scenario = db
     .prepare(
@@ -223,14 +230,7 @@ export async function executeScenario(
     .prepare('SELECT * FROM scenario_steps WHERE scenario_id = ? ORDER BY position')
     .all(scenarioId) as StepRow[];
 
-  const runRow = db
-    .prepare(
-      `INSERT INTO runs (scenario_id, status, started_at) VALUES (?, 'running', CURRENT_TIMESTAMP)`,
-    )
-    .run(scenarioId);
-  const runId = Number(runRow.lastInsertRowid);
-  const screenshotDir = path.join(config.dataDir, 'screenshots', String(runId));
-  fs.mkdirSync(screenshotDir, { recursive: true });
+  const { runId, screenshotDir } = runStore().create(scenarioId);
   // One stamp for the whole run; reused across viewports and restart attempts.
   const runFileStamp = fileStamp(new Date());
 
@@ -262,218 +262,221 @@ export async function executeScenario(
 
   // Finish the run as failed before any Step ran (bad step data, preflight
   // failure). The normal path at the bottom handles everything else.
-  const finishFailedEarly = (reason: string): number => {
+  const finishFailedEarly = (reason: string): RunStatus => {
     appendLog(ctx, reason);
-    db.prepare(
-      `UPDATE runs SET status = 'failed', finished_at = CURRENT_TIMESTAMP,
-                       log_text = ?, screenshot_paths_json = ? WHERE id = ?`,
-    ).run(log.join('\n'), JSON.stringify([]), runId);
+    runStore().finish(runId, 'failed', log.join('\n'), []);
     void notifyScenarioFailure({ id: scenario.id, name: scenario.name }, runId);
     void notifyRunResultEmail({ id: scenario.id, name: scenario.name }, runId, 'failed');
-    return runId;
+    return 'failed';
   };
 
-  // Parse every Step up front so a malformed one fails the run here, with a
-  // precise message, instead of mid-flight in the browser.
-  let steps: IndexedStep[];
-  let preflightSteps: IndexedStep[];
-  try {
-    steps = stepRows.map((row) => {
+  const finished = (async (): Promise<RunStatus> => {
+    try {
+      // Parse every Step up front so a malformed one fails the run here, with a
+      // precise message, instead of mid-flight in the browser.
+      let steps: IndexedStep[];
+      let preflightSteps: IndexedStep[];
       try {
-        return { position: row.position, step: parseStepPayload(row.kind, JSON.parse(row.payload_json)) };
+        steps = stepRows.map((row) => {
+          try {
+            return { position: row.position, step: parseStepPayload(row.kind, JSON.parse(row.payload_json)) };
+          } catch (e: any) {
+            throw new Error(`scenario step #${row.position}: ${e?.message ?? e}`);
+          }
+        });
+        let rawPreflight: unknown[] = [];
+        try { rawPreflight = JSON.parse(preflightStepsJson); } catch { rawPreflight = []; }
+        preflightSteps = rawPreflight.map((raw, i) => {
+          const { kind, ...payload } = (raw ?? {}) as { kind?: string };
+          try {
+            return { position: i + 1, step: parseStepPayload(String(kind ?? ''), payload) };
+          } catch (e: any) {
+            throw new Error(`preflight "${preflightName}" step #${i + 1}: ${e?.message ?? e}`);
+          }
+        });
       } catch (e: any) {
-        throw new Error(`scenario step #${row.position}: ${e?.message ?? e}`);
+        return finishFailedEarly(`invalid step data — ${e?.message ?? e}`);
       }
-    });
-    let rawPreflight: unknown[] = [];
-    try { rawPreflight = JSON.parse(preflightStepsJson); } catch { rawPreflight = []; }
-    preflightSteps = rawPreflight.map((raw, i) => {
-      const { kind, ...payload } = (raw ?? {}) as { kind?: string };
-      try {
-        return { position: i + 1, step: parseStepPayload(String(kind ?? ''), payload) };
-      } catch (e: any) {
-        throw new Error(`preflight "${preflightName}" step #${i + 1}: ${e?.message ?? e}`);
+
+      // "Reset & play": restart the daemon up front so the run starts with an
+      // empty cookie jar regardless of preflight mode. (Steps-mode preflights
+      // restart below anyway; this covers no-preflight and cookies-mode runs.)
+      if (opts.freshSession) {
+        appendLog(ctx, 'fresh session requested — restarting browser');
+        await closeSession(session).catch(() => undefined);
       }
-    });
-  } catch (e: any) {
-    return finishFailedEarly(`invalid step data — ${e?.message ?? e}`);
-  }
 
-  // "Reset & play": restart the daemon up front so the run starts with an
-  // empty cookie jar regardless of preflight mode. (Steps-mode preflights
-  // restart below anyway; this covers no-preflight and cookies-mode runs.)
-  if (opts.freshSession) {
-    appendLog(ctx, 'fresh session requested — restarting browser');
-    await closeSession(session).catch(() => undefined);
-  }
+      // Preflight application: bind the daemon to the preflight's --session-name
+      // (so any state save still lands in the right slot) AND execute the
+      // preflight's step list fresh. The freshness is the whole point — if you've
+      // recorded a login flow in the preflight, this is what re-runs it on every
+      // scenario run, sidestepping the Auth0/IdP session-cookie TTL problem.
+      //
+      // 'cookies' mode: skip the steps and just load the preflight's saved
+      // cookies/localStorage — fast, but requires a saved state file (from Save
+      // preflight / Replay). 'steps' mode (default): re-run the steps in a clean
+      // browser so login/consent happen fresh every run.
+      //
+      // Called before the first attempt AND on every whole-run restart: the
+      // restart closes the session, which throws away the preflight's in-memory
+      // cookies (login, consent, …), so without re-applying, a restarted attempt
+      // would run logged-out. Throws when every internal attempt failed.
+      const useCookiesOnly = scenario.preflight_mode === 'cookies';
+      async function applyPreflight(name: string): Promise<void> {
+        appendLog(
+          ctx,
+          useCookiesOnly
+            ? `preflight "${name}": loading saved cookies (mode=cookies, steps skipped)`
+            : `preflight "${name}": binding daemon + executing ${preflightSteps.length} step(s)`,
+        );
+        // Preflight Steps have no artifacts or recorder: a screenshot inside a
+        // preflight is not a thing.
+        const preflightCtx: StepContext = {
+          browser,
+          log: (msg) => appendLog(ctx, '  ' + msg),
+          authSelectors: getAuthSelectors,
+        };
+        // Whole-preflight restart loop. Unlike Replay, a scenario run does NOT wipe
+        // persisted state between attempts — the preflight re-runs its login flow
+        // fresh anyway; we only reset the browser connection so a hung/flaky daemon
+        // gets a clean socket before re-running.
+        let preflightErr: any = null;
+        for (let attempt = 0; attempt <= preflightRestarts; attempt++) {
+          try {
+            if (attempt > 0) {
+              appendLog(
+                ctx,
+                `preflight "${name}" failed — resetting browser and restarting (restart ${attempt}/${preflightRestarts})`,
+              );
+              await closeSession(session).catch(() => undefined);
+            }
+            if (useCookiesOnly) {
+              // Load the persisted state (default ensureSession behavior) and do
+              // NOT run the steps.
+              await ensureSession(session, { sessionName: name });
+              appendLog(ctx, `preflight "${name}": cookies loaded`);
+            } else {
+              // Fresh-browser guarantee: a daemon reused from a previous run still
+              // holds that run's in-memory cookies — ensureSession reuses on a
+              // session-name match, and skipStateLoad only skips the on-disk state
+              // load, not the live jar. A leftover consent cookie would hide the
+              // banner and fail the "click consent" step, so always restart the
+              // daemon before a steps-mode preflight. (attempt > 0 already closed
+              // above; the extra close is then a cheap no-op.)
+              if (attempt === 0) await closeSession(session).catch(() => undefined);
+              // skipStateLoad: run the preflight in a genuinely CLEAN browser. We
+              // re-execute its steps from scratch (login, cookie-consent, …), so
+              // loading the preflight's saved cookies would be counter-productive —
+              // e.g. a restored consent cookie means the consent banner never
+              // appears and the "click consent" step fails. Binding the name
+              // (without loading) keeps any future save landing in the right slot.
+              await ensureSession(session, { sessionName: name, skipStateLoad: true });
+              // NOTE: recording is deliberately NOT started here. The preflight
+              // navigates (login), and `record start` poisons the next navigation —
+              // so we wait and start recording after the scenario's first navigation.
+              if (preflightSteps.length > 0) {
+                await executeSteps(preflightCtx, preflightSteps, preflightPolicy);
+                appendLog(ctx, `preflight "${name}": ok`);
+              }
+            }
+            return;
+          } catch (e: any) {
+            preflightErr = e;
+          }
+        }
+        throw preflightErr;
+      }
 
-  // Preflight application: bind the daemon to the preflight's --session-name
-  // (so any state save still lands in the right slot) AND execute the
-  // preflight's step list fresh. The freshness is the whole point — if you've
-  // recorded a login flow in the preflight, this is what re-runs it on every
-  // scenario run, sidestepping the Auth0/IdP session-cookie TTL problem.
-  //
-  // 'cookies' mode: skip the steps and just load the preflight's saved
-  // cookies/localStorage — fast, but requires a saved state file (from Save
-  // preflight / Replay). 'steps' mode (default): re-run the steps in a clean
-  // browser so login/consent happen fresh every run.
-  //
-  // Called before the first attempt AND on every whole-run restart: the
-  // restart closes the session, which throws away the preflight's in-memory
-  // cookies (login, consent, …), so without re-applying, a restarted attempt
-  // would run logged-out. Throws when every internal attempt failed.
-  const useCookiesOnly = scenario.preflight_mode === 'cookies';
-  async function applyPreflight(name: string): Promise<void> {
-    appendLog(
-      ctx,
-      useCookiesOnly
-        ? `preflight "${name}": loading saved cookies (mode=cookies, steps skipped)`
-        : `preflight "${name}": binding daemon + executing ${preflightSteps.length} step(s)`,
-    );
-    // Preflight Steps have no artifacts or recorder: a screenshot inside a
-    // preflight is not a thing.
-    const preflightCtx: StepContext = {
-      browser,
-      log: (msg) => appendLog(ctx, '  ' + msg),
-      authSelectors: getAuthSelectors,
-    };
-    // Whole-preflight restart loop. Unlike Replay, a scenario run does NOT wipe
-    // persisted state between attempts — the preflight re-runs its login flow
-    // fresh anyway; we only reset the browser connection so a hung/flaky daemon
-    // gets a clean socket before re-running.
-    let preflightErr: any = null;
-    for (let attempt = 0; attempt <= preflightRestarts; attempt++) {
-      try {
+      if (preflightName) {
+        try {
+          await applyPreflight(preflightName);
+        } catch (e: any) {
+          // Hard-fail the run: scenarios that depend on the preflight (e.g. a
+          // logged-in scenario) can't usefully run without it. Better to surface
+          // the preflight error in the run log than silently hit the login page.
+          return finishFailedEarly(`preflight "${preflightName}" failed: ${e.message}`);
+        }
+      }
+
+      // Whole-run restart loop. A run that fails (a step exhausted its retries) is
+      // retried from the top, after resetting the browser connection — this re-runs
+      // all prior steps, so it's safe for stateful flows (unlike reloading mid-run).
+      for (let attempt = 0; attempt <= maxRestarts; attempt++) {
         if (attempt > 0) {
           appendLog(
             ctx,
-            `preflight "${name}" failed — resetting browser and restarting (restart ${attempt}/${preflightRestarts})`,
+            `run failed — resetting browser connection and restarting (restart ${attempt}/${maxRestarts})`,
           );
-          await closeSession(session).catch(() => undefined);
-        }
-        if (useCookiesOnly) {
-          // Load the persisted state (default ensureSession behavior) and do
-          // NOT run the steps.
-          await ensureSession(session, { sessionName: name });
-          appendLog(ctx, `preflight "${name}": cookies loaded`);
-        } else {
-          // Fresh-browser guarantee: a daemon reused from a previous run still
-          // holds that run's in-memory cookies — ensureSession reuses on a
-          // session-name match, and skipStateLoad only skips the on-disk state
-          // load, not the live jar. A leftover consent cookie would hide the
-          // banner and fail the "click consent" step, so always restart the
-          // daemon before a steps-mode preflight. (attempt > 0 already closed
-          // above; the extra close is then a cheap no-op.)
-          if (attempt === 0) await closeSession(session).catch(() => undefined);
-          // skipStateLoad: run the preflight in a genuinely CLEAN browser. We
-          // re-execute its steps from scratch (login, cookie-consent, …), so
-          // loading the preflight's saved cookies would be counter-productive —
-          // e.g. a restored consent cookie means the consent banner never
-          // appears and the "click consent" step fails. Binding the name
-          // (without loading) keeps any future save landing in the right slot.
-          await ensureSession(session, { sessionName: name, skipStateLoad: true });
-          // NOTE: recording is deliberately NOT started here. The preflight
-          // navigates (login), and `record start` poisons the next navigation —
-          // so we wait and start recording after the scenario's first navigation.
-          if (preflightSteps.length > 0) {
-            await executeSteps(preflightCtx, preflightSteps, preflightPolicy);
-            appendLog(ctx, `preflight "${name}": ok`);
+          try {
+            await closeSession(session).catch(() => undefined);
+            // The close above threw away everything the preflight established in
+            // the browser (login cookies, consent, …), so re-apply it — otherwise
+            // the restarted attempt runs logged-out and fails for a different
+            // reason than the original failure.
+            if (preflightName) {
+              await applyPreflight(preflightName);
+            } else {
+              await ensureSession(session);
+            }
+            appendLog(ctx, 'browser connection reset; re-running scenario from the top');
+          } catch (e: any) {
+            // Preflight/connection reset failed — this attempt can't usefully run
+            // the scenario steps, so skip straight to the next restart (if any).
+            appendLog(ctx, `restart reset failed: ${e.message}`);
+            status = 'failed';
+            continue;
           }
         }
-        return;
-      } catch (e: any) {
-        preflightErr = e;
-      }
-    }
-    throw preflightErr;
-  }
 
-  if (preflightName) {
-    try {
-      await applyPreflight(preflightName);
-    } catch (e: any) {
-      // Hard-fail the run: scenarios that depend on the preflight (e.g. a
-      // logged-in scenario) can't usefully run without it. Better to surface
-      // the preflight error in the run log than silently hit the login page.
-      return finishFailedEarly(`preflight "${preflightName}" failed: ${e.message}`);
-    }
-  }
+        // Each attempt starts from a clean screenshot set (filenames are reused).
+        screenshots.length = 0;
+        status = 'success';
 
-  // Whole-run restart loop. A run that fails (a step exhausted its retries) is
-  // retried from the top, after resetting the browser connection — this re-runs
-  // all prior steps, so it's safe for stateful flows (unlike reloading mid-run).
-  for (let attempt = 0; attempt <= maxRestarts; attempt++) {
-    if (attempt > 0) {
-      appendLog(
-        ctx,
-        `run failed — resetting browser connection and restarting (restart ${attempt}/${maxRestarts})`,
-      );
-      try {
-        await closeSession(session).catch(() => undefined);
-        // The close above threw away everything the preflight established in
-        // the browser (login cookies, consent, …), so re-apply it — otherwise
-        // the restarted attempt runs logged-out and fails for a different
-        // reason than the original failure.
-        if (preflightName) {
-          await applyPreflight(preflightName);
-        } else {
-          await ensureSession(session);
+        for (const viewport of viewports) {
+          const stepCtx: StepContext = {
+            browser,
+            log: (line) => appendLog(ctx, line),
+            artifacts: { screenshotDir, fileStamp: runFileStamp, viewport, screenshots },
+            recorder: {
+              start: () => startRecordingStep(ctx),
+              stop: () => stopRecordingStep(ctx),
+            },
+            authSelectors: getAuthSelectors,
+          };
+          appendLog(ctx, `=== viewport: ${viewport} ===`);
+          try {
+            await applyViewport(browser, viewport, stepCtx.log);
+            await executeSteps(stepCtx, steps, scenarioPolicy);
+          } catch (e: any) {
+            status = 'failed';
+            appendLog(ctx, `ERROR: ${e.message}`);
+            break;
+          }
         }
-        appendLog(ctx, 'browser connection reset; re-running scenario from the top');
-      } catch (e: any) {
-        // Preflight/connection reset failed — this attempt can't usefully run
-        // the scenario steps, so skip straight to the next restart (if any).
-        appendLog(ctx, `restart reset failed: ${e.message}`);
-        status = 'failed';
-        continue;
+
+        if (status === 'success') break;
       }
-    }
 
-    // Each attempt starts from a clean screenshot set (filenames are reused).
-    screenshots.length = 0;
-    status = 'success';
+      // A recording left open (a `record_start` without a matching `record_stop`,
+      // or a run that failed mid-recording) is finalized here so the partial clip
+      // is still saved.
+      await stopRecordingStep(ctx);
 
-    for (const viewport of viewports) {
-      const stepCtx: StepContext = {
-        browser,
-        log: (line) => appendLog(ctx, line),
-        artifacts: { screenshotDir, fileStamp: runFileStamp, viewport, screenshots },
-        recorder: {
-          start: () => startRecordingStep(ctx),
-          stop: () => stopRecordingStep(ctx),
-        },
-        authSelectors: getAuthSelectors,
-      };
-      appendLog(ctx, `=== viewport: ${viewport} ===`);
-      try {
-        await applyViewport(browser, viewport, stepCtx.log);
-        await executeSteps(stepCtx, steps, scenarioPolicy);
-      } catch (e: any) {
-        status = 'failed';
-        appendLog(ctx, `ERROR: ${e.message}`);
-        break;
+      runStore().finish(runId, status, log.join('\n'), screenshots);
+
+      if (status === 'failed') {
+        void notifyScenarioFailure({ id: scenario.id, name: scenario.name }, runId);
+      } else {
+        void notifyScenarioSuccess({ id: scenario.id, name: scenario.name }, runId);
       }
+      void notifyRunResultEmail({ id: scenario.id, name: scenario.name }, runId, status);
+      return status;
+    } catch (e: any) {
+      // Anything the run body did not handle itself (a driver crash, a bug):
+      // never leave the row stuck at 'running'.
+      await stopRecordingStep(ctx).catch(() => undefined);
+      return finishFailedEarly(`ERROR: ${e?.message ?? e}`);
     }
-
-    if (status === 'success') break;
-  }
-
-  // A recording left open (a `record_start` without a matching `record_stop`,
-  // or a run that failed mid-recording) is finalized here so the partial clip
-  // is still saved.
-  await stopRecordingStep(ctx);
-
-  db.prepare(
-    `UPDATE runs
-     SET status = ?, finished_at = CURRENT_TIMESTAMP, log_text = ?, screenshot_paths_json = ?
-     WHERE id = ?`,
-  ).run(status, log.join('\n'), JSON.stringify(screenshots), runId);
-
-  if (status === 'failed') {
-    void notifyScenarioFailure({ id: scenario.id, name: scenario.name }, runId);
-  } else {
-    void notifyScenarioSuccess({ id: scenario.id, name: scenario.name }, runId);
-  }
-  void notifyRunResultEmail({ id: scenario.id, name: scenario.name }, runId, status);
-  return runId;
+  })();
+  return { runId, finished };
 }

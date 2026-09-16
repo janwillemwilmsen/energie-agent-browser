@@ -2,6 +2,7 @@ import { Resend } from 'resend';
 import cron from 'node-cron';
 import { config } from './config.js';
 import { getDb } from './db/index.js';
+import { runStore } from './runs/index.js';
 import { getSetting, setSetting } from './settings.js';
 
 // --- Resend client -----------------------------------------------------------
@@ -311,16 +312,7 @@ export function buildDigest(
   period: DigestPeriod = 'daily',
 ): { subject: string; html: string; text: string; runCount: number } {
   const spec = DIGEST_SPECS[period];
-  const runs = getDb()
-    .prepare(
-      `SELECT runs.id, runs.status, runs.started_at, runs.finished_at,
-              scenarios.name AS scenario_name
-       FROM runs
-       LEFT JOIN scenarios ON scenarios.id = runs.scenario_id
-       WHERE runs.started_at >= datetime('now', ?)
-       ORDER BY runs.id DESC`,
-    )
-    .all(spec.window) as DigestRunRow[];
+  const runs = runStore().listStartedSince(spec.window) as DigestRunRow[];
 
   const failed = runs.filter((r) => r.status === 'failed').length;
   const success = runs.filter((r) => r.status === 'success').length;
