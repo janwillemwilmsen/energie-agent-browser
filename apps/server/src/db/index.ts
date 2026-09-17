@@ -15,6 +15,12 @@ export function getDb(): Database.Database {
   return db;
 }
 
+/** Install a database handle (tests: an in-memory one). Closes any open one. */
+export function setDb(next: Database.Database): void {
+  if (db && db !== next) db.close();
+  db = next;
+}
+
 export function closeDb(): void {
   if (db) {
     db.close();

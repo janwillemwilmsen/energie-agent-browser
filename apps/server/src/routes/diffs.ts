@@ -52,11 +52,12 @@ const CompareRuns = z.object({
   threshold: z.number().min(0).max(1).default(0.1),
 });
 
-const DATA = config.dataDir;
+// Read at call time: config resolves lazily, never at import.
+const DATA = (): string => config.dataDir;
 const DIFF_DIR = 'diffs'; // relative to dataDir
 
 function absPath(rel: string): string {
-  return path.join(DATA, rel);
+  return path.join(DATA(), rel);
 }
 
 // Screenshots may be png (default), jpg/jpeg, or webp depending on the step's

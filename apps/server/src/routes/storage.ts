@@ -21,7 +21,8 @@ import { agentBrowserHome, boundSessionNames } from '../agentBrowser/driver.js';
 //   preview/                    live-preview jpeg scratch
 //   agent-browser-logs/         per-session daemon logs
 
-const DATA = config.dataDir;
+// Read at call time: config resolves lazily, never at import.
+const DATA = (): string => config.dataDir;
 
 interface DirStats {
   bytes: number;
@@ -91,8 +92,8 @@ function listFiles(abs: string): string[] {
 // Resolve a dataDir-relative path and make sure it can't escape `root`
 // (which is itself relative to dataDir). Returns null on traversal.
 function safeAbs(rel: string, root: string): string | null {
-  const rootAbs = path.resolve(DATA, root);
-  const abs = path.resolve(DATA, rel);
+  const rootAbs = path.resolve(DATA(), root);
+  const abs = path.resolve(DATA(), rel);
   const relToRoot = path.relative(rootAbs, abs);
   if (!relToRoot || relToRoot.startsWith('..') || path.isAbsolute(relToRoot)) return null;
   return abs;
@@ -126,7 +127,7 @@ interface TableInfo {
 
 function dbReport() {
   const db = getDb();
-  const dbFile = path.join(DATA, 'sqlite.db');
+  const dbFile = path.join(DATA(), 'sqlite.db');
   const pageSize = (db.pragma('page_size', { simple: true }) as number) ?? 4096;
   const pageCount = (db.pragma('page_count', { simple: true }) as number) ?? 0;
   const freelist = (db.pragma('freelist_count', { simple: true }) as number) ?? 0;
@@ -192,10 +193,10 @@ function groupsReport(): StorageGroup[] {
     const t = dirStats(path.join(runStore().screenshotsRoot(), run, 'thumbs'));
     thumbs = { bytes: thumbs.bytes + t.bytes, files: thumbs.files + t.files };
   }
-  const rec = dirStats(path.join(DATA, 'recordings'));
-  const diffs = dirStats(path.join(DATA, 'diffs'));
-  const preview = dirStats(path.join(DATA, 'preview'));
-  const logs = dirStats(path.join(DATA, 'agent-browser-logs'));
+  const rec = dirStats(path.join(DATA(), 'recordings'));
+  const diffs = dirStats(path.join(DATA(), 'diffs'));
+  const preview = dirStats(path.join(DATA(), 'preview'));
+  const logs = dirStats(path.join(DATA(), 'agent-browser-logs'));
 
   return [
     { key: 'screenshots', label: 'Run screenshots', dir: 'screenshots', bytes: shots.bytes, files: shots.files },
@@ -340,7 +341,7 @@ function recordingsReport(): RecordingStorageItem[] {
   const known = new Set<string>();
   const out: RecordingStorageItem[] = [];
   for (const r of rows) {
-    const abs = path.join(DATA, r.file_path);
+    const abs = path.join(DATA(), r.file_path);
     known.add(path.normalize(abs));
     const exists = fs.existsSync(abs);
     out.push({
@@ -358,7 +359,7 @@ function recordingsReport(): RecordingStorageItem[] {
     });
   }
   // Files on disk under recordings/ that no row points at.
-  const recRoot = path.join(DATA, 'recordings');
+  const recRoot = path.join(DATA(), 'recordings');
   for (const sub of listSubdirs(recRoot)) {
     for (const f of listFiles(path.join(recRoot, sub))) {
       const abs = path.join(recRoot, sub, f);
@@ -397,10 +398,10 @@ function orphanDiffFiles(): { abs: string; rel: string; bytes: number }[] {
   const db = getDb();
   const known = new Set(
     (db.prepare('SELECT file_path FROM artifacts').all() as { file_path: string }[]).map((r) =>
-      path.normalize(path.join(DATA, r.file_path)),
+      path.normalize(path.join(DATA(), r.file_path)),
     ),
   );
-  const root = path.join(DATA, 'diffs');
+  const root = path.join(DATA(), 'diffs');
   const out: { abs: string; rel: string; bytes: number }[] = [];
   for (const f of listFiles(root)) {
     const abs = path.join(root, f);
@@ -468,7 +469,7 @@ export async function storageRoutes(app: FastifyInstance) {
     const orphanShots = orphanScreenshotDirs();
     const missingRecordings = recordingsReport().filter((r) => r.missing).length;
     return {
-      dataDir: DATA,
+      dataDir: DATA(),
       totalBytes: dbTotal + filesTotal,
       db,
       groups,
@@ -607,7 +608,7 @@ export async function storageRoutes(app: FastifyInstance) {
         break;
       }
       case 'preview': {
-        const root = path.join(DATA, 'preview');
+        const root = path.join(DATA(), 'preview');
         for (const f of listFiles(root)) {
           const abs = path.join(root, f);
           freed += fileSize(abs);
@@ -619,7 +620,7 @@ export async function storageRoutes(app: FastifyInstance) {
       case 'logs': {
         // Live daemons may hold their log open (Windows refuses the unlink);
         // those are skipped by rmrf's force/try and simply not counted.
-        const root = path.join(DATA, 'agent-browser-logs');
+        const root = path.join(DATA(), 'agent-browser-logs');
         for (const f of listFiles(root)) {
           const abs = path.join(root, f);
           const size = fileSize(abs);
@@ -654,14 +655,14 @@ export async function storageRoutes(app: FastifyInstance) {
         // showing dead entries.
         const rows = db.prepare('SELECT id, file_path FROM recordings').all() as { id: number; file_path: string }[];
         for (const r of rows) {
-          if (fs.existsSync(path.join(DATA, r.file_path))) continue;
+          if (fs.existsSync(path.join(DATA(), r.file_path))) continue;
           db.prepare('DELETE FROM recordings WHERE id = ?').run(r.id);
           count += 1;
         }
         break;
       }
       case 'vacuum': {
-        const before = fileSize(path.join(DATA, 'sqlite.db')) + fileSize(path.join(DATA, 'sqlite.db-wal'));
+        const before = fileSize(path.join(DATA(), 'sqlite.db')) + fileSize(path.join(DATA(), 'sqlite.db-wal'));
         try {
           db.pragma('wal_checkpoint(TRUNCATE)');
           db.exec('VACUUM');
@@ -670,7 +671,7 @@ export async function storageRoutes(app: FastifyInstance) {
           req.log.warn({ err: e }, 'vacuum failed');
           return reply.code(500).send({ error: 'vacuum_failed', message: (e as Error).message });
         }
-        const after = fileSize(path.join(DATA, 'sqlite.db')) + fileSize(path.join(DATA, 'sqlite.db-wal'));
+        const after = fileSize(path.join(DATA(), 'sqlite.db')) + fileSize(path.join(DATA(), 'sqlite.db-wal'));
         freed = Math.max(0, before - after);
         count = 1;
         break;

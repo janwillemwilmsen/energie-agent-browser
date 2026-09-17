@@ -1,41 +1,15 @@
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import Fastify from 'fastify';
-import { ZodError } from 'zod';
-import cors from '@fastify/cors';
-import fastifyStatic from '@fastify/static';
-import websocket from '@fastify/websocket';
 import { config, loadConfig, loadDotenv, setConfig } from './config.js';
 import { migrate } from './db/migrate.js';
-import { scenariosRoutes } from './routes/scenarios.js';
-import { snapshotRoutes } from './routes/snapshot.js';
-import { runsRoutes } from './routes/runs.js';
-import { recordingsRoutes } from './routes/recordings.js';
-import { diffsRoutes } from './routes/diffs.js';
-import { schedulesRoutes } from './routes/schedules.js';
-import { sessionsRoutes } from './routes/sessions.js';
-import { sessionStatesRoutes } from './routes/sessionStates.js';
-import { preflightsRoutes } from './routes/preflights.js';
-import { authProfilesRoutes } from './routes/authProfiles.js';
-import { authRoutes } from './routes/auth.js';
-import { isAuthenticated } from './auth.js';
-import { pushRoutes } from './routes/push.js';
-import { emailRoutes } from './routes/email.js';
-import { agentTasksRoutes } from './routes/agentTasks.js';
-import { adminEnvRoutes } from './routes/adminEnv.js';
-import { ensurePushConfigured } from './push.js';
-import { pushRunFinished } from './push.js';
-import { emailRunFinished } from './email.js';
+import { createApp } from './app.js';
+import { ensurePushConfigured, pushRunFinished } from './push.js';
+import { emailRunFinished, startEmailDigestSchedule } from './email.js';
 import { onRunFinished } from './notifications.js';
-import { startEmailDigestSchedule } from './email.js';
-import { browserlessHealthRoutes } from './routes/browserlessHealth.js';
-import { storageRoutes } from './routes/storage.js';
-import { screenshotsZipRoutes } from './routes/screenshotsZip.js';
-import { terminalWsRoute } from './ws/terminal.js';
-import { screencastWsRoute } from './ws/screencast.js';
 import { startScheduler } from './scheduler/index.js';
 import { closeAllActiveSessions } from './agentBrowser/driver.js';
+
+// The process entry point: load configuration, migrate, build the app
+// (app.ts), wire the adapters and background work, listen, and shut down
+// cleanly. Everything that starts or stops something lives here.
 
 // node-pty on Windows occasionally throws "AttachConsole failed" from its
 // internal console-enumeration helper. That can kill the whole server. Catch
@@ -64,96 +38,7 @@ async function main() {
 
   migrate();
 
-  const app = Fastify({ logger: true });
-
-  await app.register(cors, { origin: config.webOrigin, credentials: true });
-  await app.register(websocket);
-
-  // A failed `Schema.parse(req.body)` throws a ZodError. Fastify's default
-  // handler renders any uncaught error as a 500, so bad input (e.g. an invalid
-  // auth-profile URL) looked like a server crash. Turn validation errors into a
-  // clean 400 with the offending fields, and keep real failures as 500.
-  app.setErrorHandler((error, req, reply) => {
-    if (error instanceof ZodError) {
-      return reply.code(400).send({
-        error: 'validation_error',
-        message: error.issues
-          .map((i) => `${i.path.join('.') || '(body)'}: ${i.message}`)
-          .join('; '),
-        issues: error.issues.map((i) => ({ path: i.path.join('.'), message: i.message })),
-      });
-    }
-    const status = (error as { statusCode?: number }).statusCode ?? 500;
-    if (status < 500) {
-      return reply.code(status).send({ error: error.name, message: error.message });
-    }
-    req.log.error(error);
-    return reply.code(500).send({ error: 'internal_error', message: error.message });
-  });
-
-  // Login gate: everything under /api/* and /ws/* requires a valid session,
-  // EXCEPT the auth endpoints themselves and the health check. Static assets and
-  // the SPA (any non-API/WS path) are served freely so the login page can load;
-  // the API returning 401 is what actually keeps data protected.
-  app.addHook('onRequest', async (req, reply) => {
-    const url = req.raw.url ?? '';
-    if (url.startsWith('/api/auth/') || url === '/health') return;
-    const gated = url.startsWith('/api/') || url.startsWith('/ws/');
-    if (gated && !isAuthenticated(req)) {
-      return reply.code(401).send({ error: 'unauthenticated' });
-    }
-  });
-
-  app.get('/health', async () => ({ ok: true, ts: new Date().toISOString() }));
-
-  await app.register(authRoutes);
-  await app.register(scenariosRoutes);
-  await app.register(snapshotRoutes);
-  await app.register(runsRoutes);
-  await app.register(recordingsRoutes);
-  await app.register(diffsRoutes);
-  await app.register(schedulesRoutes);
-  await app.register(sessionsRoutes);
-  await app.register(sessionStatesRoutes);
-  await app.register(preflightsRoutes);
-  await app.register(authProfilesRoutes);
-  await app.register(pushRoutes);
-  await app.register(emailRoutes);
-  await app.register(agentTasksRoutes);
-  await app.register(adminEnvRoutes);
-  await app.register(browserlessHealthRoutes);
-  await app.register(storageRoutes);
-  await app.register(screenshotsZipRoutes);
-  await app.register(terminalWsRoute);
-  await app.register(screencastWsRoute);
-
-  // Static SPA: serve apps/web/dist/ when the build output exists. Skipped
-  // silently in development, where Vite runs on its own port and proxies
-  // /api + /ws to this server. In production (Coolify / Docker) this is what
-  // makes a single container serve both the API and the React SPA on $PORT.
-  // Order matters: all API + WS routes are already registered above, so the
-  // static handler only catches things they didn't claim.
-  const __dirname = path.dirname(fileURLToPath(import.meta.url));
-  const webDist = path.resolve(__dirname, '..', '..', 'web', 'dist');
-  if (fs.existsSync(path.join(webDist, 'index.html'))) {
-    await app.register(fastifyStatic, { root: webDist, prefix: '/' });
-    // React Router uses client-side routes (/preflight, /scenarios/12, …). On
-    // a hard refresh the browser asks the server for those paths and we'd
-    // 404 without this fallback — return index.html so the SPA hydrates and
-    // the in-app router takes over. Excludes /api/* and /ws/* to keep their
-    // 404s honest (so a typo'd API path doesn't silently return HTML).
-    app.setNotFoundHandler((req, reply) => {
-      const url = req.raw.url ?? '';
-      if (url.startsWith('/api/') || url.startsWith('/ws/')) {
-        reply.code(404).send({ error: 'not_found', path: url });
-        return;
-      }
-      reply.type('text/html').sendFile('index.html');
-    });
-    app.log.info({ webDist }, 'SPA: serving apps/web/dist from this server');
-  } else {
-    app.log.info('SPA: apps/web/dist not built — only the API is exposed on this port');
-  }
+  const app = await createApp();
 
   // Set up VAPID (generates/persists keys on first boot) so the first push
   // request doesn't pay that cost mid-request.
@@ -166,23 +51,23 @@ async function main() {
   startScheduler();
   startEmailDigestSchedule();
 
-  // Graceful shutdown: flush every daemon's --session-name state to disk
-  // before exit. Without this, Ctrl+C kills the daemon with taskkill /F and
-  // the in-memory cookies/localStorage for the live preflight are lost.
-  // 15-second cap so a single stuck daemon can't block the whole shutdown.
+  // Graceful shutdown: close every daemon we started before exit. Without
+  // this, Ctrl+C kills the daemon with taskkill /F and the in-memory
+  // cookies/localStorage for the live preflight are lost. 15-second cap so a
+  // single stuck daemon can't block the whole shutdown.
   let shuttingDown = false;
   const SHUTDOWN_TIMEOUT_MS = 15_000;
   async function gracefulShutdown(signal: string) {
     if (shuttingDown) return;
     shuttingDown = true;
-    app.log.info({ signal }, 'shutdown: flushing agent-browser --session-name state');
+    app.log.info({ signal }, 'shutdown: closing agent-browser sessions');
     try {
       await Promise.race([
         closeAllActiveSessions(),
         new Promise<void>((res) => setTimeout(res, SHUTDOWN_TIMEOUT_MS)),
       ]);
     } catch (e) {
-      app.log.error({ err: e }, 'shutdown: session flush failed');
+      app.log.error({ err: e }, 'shutdown: session close failed');
     }
     try { await app.close(); } catch { /* ignore */ }
     process.exit(0);
