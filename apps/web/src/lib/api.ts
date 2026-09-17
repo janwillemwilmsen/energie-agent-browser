@@ -1,4 +1,7 @@
 import type { A11yTree, PreflightStep, ScenarioStep } from '@eab/shared';
+import { request as req, requestRaw } from './request.js';
+
+export { ApiError, errorMessage, onUnauthenticated } from './request.js';
 
 export interface EmailRecipient {
   id: number;
@@ -95,20 +98,6 @@ export interface ScenarioCard extends Scenario {
 }
 
 export type ScenarioDetail = Scenario & { steps: ScenarioStep[] };
-
-async function req<T>(url: string, init?: RequestInit): Promise<T> {
-  const headers: Record<string, string> = { ...((init?.headers as Record<string, string>) ?? {}) };
-  // Only declare a JSON body when we're actually sending one — Fastify rejects
-  // an empty body with Content-Type: application/json as 400 Bad Request.
-  if (init?.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
-  const res = await fetch(url, { ...init, headers });
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new Error(`${res.status} ${res.statusText}${text ? ` — ${text}` : ''}`);
-  }
-  if (res.status === 204) return undefined as T;
-  return res.json() as Promise<T>;
-}
 
 export interface Schedule {
   id: number;
@@ -598,15 +587,10 @@ export const api = {
   downloadScreenshotsZip: async (
     items: { runId: number; names?: string[] }[],
   ): Promise<{ blob: Blob; filename: string }> => {
-    const res = await fetch('/api/screenshots/zip', {
+    const res = await requestRaw('/api/screenshots/zip', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ items }),
     });
-    if (!res.ok) {
-      const text = await res.text().catch(() => '');
-      throw new Error(`${res.status} ${res.statusText}${text ? ` — ${text}` : ''}`);
-    }
     const cd = res.headers.get('Content-Disposition') ?? '';
     const m = /filename="([^"]+)"/.exec(cd);
     return { blob: await res.blob(), filename: m?.[1] ?? 'screenshots.zip' };

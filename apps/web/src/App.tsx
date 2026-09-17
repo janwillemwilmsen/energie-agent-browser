@@ -27,7 +27,7 @@ import { Runs } from './pages/Runs.js';
 import { Notifications } from './pages/Notifications.js';
 import { Login } from './pages/Login.js';
 import { Diffs } from './pages/Diffs.js';
-import { api } from './lib/api.js';
+import { api, onUnauthenticated } from './lib/api.js';
 import { PreflightPage } from './pages/Preflight.js';
 import { Screenshots } from './pages/Screenshots.js';
 // Recordings pulls in Mediabunny (~400 kB) for video decode/playback — lazy-load
@@ -131,6 +131,9 @@ export function App() {
       .catch(() => setAuthed(false));
   useEffect(() => {
     void checkAuth();
+    // A 401 from any endpoint mid-session drops back to the login gate, which
+    // unmounts every page (and its polling); a fresh login remounts them.
+    return onUnauthenticated(() => setAuthed(false));
   }, []);
 
   async function logout() {
