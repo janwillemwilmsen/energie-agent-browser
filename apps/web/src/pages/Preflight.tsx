@@ -1,8 +1,9 @@
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import { PreflightStep as PreflightStepSchema } from '@eab/shared';
 import { api, type AuthProfile, type Preflight, type PreflightStep } from '../lib/api.js';
 import { AddStepControls, SnapshotPane, StepList, useDraftStepStore } from '../lib/stepEditor/index.js';
 import { PreviewStream } from '../lib/screencast.js';
+import { useResource } from '../lib/resource.js';
 
 // The /preflight page works against the same `default` daemon scenarios use,
 // bound to whichever preflight's --session-name the user is editing. Binding
@@ -47,7 +48,6 @@ function coerceInt(v: string): number {
 }
 
 export function PreflightPage() {
-  const [preflights, setPreflights] = useState<Preflight[]>([]);
   const [draft, setDraft] = useState<Draft>(emptyDraft());
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -60,28 +60,15 @@ export function PreflightPage() {
   const [boundTo, setBoundTo] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null); // shorthand for an in-flight action
   const [replaying, setReplaying] = useState(false);
-  const [authProfiles, setAuthProfiles] = useState<AuthProfile[]>([]);
   const [showAuthForm, setShowAuthForm] = useState(false);
-  async function reloadAuthProfiles() {
-    try {
-      setAuthProfiles(await api.listAuthProfiles());
-    } catch (e: any) {
-      setError(e?.message ?? String(e));
-    }
-  }
-
-  async function reload() {
-    try {
-      setPreflights(await api.listPreflights());
-    } catch (e: any) {
-      setError(e?.message ?? String(e));
-    }
-  }
-
-  useEffect(() => {
-    reload();
-    reloadAuthProfiles();
-  }, []);
+  const { data: preflights, refresh: reload } = useResource(() => api.listPreflights(), {
+    initial: [] as Preflight[],
+    onError: setError,
+  });
+  const { data: authProfiles, refresh: reloadAuthProfiles } = useResource(() => api.listAuthProfiles(), {
+    initial: [] as AuthProfile[],
+    onError: setError,
+  });
 
   const draftDirty = useMemo(() => {
     if (draft.id == null) {

@@ -1,16 +1,15 @@
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, type Scenario } from '../lib/api.js';
 import { GroupBySwitch, GroupLabel, groupKey, sortByGroup, type GroupBy } from '../lib/tagGrouping.js';
+import { useResource } from '../lib/resource.js';
 
 export function Scenarios() {
-  const [items, setItems] = useState<Scenario[]>([]);
   const [name, setName] = useState('');
   const [url, setUrl] = useState('https://');
   const [preset, setPreset] = useState<'desktop' | 'mobile' | 'both'>('desktop');
   const [brand, setBrand] = useState('');
   const [type, setType] = useState('');
-  const [err, setErr] = useState<string | null>(null);
   // Brand/Type chip filters — same UI and semantics as /runs: within a group
   // any selected value matches (OR), across groups both must match (AND).
   const [selectedBrands, setSelectedBrands] = useState<Set<string>>(new Set());
@@ -27,17 +26,10 @@ export function Scenarios() {
   // that run's detail panel.
   const [lastRunId, setLastRunId] = useState<number | null>(null);
 
-  async function load() {
-    try {
-      setItems(await api.listScenarios());
-    } catch (e: any) {
-      setErr(e.message);
-    }
-  }
-
-  useEffect(() => {
-    load();
-  }, []);
+  const { data: items, error: err, setError: setErr, refresh: load } = useResource(
+    () => api.listScenarios(),
+    { initial: [] as Scenario[] },
+  );
 
   async function create(e: React.FormEvent) {
     e.preventDefault();

@@ -8,6 +8,7 @@ import {
   type StorageCleanupAction,
   type StorageSummary,
 } from '../lib/api.js';
+import { useResource } from '../lib/resource.js';
 
 // Admin → Storage. Shows what the SQLite database and the on-disk artifacts
 // (run screenshots, recordings, diff images, caches) take up, and lets an
@@ -79,12 +80,27 @@ function collectTagValues(items: { brand: string | null; type: string | null }[]
 }
 
 export function AdminStorage() {
-  const [summary, setSummary] = useState<StorageSummary | null>(null);
-  const [runs, setRuns] = useState<RunStorageItem[]>([]);
-  const [recs, setRecs] = useState<RecordingStorageItem[]>([]);
-  const [auth, setAuth] = useState<AuthStorage | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState<string | null>(null);
+  const storage = useResource(
+    async () => {
+      const [summary, runs, recs, auth] = await Promise.all([
+        api.storageSummary(),
+        api.storageRuns(),
+        api.storageRecordings(),
+        api.storageAuth(),
+      ]);
+      return { summary, runs, recs, auth };
+    },
+    {
+      initial: {
+        summary: null as StorageSummary | null,
+        runs: [] as RunStorageItem[],
+        recs: [] as RecordingStorageItem[],
+        auth: null as AuthStorage | null,
+      },
+    },
+  );
+  const { summary, runs, recs, auth } = storage.data;
+  const { loading, refreshing, error: err, setError: setErr } = storage;
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -104,32 +120,12 @@ export function AdminStorage() {
   const [olderThanDays, setOlderThanDays] = useState<number | null>(null);
   const [minBytes, setMinBytes] = useState<number | null>(null);
 
+  // A reload drops the selection: the rows it pointed at may be gone.
   async function load() {
-    setErr(null);
-    setLoading(true);
-    try {
-      const [s, r, v, a] = await Promise.all([
-        api.storageSummary(),
-        api.storageRuns(),
-        api.storageRecordings(),
-        api.storageAuth(),
-      ]);
-      setSummary(s);
-      setRuns(r);
-      setRecs(v);
-      setAuth(a);
-      setSelRuns(new Set());
-      setSelRecs(new Set());
-    } catch (e: any) {
-      setErr(e?.message ?? String(e));
-    } finally {
-      setLoading(false);
-    }
+    await storage.refresh();
+    setSelRuns(new Set());
+    setSelRecs(new Set());
   }
-
-  useEffect(() => {
-    void load();
-  }, []);
 
   // Wrap an action: clear messages, mark busy, report, reload.
   async function run(key: string, fn: () => Promise<string>) {
@@ -377,8 +373,8 @@ export function AdminStorage() {
       </p>
 
       <div className="actions" style={{ marginBottom: 12 }}>
-        <button onClick={() => void load()} disabled={loading || busy != null}>
-          {loading ? 'Loading…' : 'Refresh'}
+        <button onClick={() => void load()} disabled={refreshing || busy != null}>
+          {refreshing ? 'Loading…' : 'Refresh'}
         </button>
         {summary && (
           <span className="muted" style={{ alignSelf: 'center' }}>

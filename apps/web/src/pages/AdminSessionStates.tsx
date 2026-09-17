@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, type SessionState } from '../lib/api.js';
+import { useResource } from '../lib/resource.js';
 
 // Admin → Session state files. Lists agent-browser's persisted --session-name
 // state (~/.agent-browser/sessions/<name>.json) and lets an operator delete a
@@ -24,25 +25,9 @@ function fmtDate(iso: string): string {
 }
 
 export function AdminSessionStates() {
-  const [items, setItems] = useState<SessionState[]>([]);
-  const [err, setErr] = useState<string | null>(null);
+  const { data: items, setData: setItems, error: err, setError: setErr, loading, refreshing, refresh: load } =
+    useResource(() => api.listSessionStates(), { initial: [] as SessionState[] });
   const [busy, setBusy] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  async function load() {
-    setErr(null);
-    try {
-      setItems(await api.listSessionStates());
-    } catch (e: any) {
-      setErr(e?.message ?? String(e));
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    load();
-  }, []);
 
   async function remove(name: string, inUse: boolean) {
     const warning = inUse
@@ -79,8 +64,8 @@ export function AdminSessionStates() {
       </p>
 
       <div className="actions" style={{ marginBottom: 12 }}>
-        <button onClick={load} disabled={loading}>
-          {loading ? 'Loading…' : 'Refresh'}
+        <button onClick={() => void load()} disabled={refreshing}>
+          {refreshing ? 'Loading…' : 'Refresh'}
         </button>
       </div>
 

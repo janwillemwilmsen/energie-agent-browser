@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, type Preflight, type Scenario } from '../lib/api.js';
 import {
@@ -8,34 +8,31 @@ import {
   toPortableScenario,
   type ImportResult,
 } from '../lib/scenarioIO.js';
+import { useResource } from '../lib/resource.js';
 
 // Admin → Export / import scenarios. Produces a portable JSON bundle that can be
 // pasted into another instance's Import box to recreate scenarios there (e.g.
 // dev → prod) without touching the database directly.
 
 export function AdminScenarioIO() {
-  const [scenarios, setScenarios] = useState<Scenario[]>([]);
-  const [preflights, setPreflights] = useState<Preflight[]>([]);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [exportText, setExportText] = useState('');
   const [exporting, setExporting] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
 
   const [importText, setImportText] = useState('');
   const [importing, setImporting] = useState(false);
   const [results, setResults] = useState<ImportResult[]>([]);
   const [importErr, setImportErr] = useState<string | null>(null);
 
-  async function reloadLists() {
-    const [s, p] = await Promise.all([api.listScenarios(), api.listPreflights()]);
-    setScenarios(s);
-    setPreflights(p);
-  }
-
-  useEffect(() => {
-    reloadLists().catch((e) => setErr(e?.message ?? String(e)));
-  }, []);
+  const { data: lists, error: err, setError: setErr, refresh: reloadLists } = useResource(
+    async () => {
+      const [scenarios, preflights] = await Promise.all([api.listScenarios(), api.listPreflights()]);
+      return { scenarios, preflights };
+    },
+    { initial: { scenarios: [] as Scenario[], preflights: [] as Preflight[] } },
+  );
+  const { scenarios, preflights } = lists;
 
   function toggle(id: number) {
     setSelected((cur) => {
@@ -113,7 +110,7 @@ export function AdminScenarioIO() {
     } finally {
       setResults(out);
       setImporting(false);
-      await reloadLists().catch(() => undefined);
+      await reloadLists();
     }
   }
 

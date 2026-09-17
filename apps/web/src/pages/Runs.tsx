@@ -2,11 +2,10 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { api, type Run } from '../lib/api.js';
 import { GroupBySwitch, GroupLabel, groupKey, sortByGroup, type GroupBy } from '../lib/tagGrouping.js';
+import { useResource, usePolling } from '../lib/resource.js';
 
 export function Runs() {
-  const [runs, setRuns] = useState<Run[]>([]);
   const [selected, setSelected] = useState<Run | null>(null);
-  const [err, setErr] = useState<string | null>(null);
   const [selectedBrands, setSelectedBrands] = useState<Set<string>>(new Set());
   const [selectedTypes, setSelectedTypes] = useState<Set<string>>(new Set());
   // Ordered, unbounded selection. Drives both bulk-delete and compare (which
@@ -25,13 +24,10 @@ export function Runs() {
   // editor's play status). Applied once, so the 4s refresh won't fight clicks.
   const appliedRunParam = useRef(false);
 
-  async function load() {
-    try {
-      setRuns(await api.listRuns());
-    } catch (e: any) {
-      setErr(e.message);
-    }
-  }
+  const { data: runs, error: err, setError: setErr, refresh: load } = useResource(
+    () => api.listRuns(),
+    { initial: [] as Run[] },
+  );
 
   // `selected` captures the run row at click-time, so its log never grew
   // between polls. `liveSelected` re-resolves the same id against the latest
@@ -43,14 +39,9 @@ export function Runs() {
   const watching = !!liveSelected &&
     (liveSelected.status === 'running' || liveSelected.status === 'queued');
 
-  useEffect(() => {
-    load();
-    // Poll faster while you're staring at a not-yet-finished run, slower
-    // otherwise — keeps idle pages cheap but the log feels live when it
-    // matters. Re-arms whenever `watching` flips.
-    const t = setInterval(load, watching ? 1500 : 4000);
-    return () => clearInterval(t);
-  }, [watching]);
+  // Poll faster while you're staring at a not-yet-finished run, slower
+  // otherwise — keeps idle pages cheap but the log feels live when it matters.
+  usePolling(load, watching ? 1500 : 4000);
 
   useEffect(() => {
     if (appliedRunParam.current) return;

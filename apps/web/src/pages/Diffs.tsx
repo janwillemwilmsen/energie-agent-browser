@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { parseSlot } from '@eab/shared';
 import { api, type Artifact, type Comparison } from '../lib/api.js';
+import { useResource } from '../lib/resource.js';
 
 function pct(ratio: number | null): string {
   if (ratio == null) return '—';
@@ -29,33 +30,27 @@ interface DiffGroup {
 }
 
 export function Diffs() {
-  const [items, setItems] = useState<Comparison[]>([]);
-  const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   // Up to two artifacts staged for a new (re-)comparison.
   const [selection, setSelection] = useState<Artifact[]>([]);
   // Source runs that still exist, so we know whether "Delete run" is offered.
-  const [liveRunIds, setLiveRunIds] = useState<Set<number>>(new Set());
-  const [scenarioNames, setScenarioNames] = useState<Map<number, string>>(new Map());
 
-  async function load() {
-    try {
+  const { data, setData, error: err, setError: setErr, refresh: load } = useResource(
+    async () => {
       const [comparisons, runs, scenarios] = await Promise.all([
         api.listComparisons(),
         api.listRuns(),
         api.listScenarios(),
       ]);
-      setItems(comparisons);
-      setLiveRunIds(new Set(runs.map((r) => r.id)));
-      setScenarioNames(new Map(scenarios.map((s) => [s.id, s.name])));
-    } catch (e: any) {
-      setErr(e.message);
-    }
-  }
-
-  useEffect(() => {
-    load();
-  }, []);
+      return {
+        items: comparisons,
+        liveRunIds: new Set(runs.map((r) => r.id)),
+        scenarioNames: new Map(scenarios.map((s) => [s.id, s.name])),
+      };
+    },
+    { initial: { items: [] as Comparison[], liveRunIds: new Set<number>(), scenarioNames: new Map<number, string>() } },
+  );
+  const { items, liveRunIds, scenarioNames } = data;
 
   // Group comparisons that share the same (baseline run -> target run) pair.
   // Comparisons without a clean run pair (e.g. a diff-of-diffs) stand alone.
@@ -88,10 +83,10 @@ export function Diffs() {
       return;
     try {
       await api.deleteRun(runId);
-      setLiveRunIds((cur) => {
-        const next = new Set(cur);
+      setData((cur) => {
+        const next = new Set(cur.liveRunIds);
         next.delete(runId);
-        return next;
+        return { ...cur, liveRunIds: next };
       });
     } catch (e: any) {
       setErr(e.message);

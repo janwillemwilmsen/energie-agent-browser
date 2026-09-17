@@ -1,33 +1,19 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { api, type BrowserlessHealth } from '../lib/api.js';
 import { TerminalShell, type TerminalShellHandle } from '../lib/TerminalShell.js';
+import { useResource, usePolling } from '../lib/resource.js';
 
 const HEALTH_POLL_MS = 10_000;
 
 export function Terminal() {
   const termRef = useRef<TerminalShellHandle | null>(null);
-  const [health, setHealth] = useState<BrowserlessHealth | null>(null);
-  const [checking, setChecking] = useState(false);
-  const [healthErr, setHealthErr] = useState<string | null>(null);
   const [openUrl, setOpenUrl] = useState('https://example.com');
 
-  async function refreshHealth() {
-    setChecking(true);
-    setHealthErr(null);
-    try {
-      setHealth(await api.browserlessHealth());
-    } catch (e: any) {
-      setHealthErr(e?.message ?? String(e));
-    } finally {
-      setChecking(false);
-    }
-  }
-
-  useEffect(() => {
-    refreshHealth();
-    const t = setInterval(refreshHealth, HEALTH_POLL_MS);
-    return () => clearInterval(t);
-  }, []);
+  const { data: health, refreshing: checking, error: healthErr, refresh: refreshHealth } = useResource(
+    () => api.browserlessHealth(),
+    { initial: null as BrowserlessHealth | null },
+  );
+  usePolling(refreshHealth, HEALTH_POLL_MS);
 
   return (
     <section>

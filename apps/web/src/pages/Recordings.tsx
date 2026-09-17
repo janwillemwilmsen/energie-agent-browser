@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, type Recording } from '../lib/api.js';
 import { MediabunnyPlayer } from '../lib/MediabunnyPlayer.js';
+import { useResource, usePolling } from '../lib/resource.js';
 
 // Lists run recordings (webm) with the same Brand/Type chip filters as the Runs
 // page, plays them via Mediabunny, and allows deletion.
@@ -22,25 +23,15 @@ function fmtSize(bytes: number | null): string {
 }
 
 export function Recordings() {
-  const [items, setItems] = useState<Recording[]>([]);
-  const [err, setErr] = useState<string | null>(null);
   const [selectedBrands, setSelectedBrands] = useState<Set<string>>(new Set());
   const [selectedTypes, setSelectedTypes] = useState<Set<string>>(new Set());
 
-  async function load() {
-    try {
-      setItems(await api.listRecordings());
-    } catch (e: any) {
-      setErr(e?.message ?? String(e));
-    }
-  }
-
-  useEffect(() => {
-    load();
-    // Keep the list fresh as runs finish and produce recordings.
-    const t = setInterval(load, 8000);
-    return () => clearInterval(t);
-  }, []);
+  const { data: items, setData: setItems, error: err, setError: setErr, refresh: load } = useResource(
+    () => api.listRecordings(),
+    { initial: [] as Recording[] },
+  );
+  // Keep the list fresh as runs finish and produce recordings.
+  usePolling(load, 8000);
 
   const brands = useMemo(() => collectTagValues(items, 'brand'), [items]);
   const types = useMemo(() => collectTagValues(items, 'type'), [items]);

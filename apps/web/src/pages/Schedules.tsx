@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import cronstrue from 'cronstrue';
 import { api, type Schedule, type Scenario } from '../lib/api.js';
+import { useResource } from '../lib/resource.js';
 
 function formatUtcOffset(minutes: number): string {
   const sign = minutes >= 0 ? '+' : '-';
@@ -149,8 +150,6 @@ function hoursToField(mode: HourMode, hour: string, hourStep: string, hourStart:
 }
 
 export function Schedules() {
-  const [items, setItems] = useState<Schedule[]>([]);
-  const [scenarios, setScenarios] = useState<Scenario[]>([]);
 
   // Ordered chain of scenario ids the schedule runs sequentially. Duplicates
   // are allowed on purpose (run the same scenario at the start and end).
@@ -174,19 +173,14 @@ export function Schedules() {
 
   const [minute, setMinute] = useState('0');
 
-  const [err, setErr] = useState<string | null>(null);
-
-  async function load() {
-    try {
-      setItems(await api.listSchedules());
-      setScenarios(await api.listScenarios());
-    } catch (e: any) {
-      setErr(e.message);
-    }
-  }
-  useEffect(() => {
-    load();
-  }, []);
+  const { data: lists, error: err, setError: setErr, refresh: load } = useResource(
+    async () => {
+      const [items, scenarios] = await Promise.all([api.listSchedules(), api.listScenarios()]);
+      return { items, scenarios };
+    },
+    { initial: { items: [] as Schedule[], scenarios: [] as Scenario[] } },
+  );
+  const { items, scenarios } = lists;
 
   const cronExpr = useMemo(() => {
     const m = minute || '0';

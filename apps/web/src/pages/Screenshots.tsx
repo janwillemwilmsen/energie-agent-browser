@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, type Run } from '../lib/api.js';
+import { useResource, usePolling } from '../lib/resource.js';
 
 // Per-scenario gallery: one section per scenario that has runs (after the
 // global Brand/Type filter), and each section carries its OWN day dropdown
@@ -41,27 +42,17 @@ interface ScenarioData {
 }
 
 export function Screenshots() {
-  const [runs, setRuns] = useState<Run[]>([]);
-  const [err, setErr] = useState<string | null>(null);
   const [selectedBrands, setSelectedBrands] = useState<Set<string>>(new Set());
   const [selectedTypes, setSelectedTypes] = useState<Set<string>>(new Set());
   // Per-scenario date selection. Absent → use the scenario's latest day.
   const [dayByScenario, setDayByScenario] = useState<Record<number, string>>({});
 
-  async function load() {
-    try {
-      setRuns(await api.listRuns());
-    } catch (e: any) {
-      setErr(e.message);
-    }
-  }
-
-  useEffect(() => {
-    load();
-    // Polling keeps the page live while a scheduled run completes.
-    const t = setInterval(load, 6000);
-    return () => clearInterval(t);
-  }, []);
+  const { data: runs, error: err, setError: setErr, refresh: load } = useResource(
+    () => api.listRuns(),
+    { initial: [] as Run[] },
+  );
+  // Polling keeps the page live while a scheduled run completes.
+  usePolling(load, 6000);
 
   const brands = useMemo(() => collectTagValues(runs, 'brand'), [runs]);
   const types = useMemo(() => collectTagValues(runs, 'type'), [runs]);
