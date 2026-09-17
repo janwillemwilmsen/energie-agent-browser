@@ -4,7 +4,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { browserlessCdpUrl, config, localBrowserArgs } from '../config.js';
+import { browserlessApiBase, browserlessCdpUrl, config, localBrowserArgs } from '../config.js';
 import { planOpen, type OpenIntent } from './sessionPlan.js';
 export type { OpenIntent } from './sessionPlan.js';
 
@@ -121,6 +121,45 @@ function readSessionName(session: string): string | null {
     return null;
   }
 }
+/** The --session-name the live daemon for `session` was started with, or null. */
+export function boundSessionName(session: string): string | null {
+  return readSessionName(session);
+}
+
+/** Every session with a live binding marker on disk, with the name it is bound to. */
+export function listBoundSessions(): { session: string; name: string | null }[] {
+  try {
+    return fs
+      .readdirSync(agentBrowserHome())
+      .filter((f) => f.endsWith('.session-name'))
+      .map((f) => f.slice(0, -'.session-name'.length))
+      .map((session) => ({ session, name: readSessionName(session) }));
+  } catch {
+    return [];
+  }
+}
+
+/** The names currently bound to a live daemon. */
+export function boundSessionNames(): Set<string> {
+  return new Set(listBoundSessions().map((b) => b.name).filter((n): n is string => !!n));
+}
+
+/** agent-browser's home directory (markers, auth vault, persisted states). */
+export function agentBrowserHome(): string {
+  return path.join(os.homedir(), '.agent-browser');
+}
+
+/** Liveness of a session's daemon, with its recorded pid when known. */
+export function sessionStatus(session: string): { alive: boolean; pid: number | null } {
+  let pid: number | null = null;
+  try {
+    pid = Number(fs.readFileSync(pidFile(session), 'utf-8').trim()) || null;
+  } catch {
+    return { alive: false, pid: null };
+  }
+  return { alive: isSessionAlive(session), pid };
+}
+
 function writeSessionName(session: string, name: string | null): void {
   const file = sessionNameMarker(session);
   try {
@@ -164,7 +203,11 @@ function killProcessTree(pid: number): void {
 
 const DEBUG = process.env.AB_DRIVER_DEBUG === '1';
 
-function childEnv(): NodeJS.ProcessEnv {
+/**
+ * The environment every agent-browser process gets: the local-vs-browserless
+ * wiring and the stealth knobs. The terminal's shell builds on it too.
+ */
+export function agentBrowserEnv(): NodeJS.ProcessEnv {
   if (config.browser.mode === 'local') {
     // Local mode: agent-browser launches its own installed browser, so there is
     // no wss `launch` query to fold the Chromium args into — they travel via
@@ -186,14 +229,10 @@ function childEnv(): NodeJS.ProcessEnv {
   // auto-launch error, but do NOT set AGENT_BROWSER_PROVIDER — the self-hosted
   // browserless lacks the REST API the provider mode expects. We always go
   // through explicit `connect wss://...` instead.
-  // wss:// → https://, ws:// → http://  (preserve the secure scheme)
-  const apiBase = config.browserless.url
-    .replace(/^wss:\/\//, 'https://')
-    .replace(/^ws:\/\//, 'http://');
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     BROWSERLESS_API_KEY: config.browserless.token,
-    BROWSERLESS_API_URL: apiBase,
+    BROWSERLESS_API_URL: browserlessApiBase(),
   };
   if (config.stealth.enabled) {
     // We connect to a REMOTE browser via CDP, so Chromium-launch args go via
@@ -206,88 +245,14 @@ function childEnv(): NodeJS.ProcessEnv {
   return env;
 }
 
-// Plain process.env without our BROWSERLESS_* / AGENT_BROWSER_* knobs.
-// Detached commands (auth list/save/delete/show, state list, version, etc.)
-// just touch local files — passing the browserless wiring makes them try to
-// auto-connect and hang. Use this env instead.
-function detachedEnv(): NodeJS.ProcessEnv {
-  return { ...process.env };
-}
-
-// Public sister of `runRaw` for commands that don't talk to a daemon — auth
-// vault CRUD, state list, version, etc. No ensureSession; we just spawn the
-// native binary with the given args and capture stdout/stderr.
-export async function runDetached(args: string[], timeoutMs = 10_000): Promise<RunResult> {
-  return new Promise((resolve) => {
-    const proc = spawn(NATIVE_BIN, args, {
-      shell: false,
-      windowsHide: true,
-      env: detachedEnv(),
-    });
-    let stdout = '';
-    let stderr = '';
-    let resolved = false;
-    const done = (code: number) => {
-      if (resolved) return;
-      resolved = true;
-      clearTimeout(timer);
-      resolve({ stdout, stderr, exitCode: code });
-    };
-    const timer = setTimeout(() => {
-      if (proc.pid) killProcessTree(proc.pid);
-      setTimeout(() => done(-9), 1_000);
-    }, timeoutMs);
-    proc.stdout.on('data', (d) => (stdout += d.toString()));
-    proc.stderr.on('data', (d) => (stderr += d.toString()));
-    proc.on('close', (code) => done(code ?? -1));
-    proc.on('error', (err) => { stderr += '\n' + err.message; done(-1); });
-  });
-}
-
-// Same as runDetached but pipes a single line into the child's stdin and
-// closes it. Used for `auth save --password-stdin` so the password never
-// appears in argv (visible in `ps` / Task Manager / audit logs).
-export async function runDetachedWithStdin(
-  args: string[],
-  stdinLine: string,
-  timeoutMs = 10_000,
-): Promise<RunResult> {
-  return new Promise((resolve) => {
-    const proc = spawn(NATIVE_BIN, args, {
-      shell: false,
-      windowsHide: true,
-      env: detachedEnv(),
-    });
-    let stdout = '';
-    let stderr = '';
-    let resolved = false;
-    const done = (code: number) => {
-      if (resolved) return;
-      resolved = true;
-      clearTimeout(timer);
-      resolve({ stdout, stderr, exitCode: code });
-    };
-    const timer = setTimeout(() => {
-      if (proc.pid) killProcessTree(proc.pid);
-      setTimeout(() => done(-9), 1_000);
-    }, timeoutMs);
-    proc.stdout.on('data', (d) => (stdout += d.toString()));
-    proc.stderr.on('data', (d) => (stderr += d.toString()));
-    proc.on('close', (code) => done(code ?? -1));
-    proc.on('error', (err) => { stderr += '\n' + err.message; done(-1); });
-    proc.stdin.write(stdinLine.endsWith('\n') ? stdinLine : stdinLine + '\n');
-    proc.stdin.end();
-  });
-}
-
-async function runRaw(args: string[], timeoutMs: number): Promise<RunResult> {
+function runRaw(args: string[], timeoutMs: number): Promise<RunResult> {
   return new Promise((resolve) => {
     const startedAt = Date.now();
     if (DEBUG) console.log(`[ab] spawn ${args.join(' ')} (timeout=${timeoutMs}ms)`);
     const proc = spawn(NATIVE_BIN, args, {
       shell: false,
       windowsHide: true,
-      env: childEnv(),
+      env: agentBrowserEnv(),
     });
     let stdout = '';
     let stderr = '';
@@ -344,7 +309,7 @@ function sessionHasPidFile(session: string): boolean {
   }
 }
 
-function isSessionAlive(session: string): boolean {
+export function isSessionAlive(session: string): boolean {
   // The daemon writes its pid file only AFTER the wss handshake to browserless
   // succeeds — i.e. once it's actually ready to receive commands. So the pid
   // file existing + the recorded pid being alive is a sufficient readiness
@@ -579,7 +544,7 @@ async function spawnConnectDetached(session: string, sessionName?: string | null
       windowsHide: true,
       detached: process.platform !== 'win32',
       stdio: ['ignore', fd, fd],
-      env: childEnv(),
+      env: agentBrowserEnv(),
     });
     proc.unref();
     proc.on('exit', () => { try { fs.closeSync(fd); } catch { /* already closed */ } });
@@ -786,7 +751,7 @@ export async function runWithStdin(
     const proc = spawn(NATIVE_BIN, fullArgs, {
       shell: false,
       windowsHide: true,
-      env: childEnv(),
+      env: agentBrowserEnv(),
     });
     let stdout = '';
     let stderr = '';
@@ -843,7 +808,44 @@ export async function runJson<T = unknown>(
 // runtime drops state when shutdown is graceful). We use the `.json` suffix
 // so `agent-browser state list` recognizes the file — without it, state list
 // hides the entry even though --session-name load still works.
-export function persistedStatePath(sessionName: string): string {
+export interface PersistedStateInfo {
+  name: string;
+  file: string;
+  sizeBytes: number;
+  modifiedAt: string;
+}
+
+/** Every persisted --session-name state file, sorted by name. */
+export function listPersistedStates(): PersistedStateInfo[] {
+  const dir = path.join(agentBrowserHome(), 'sessions');
+  let entries: string[] = [];
+  try {
+    entries = fs.readdirSync(dir);
+  } catch {
+    return [];
+  }
+  const out: PersistedStateInfo[] = [];
+  for (const file of entries) {
+    if (!file.endsWith('.json')) continue;
+    try {
+      const stat = fs.statSync(path.join(dir, file));
+      if (!stat.isFile()) continue;
+      out.push({ name: file.slice(0, -'.json'.length), file, sizeBytes: stat.size, modifiedAt: stat.mtime.toISOString() });
+    } catch {
+      /* skip */
+    }
+  }
+  out.sort((a, b) => a.name.localeCompare(b.name));
+  return out;
+}
+
+/** Whether any persisted state exists for the name (file or directory shape). */
+export function hasPersistedState(sessionName: string): boolean {
+  const base = path.join(agentBrowserHome(), 'sessions');
+  return fs.existsSync(path.join(base, `${sessionName}.json`)) || fs.existsSync(path.join(base, sessionName));
+}
+
+function persistedStatePath(sessionName: string): string {
   return path.join(os.homedir(), '.agent-browser', 'sessions', `${sessionName}.json`);
 }
 
@@ -945,17 +947,8 @@ async function closeSessionLocked(session: string): Promise<void> {
 // auth.json for the live preflight isn't stranded in browser memory. Errors
 // are swallowed per-session so one stuck daemon can't block the others.
 export async function closeAllActiveSessions(): Promise<void> {
-  const dir = path.join(os.homedir(), '.agent-browser');
-  let names: string[] = [];
-  try {
-    names = fs
-      .readdirSync(dir)
-      .filter((f) => f.endsWith('.session-name'))
-      .map((f) => f.slice(0, -'.session-name'.length));
-  } catch {
-    return;
-  }
-  await Promise.all(names.map((s) => closeSession(s).catch(() => undefined)));
+  const sessions = listBoundSessions().map((b) => b.session);
+  await Promise.all(sessions.map((s) => closeSession(s).catch(() => undefined)));
 }
 
 // Best-effort wipe of agent-browser's persisted state for a given
@@ -976,5 +969,3 @@ export function clearPersistedSessionState(sessionName: string): void {
     try { fs.rmSync(candidate, { recursive: true, force: true }); } catch { /* ignore */ }
   }
 }
-
-export { browserlessCdpUrl, config, pidFile };

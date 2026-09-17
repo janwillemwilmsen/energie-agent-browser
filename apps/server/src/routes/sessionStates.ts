@@ -1,8 +1,11 @@
-import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
-import { clearPersistedSessionState } from '../agentBrowser/driver.js';
+import {
+  boundSessionNames,
+  clearPersistedSessionState,
+  hasPersistedState,
+  listPersistedStates,
+} from '../agentBrowser/driver.js';
 
 // Admin surface over agent-browser's persisted --session-name state files.
 //
@@ -12,9 +15,6 @@ import { clearPersistedSessionState } from '../agentBrowser/driver.js';
 // preflight whose accepted-cookie state got baked into this file will find the
 // banner already gone and its "click accept" step fails. Deleting the file
 // resets that session to a clean slate so the banner reappears on the next run.
-
-const SESSIONS_DIR = path.join(os.homedir(), '.agent-browser', 'sessions');
-const AGENT_BROWSER_DIR = path.join(os.homedir(), '.agent-browser');
 
 // Session/preflight names are used as filenames, so keep them to a safe set and
 // reject anything that could escape the sessions directory.
@@ -31,55 +31,10 @@ export interface SessionStateInfo {
   inUse: boolean;
 }
 
-// Names currently bound to a live daemon: read every "<session>.session-name"
-// marker and collect its contents.
-function boundSessionNames(): Set<string> {
-  const names = new Set<string>();
-  try {
-    for (const f of fs.readdirSync(AGENT_BROWSER_DIR)) {
-      if (!f.endsWith('.session-name')) continue;
-      try {
-        const v = fs.readFileSync(path.join(AGENT_BROWSER_DIR, f), 'utf-8').trim();
-        if (v) names.add(v);
-      } catch {
-        /* ignore unreadable marker */
-      }
-    }
-  } catch {
-    /* dir missing — no daemons have ever run */
-  }
-  return names;
-}
-
 export async function sessionStatesRoutes(app: FastifyInstance) {
   app.get('/api/session-states', async () => {
     const bound = boundSessionNames();
-    let entries: string[] = [];
-    try {
-      entries = fs.readdirSync(SESSIONS_DIR);
-    } catch {
-      return [] as SessionStateInfo[]; // dir doesn't exist yet → nothing saved
-    }
-    const out: SessionStateInfo[] = [];
-    for (const file of entries) {
-      if (!file.endsWith('.json')) continue;
-      const name = file.slice(0, -'.json'.length);
-      let stat: fs.Stats;
-      try {
-        stat = fs.statSync(path.join(SESSIONS_DIR, file));
-      } catch {
-        continue;
-      }
-      if (!stat.isFile()) continue;
-      out.push({
-        name,
-        file,
-        sizeBytes: stat.size,
-        modifiedAt: stat.mtime.toISOString(),
-        inUse: bound.has(name),
-      });
-    }
-    out.sort((a, b) => a.name.localeCompare(b.name));
+    const out: SessionStateInfo[] = listPersistedStates().map((st) => ({ ...st, inUse: bound.has(st.name) }));
     return out;
   });
 
@@ -88,9 +43,7 @@ export async function sessionStatesRoutes(app: FastifyInstance) {
     if (!SAFE_NAME.test(name) || path.basename(name) !== name) {
       return reply.code(400).send({ error: 'invalid_name' });
     }
-    const jsonPath = path.join(SESSIONS_DIR, `${name}.json`);
-    const dirPath = path.join(SESSIONS_DIR, name);
-    if (!fs.existsSync(jsonPath) && !fs.existsSync(dirPath)) {
+    if (!hasPersistedState(name)) {
       return reply.code(404).send({ error: 'not_found' });
     }
     // Reuse the driver's helper so we clear both the "<name>.json" file and the

@@ -3,8 +3,8 @@ import * as pty from 'node-pty';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { config, browserlessCdpUrl, localBrowserArgs } from '../config.js';
-import { DEFAULT_SESSION } from '../agentBrowser/driver.js';
+import { config, browserlessCdpUrl } from '../config.js';
+import { agentBrowserEnv, DEFAULT_SESSION } from '../agentBrowser/driver.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -46,30 +46,15 @@ function ptyEnv(): NodeJS.ProcessEnv {
   ];
   const pathSep = process.platform === 'win32' ? ';' : ':';
   const currentPath = process.env.PATH ?? '';
+  // The same wiring every agent-browser process gets (local vs browserless,
+  // stealth), plus what a shell needs: the bin dirs on PATH, the shared
+  // session as the default --session, and the CDP URL for a manual `connect`.
   const env: NodeJS.ProcessEnv = {
-    ...process.env,
+    ...agentBrowserEnv(),
     PATH: `${binDirs.join(pathSep)}${pathSep}${currentPath}`,
     AGENT_BROWSER_SESSION: DEFAULT_SESSION,
   };
-  if (config.browser.mode === 'local') {
-    // Match the driver's local-mode wiring so agent-browser commands typed in
-    // the terminal launch the same locally-installed browser (no BROWSERLESS_*;
-    // args + UA via env). browserlessCdpUrl() would throw on the empty URL here.
-    env.AGENT_BROWSER_ARGS = localBrowserArgs();
-    if (config.browser.executablePath) {
-      env.AGENT_BROWSER_EXECUTABLE_PATH = config.browser.executablePath;
-    }
-  } else {
-    env.BROWSERLESS_CDP_URL = browserlessCdpUrl();
-    env.BROWSERLESS_API_URL = config.browserless.url
-      .replace(/^wss:\/\//, 'https://')
-      .replace(/^ws:\/\//, 'http://');
-    env.BROWSERLESS_API_KEY = config.browserless.token;
-  }
-  if (config.stealth.enabled) {
-    if (config.stealth.userAgent) env.AGENT_BROWSER_USER_AGENT = config.stealth.userAgent;
-    if (config.stealth.initScript) env.AGENT_BROWSER_INIT_SCRIPTS = config.stealth.initScript;
-  }
+  if (config.browser.mode !== 'local') env.BROWSERLESS_CDP_URL = browserlessCdpUrl();
   return env;
 }
 

@@ -1,21 +1,8 @@
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { config } from '../config.js';
-import { openSession, run, DEFAULT_SESSION } from '../agentBrowser/driver.js';
-
-function sessionPidAlive(session: string): boolean {
-  try {
-    const pid = Number(
-      fs.readFileSync(path.join(os.homedir(), '.agent-browser', `${session}.pid`), 'utf-8').trim(),
-    );
-    if (!pid) return false;
-    try { process.kill(pid, 0); return true; } catch { return false; }
-  } catch {
-    return false;
-  }
-}
+import { isSessionAlive, openSession, run, DEFAULT_SESSION } from '../agentBrowser/driver.js';
 
 const FRAME_INTERVAL_MS = 1500;
 
@@ -96,7 +83,7 @@ export async function screencastWsRoute(app: FastifyInstance) {
       // streaming frames. ensureSession dedupes concurrent bootstraps, so a
       // preview opening mid-bootstrap just awaits the in-flight connect.
       void (async () => {
-        if (!sessionPidAlive(session)) {
+        if (!isSessionAlive(session)) {
           try {
             socket.send(
               JSON.stringify({ type: 'status', message: 'Starting browser session…' }),

@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { config } from '../config.js';
+import { browserlessApiBase, config } from '../config.js';
 
 // Probes the configured browserless instance from the server (which is on the
 // same network as the agent-browser daemon, so this is the most relevant
@@ -45,16 +45,20 @@ async function probe(url: string, timeoutMs: number): Promise<
   }
 }
 
-function httpBaseFromWss(rawUrl: string): string {
-  return rawUrl
-    .replace(/^wss:\/\//, 'https://')
-    .replace(/^ws:\/\//, 'http://')
-    .replace(/\/+$/, '');
-}
-
 export async function browserlessHealthRoutes(app: FastifyInstance) {
   app.get('/api/browserless/health', async () => {
-    const httpsBase = httpBaseFromWss(config.browserless.url);
+    if (config.browser.mode === 'local') {
+      // Local mode launches its own browser; there is no browserless to probe.
+      return {
+        ok: true,
+        checkedAt: new Date().toISOString(),
+        latencyMs: 0,
+        docs: { url: '', status: null, ok: true, error: null },
+        version: null,
+        cdp: { configuredUrl: 'local browser (BROWSER_MODE=local)' },
+      };
+    }
+    const httpsBase = browserlessApiBase();
     const docsUrl = `${httpsBase}/docs`;
     // /json/version is token-gated on browserless v2 (returns "Bad or missing
     // authentication" otherwise). Pass the token but never echo it back to

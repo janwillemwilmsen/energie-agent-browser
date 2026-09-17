@@ -1,11 +1,8 @@
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { PreflightCreate, PreflightUpdate, PreflightStep, parseStepPayload } from '@eab/shared';
 import { getDb } from '../db/index.js';
-import { openSession, persistSessionState, DEFAULT_SESSION } from '../agentBrowser/driver.js';
+import { boundSessionName, openSession, persistSessionState, DEFAULT_SESSION } from '../agentBrowser/driver.js';
 import { cliBrowser } from '../agentBrowser/cliBrowser.js';
 import { getAuthSelectors } from '../authSelectors.js';
 import { executeStep, executeSteps, type StepContext } from '../scenarios/stepExecutor.js';
@@ -74,15 +71,7 @@ export async function preflightsRoutes(app: FastifyInstance) {
     // as "Save changes" (PUT). Without this, a brand-new preflight had no saved
     // state, so a scenario in "cookies" mode had nothing to load. Best-effort.
     try {
-      const markerPath = path.join(
-        os.homedir(),
-        '.agent-browser',
-        `${DEFAULT_SESSION}.session-name`,
-      );
-      const activeName = fs.existsSync(markerPath)
-        ? fs.readFileSync(markerPath, 'utf-8').trim()
-        : '';
-      if (activeName && activeName === body.name) {
+      if (boundSessionName(DEFAULT_SESSION) === body.name) {
         await persistSessionState(DEFAULT_SESSION, body.name);
       }
     } catch {
@@ -148,15 +137,7 @@ export async function preflightsRoutes(app: FastifyInstance) {
     // the persisted session-name marker rather than trusting in-memory
     // tracking, so the gate holds across server hot-reloads too.
     try {
-      const markerPath = path.join(
-        os.homedir(),
-        '.agent-browser',
-        `${DEFAULT_SESSION}.session-name`,
-      );
-      const activeName = fs.existsSync(markerPath)
-        ? fs.readFileSync(markerPath, 'utf-8').trim()
-        : '';
-      if (activeName && activeName === nextName) {
+      if (boundSessionName(DEFAULT_SESSION) === nextName) {
         await persistSessionState(DEFAULT_SESSION, nextName);
       }
     } catch {

@@ -1,11 +1,11 @@
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { config } from '../config.js';
 import { getDb } from '../db/index.js';
 import { runStore } from '../runs/index.js';
+import { agentBrowserHome, boundSessionNames } from '../agentBrowser/driver.js';
 
 // Admin → Storage. Reports how much disk the SQLite database and the on-disk
 // artifacts (run screenshots, video recordings, diff images, preview/thumb
@@ -542,7 +542,7 @@ export async function storageRoutes(app: FastifyInstance) {
   // DELETE /api/session-states/:name), so vault encryption bookkeeping and
   // selector overrides stay consistent.
   app.get('/api/storage/auth', async () => {
-    const abDir = path.join(os.homedir(), '.agent-browser');
+    const abDir = agentBrowserHome();
 
     const listJsonFiles = (dir: string) => {
       const out: { name: string; file: string; bytes: number; modifiedAt: string }[] = [];
@@ -568,16 +568,7 @@ export async function storageRoutes(app: FastifyInstance) {
     // Session names currently bound to a live daemon (mirror of the
     // session-states route): deleting an in-use state only takes effect after
     // that daemon restarts.
-    const bound = new Set<string>();
-    for (const f of listFiles(abDir)) {
-      if (!f.endsWith('.session-name')) continue;
-      try {
-        const v = fs.readFileSync(path.join(abDir, f), 'utf-8').trim();
-        if (v) bound.add(v);
-      } catch {
-        /* ignore */
-      }
-    }
+    const bound = boundSessionNames();
 
     const encryptionKeyExists = fs.existsSync(path.join(abDir, '.encryption-key'));
 

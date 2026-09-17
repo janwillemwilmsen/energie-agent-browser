@@ -113,6 +113,14 @@ export const config = {
   },
 } as const;
 
+/** The browserless HTTP API base for its configured wss URL (wss→https, ws→http). */
+export function browserlessApiBase(): string {
+  return config.browserless.url
+    .replace(/^wss:\/\//, 'https://')
+    .replace(/^ws:\/\//, 'http://')
+    .replace(/\/+$/, '');
+}
+
 export function browserlessCdpUrl(): string {
   const u = new URL(config.browserless.url);
   // Browserless v2 expects the CDP WebSocket on /chromium (or /devtools/browser/<id>
