@@ -6,7 +6,7 @@ import { ZodError } from 'zod';
 import cors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
 import websocket from '@fastify/websocket';
-import { config } from './config.js';
+import { config, loadConfig, loadDotenv, setConfig } from './config.js';
 import { migrate } from './db/migrate.js';
 import { scenariosRoutes } from './routes/scenarios.js';
 import { snapshotRoutes } from './routes/snapshot.js';
@@ -51,6 +51,17 @@ process.on('unhandledRejection', (reason) => {
 });
 
 async function main() {
+  // Configuration is a value: read .env, load it once, fail with every missing
+  // variable listed, and install it for the modules that read `config`.
+  loadDotenv();
+  const loaded = loadConfig(process.env);
+  if (!loaded.ok) {
+    // eslint-disable-next-line no-console
+    console.error(`Missing required env var(s): ${loaded.missing.join(', ')}`);
+    process.exit(1);
+  }
+  setConfig(loaded.config);
+
   migrate();
 
   const app = Fastify({ logger: true });

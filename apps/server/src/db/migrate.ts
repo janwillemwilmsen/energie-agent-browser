@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { config } from '../config.js';
+import { config, loadDotenv } from '../config.js';
 import { getDb } from './index.js';
 
 export function migrate(): void {
@@ -41,6 +41,7 @@ export function migrate(): void {
 
 const entry = process.argv[1];
 if (entry && import.meta.url === pathToFileURL(entry).href) {
+  loadDotenv();
   migrate();
   console.log('Migrations complete.');
 }
