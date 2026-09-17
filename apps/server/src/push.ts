@@ -3,6 +3,7 @@ import path from 'node:path';
 import webpush from 'web-push';
 import { config } from './config.js';
 import { getDb } from './db/index.js';
+import type { RunFinished } from './notifications.js';
 
 // --- VAPID key management ---------------------------------------------------
 // Web Push signs each message with a VAPID keypair. The keys MUST stay stable —
@@ -153,51 +154,29 @@ export async function sendTestToEndpoint(endpoint: string): Promise<boolean> {
   return true;
 }
 
-// Called by the runner when a scenario run finishes. Fire-and-forget (never
-// let a push error affect the run). Only browsers that opted in for this
-// scenario id + outcome are notified.
-async function notifyScenarioResult(
-  scenario: { id: number; name: string },
-  runId: number,
-  outcome: 'failed' | 'success',
-): Promise<void> {
-  try {
-    const column = outcome === 'failed' ? 'scenario_ids_json' : 'success_scenario_ids_json';
-    const rows = getDb().prepare('SELECT * FROM push_subscriptions').all() as SubRow[];
-    const targets = rows.filter((r) => parseIds(r[column]).includes(scenario.id));
-    if (targets.length === 0) return;
-    const payload =
-      outcome === 'failed'
-        ? {
-            title: `Scenario failed: ${scenario.name}`,
-            body: `Run #${runId} failed — tap to view.`,
-            url: '/runs',
-            scenarioId: scenario.id,
-            runId,
-          }
-        : {
-            title: `Scenario succeeded: ${scenario.name}`,
-            body: `Run #${runId} completed successfully ✅`,
-            url: '/runs',
-            scenarioId: scenario.id,
-            runId,
-          };
-    await Promise.all(targets.map((r) => sendToRow(r, payload)));
-  } catch {
-    /* never throw into the run */
-  }
-}
-
-export async function notifyScenarioFailure(
-  scenario: { id: number; name: string },
-  runId: number,
-): Promise<void> {
-  return notifyScenarioResult(scenario, runId, 'failed');
-}
-
-export async function notifyScenarioSuccess(
-  scenario: { id: number; name: string },
-  runId: number,
-): Promise<void> {
-  return notifyScenarioResult(scenario, runId, 'success');
+// The web-push adapter at the run-finished seam. Only browsers that opted in
+// for this scenario id + outcome are notified. Registered at start-up.
+export async function pushRunFinished(event: RunFinished): Promise<void> {
+  const { scenario, runId, status } = event;
+  const column = status === 'failed' ? 'scenario_ids_json' : 'success_scenario_ids_json';
+  const rows = getDb().prepare('SELECT * FROM push_subscriptions').all() as SubRow[];
+  const targets = rows.filter((r) => parseIds(r[column]).includes(scenario.id));
+  if (targets.length === 0) return;
+  const payload =
+    status === 'failed'
+      ? {
+          title: `Scenario failed: ${scenario.name}`,
+          body: `Run #${runId} failed — tap to view.`,
+          url: '/runs',
+          scenarioId: scenario.id,
+          runId,
+        }
+      : {
+          title: `Scenario succeeded: ${scenario.name}`,
+          body: `Run #${runId} completed successfully ✅`,
+          url: '/runs',
+          scenarioId: scenario.id,
+          runId,
+        };
+  await Promise.all(targets.map((r) => sendToRow(r, payload)));
 }

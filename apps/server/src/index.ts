@@ -25,6 +25,9 @@ import { emailRoutes } from './routes/email.js';
 import { agentTasksRoutes } from './routes/agentTasks.js';
 import { adminEnvRoutes } from './routes/adminEnv.js';
 import { ensurePushConfigured } from './push.js';
+import { pushRunFinished } from './push.js';
+import { emailRunFinished } from './email.js';
+import { onRunFinished } from './notifications.js';
 import { startEmailDigestSchedule } from './email.js';
 import { browserlessHealthRoutes } from './routes/browserlessHealth.js';
 import { storageRoutes } from './routes/storage.js';
@@ -144,6 +147,10 @@ async function main() {
   // Set up VAPID (generates/persists keys on first boot) so the first push
   // request doesn't pay that cost mid-request.
   try { ensurePushConfigured(); } catch (e) { app.log.warn({ err: e }, 'push: VAPID setup failed'); }
+
+  // The run-finished seam: push and email are its two adapters.
+  onRunFinished(pushRunFinished);
+  onRunFinished(emailRunFinished);
 
   startScheduler();
   startEmailDigestSchedule();

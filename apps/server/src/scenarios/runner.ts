@@ -14,8 +14,7 @@ import {
 } from './stepExecutor.js';
 import { StreamRecorder } from './streamRecorder.js';
 import { runStore, type RunStatus } from '../runs/index.js';
-import { notifyScenarioFailure, notifyScenarioSuccess } from '../push.js';
-import { notifyRunResultEmail } from '../email.js';
+import { notifyRunFinished } from '../notifications.js';
 import { parseStepPayload, type ViewportPreset } from '@eab/shared';
 
 // Scenario-run orchestration: loads the Scenario and its Preflight, creates the
@@ -262,11 +261,10 @@ export function startRun(scenarioId: number, opts: StartRunOptions = {}): Starte
 
   // Finish the run as failed before any Step ran (bad step data, preflight
   // failure). The normal path at the bottom handles everything else.
-  const finishFailedEarly = (reason: string): RunStatus => {
+  const finishFailedEarly = async (reason: string): Promise<RunStatus> => {
     appendLog(ctx, reason);
     runStore().finish(runId, 'failed', log.join('\n'), []);
-    void notifyScenarioFailure({ id: scenario.id, name: scenario.name }, runId);
-    void notifyRunResultEmail({ id: scenario.id, name: scenario.name }, runId, 'failed');
+    await notifyRunFinished({ scenario: { id: scenario.id, name: scenario.name }, runId, status: 'failed' });
     return 'failed';
   };
 
@@ -464,12 +462,7 @@ export function startRun(scenarioId: number, opts: StartRunOptions = {}): Starte
 
       runStore().finish(runId, status, log.join('\n'), screenshots);
 
-      if (status === 'failed') {
-        void notifyScenarioFailure({ id: scenario.id, name: scenario.name }, runId);
-      } else {
-        void notifyScenarioSuccess({ id: scenario.id, name: scenario.name }, runId);
-      }
-      void notifyRunResultEmail({ id: scenario.id, name: scenario.name }, runId, status);
+      await notifyRunFinished({ scenario: { id: scenario.id, name: scenario.name }, runId, status });
       return status;
     } catch (e: any) {
       // Anything the run body did not handle itself (a driver crash, a bug):

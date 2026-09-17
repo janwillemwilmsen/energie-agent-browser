@@ -3,6 +3,7 @@ import cron from 'node-cron';
 import { config } from './config.js';
 import { getDb } from './db/index.js';
 import { runStore } from './runs/index.js';
+import type { RunFinished } from './notifications.js';
 import { getSetting, setSetting } from './settings.js';
 
 // --- Resend client -----------------------------------------------------------
@@ -175,48 +176,42 @@ export function deleteRecipient(id: number): boolean {
 }
 
 // --- Run result notifications ---------------------------------------------------
-// Called by the runner next to the push notification. Fire-and-forget: a mail
-// problem must never affect the run. Sends go out sequentially — Resend's
-// default rate limit is 2 req/s and recipient lists here are small.
-export async function notifyRunResultEmail(
-  scenario: { id: number; name: string },
-  runId: number,
-  outcome: 'failed' | 'success',
-): Promise<void> {
-  try {
-    if (!emailEnabled()) return;
-    const targets = listRecipients().filter((r) =>
-      (outcome === 'failed' ? r.scenarioIds : r.successScenarioIds).includes(scenario.id),
-    );
-    if (targets.length === 0) return;
+// The email adapter at the run-finished seam (registered at start-up). Sends
+// go out sequentially — Resend's default rate limit is 2 req/s and recipient
+// lists here are small. A send failure is logged per recipient; anything else
+// is reported by the seam.
+export async function emailRunFinished(event: RunFinished): Promise<void> {
+  const { scenario, runId, status: outcome } = event;
+  if (!emailEnabled()) return;
+  const targets = listRecipients().filter((r) =>
+    (outcome === 'failed' ? r.scenarioIds : r.successScenarioIds).includes(scenario.id),
+  );
+  if (targets.length === 0) return;
 
-    const verb = outcome === 'failed' ? 'failed' : 'succeeded';
-    const subject = `Scenario ${verb}: ${scenario.name} (run #${runId})`;
-    const link = runsUrl();
-    const linkHtml = link
-      ? `<p><a href="${esc(link)}" style="color:#1d4ed8;">View run #${runId} on the Runs page</a></p>`
-      : '';
-    const html = baseHtml(
+  const verb = outcome === 'failed' ? 'failed' : 'succeeded';
+  const subject = `Scenario ${verb}: ${scenario.name} (run #${runId})`;
+  const link = runsUrl();
+  const linkHtml = link
+    ? `<p><a href="${esc(link)}" style="color:#1d4ed8;">View run #${runId} on the Runs page</a></p>`
+    : '';
+  const html = baseHtml(
+    subject,
+    `<p>Scenario <strong>${esc(scenario.name)}</strong> ${verb} in run <strong>#${runId}</strong>.</p>${linkHtml}`,
+  );
+  const text =
+    `Scenario "${scenario.name}" ${verb} in run #${runId}.` + (link ? `\n${link}` : '');
+
+  for (const r of targets) {
+    const res = await sendEmail({
+      to: r.email,
       subject,
-      `<p>Scenario <strong>${esc(scenario.name)}</strong> ${verb} in run <strong>#${runId}</strong>.</p>${linkHtml}`,
-    );
-    const text =
-      `Scenario "${scenario.name}" ${verb} in run #${runId}.` + (link ? `\n${link}` : '');
-
-    for (const r of targets) {
-      const res = await sendEmail({
-        to: r.email,
-        subject,
-        html,
-        text,
-        // One key per run+outcome+recipient: a retried runner call can't
-        // double-send, but failure and success of the same run stay distinct.
-        idempotencyKey: `run-${outcome}/${runId}-r${r.id}`,
-      });
-      if (!res.ok) console.error(`email: run ${outcome} notification to ${r.email} failed: ${res.error}`);
-    }
-  } catch (e: any) {
-    console.error(`email: notifyRunResultEmail threw: ${e?.message ?? e}`);
+      html,
+      text,
+      // One key per run+outcome+recipient: a retried runner call can't
+      // double-send, but failure and success of the same run stay distinct.
+      idempotencyKey: `run-${outcome}/${runId}-r${r.id}`,
+    });
+    if (!res.ok) console.error(`email: run ${outcome} notification to ${r.email} failed: ${res.error}`);
   }
 }
 
