@@ -1,4 +1,4 @@
-import type { A11yTree, PreflightStep, ScenarioStep } from '@eab/shared';
+import type { A11yTree, AuthProfile, Preflight, PreflightStep, Run, Scenario, Schedule, ScenarioStep } from '@eab/shared';
 import { request as req, requestRaw } from './request.js';
 
 export { ApiError, errorMessage, onUnauthenticated } from './request.js';
@@ -15,23 +15,6 @@ export interface EmailRecipient {
 
 export type DigestPeriod = 'daily' | 'weekly' | 'monthly';
 
-export interface Scenario {
-  id: number;
-  name: string;
-  url: string;
-  viewport_preset: 'desktop' | 'mobile' | 'both';
-  brand: string | null;
-  type: string | null;
-  retries: number;
-  retry_wait_before_ms: number;
-  retry_wait_after_ms: number;
-  restart_on_failure: number;
-  preflight_id: number | null;
-  preflight_mode: 'steps' | 'cookies';
-  record_enabled: number;
-  created_at: string;
-  updated_at: string;
-}
 
 export interface Recording {
   id: number;
@@ -46,19 +29,6 @@ export interface Recording {
   type?: string | null;
 }
 
-export interface Preflight {
-  id: number;
-  name: string;
-  description: string;
-  steps_json: string;
-  retries: number;
-  retry_wait_before_ms: number;
-  retry_wait_after_ms: number;
-  restart_on_failure: number;
-  created_at: string;
-  updated_at: string;
-  deleted_at: string | null;
-}
 
 export interface PreflightRetryPolicy {
   retries?: number;
@@ -73,22 +43,20 @@ export interface PreflightRetryPolicy {
 export type {
   A11yNode,
   A11yTree,
+  AuthProfile,
+  Preflight,
   PreflightStep,
+  Run,
+  RunStatus,
+  Scenario,
   ScenarioStep,
+  Schedule,
   ScenarioStepPayload,
   SelectorStrategy,
   StepKind,
   StepPayload,
 } from '@eab/shared';
 
-export interface AuthProfile {
-  name: string;
-  url: string;
-  username: string;
-  usernameSelector?: string;
-  passwordSelector?: string;
-  submitSelector?: string;
-}
 
 export interface ScenarioCard extends Scenario {
   latest_run_id: number | null;
@@ -99,30 +67,7 @@ export interface ScenarioCard extends Scenario {
 
 export type ScenarioDetail = Scenario & { steps: ScenarioStep[] };
 
-export interface Schedule {
-  id: number;
-  scenario_id: number;
-  // Ordered chain of scenarios this schedule runs sequentially.
-  scenario_ids: number[];
-  cron_expr: string;
-  enabled: 0 | 1 | boolean;
-  last_run_at: string | null;
-  last_status: string | null;
-}
 
-export interface Run {
-  id: number;
-  scenario_id: number;
-  started_at: string;
-  finished_at: string | null;
-  status: 'queued' | 'running' | 'success' | 'failed';
-  log_text: string;
-  screenshot_paths_json: string;
-  // Joined from the scenario by GET /api/runs (absent on the single-run endpoint).
-  scenario_name?: string | null;
-  brand?: string | null;
-  type?: string | null;
-}
 
 export interface Artifact {
   id: number;

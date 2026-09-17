@@ -157,29 +157,6 @@ export type StepPayload = z.infer<typeof StepPayload>;
 export const PreflightMode = z.enum(['steps', 'cookies']);
 export type PreflightMode = z.infer<typeof PreflightMode>;
 
-export const Scenario = z.object({
-  id: z.number().int(),
-  name: z.string().min(1),
-  url: z.string().url(),
-  viewport_preset: ViewportPreset,
-  brand: z.string().nullable(),
-  type: z.string().nullable(),
-  retries: z.number().int().nonnegative(),
-  retry_wait_before_ms: z.number().int().nonnegative(),
-  retry_wait_after_ms: z.number().int().nonnegative(),
-  restart_on_failure: z.number().int().nonnegative(),
-  // FK to preflights(id). When set, the runner ensures the 'default' daemon is
-  // running with --session-name = the preflight's name, so the browser starts
-  // with its cookies/localStorage already restored.
-  preflight_id: z.number().int().nullable(),
-  // How the attached preflight is applied per run — see PreflightMode.
-  preflight_mode: PreflightMode,
-  // 0/1: record a .webm of each run via agent-browser record start/stop.
-  record_enabled: z.number().int(),
-  created_at: z.string(),
-  updated_at: z.string(),
-});
-export type Scenario = z.infer<typeof Scenario>;
 
 export const ScenarioCreate = z.object({
   name: z.string().min(1),
@@ -232,18 +209,6 @@ export type PreflightStep = z.infer<typeof PreflightStep>;
 // Mirror of `agent-browser auth list` / `auth show` output. Passwords are
 // never returned by the API; the only place they're stored is the encrypted
 // on-disk file managed by agent-browser itself.
-export const AuthProfile = z.object({
-  name: z.string(),
-  url: z.string(),
-  username: z.string(),
-  // Optional CSS selector overrides applied at `auth login` time. Persisted by
-  // this app (agent-browser's `auth save` doesn't store them), so they're
-  // returned here for display and re-use.
-  usernameSelector: z.string().optional(),
-  passwordSelector: z.string().optional(),
-  submitSelector: z.string().optional(),
-});
-export type AuthProfile = z.infer<typeof AuthProfile>;
 
 // Accept a bare host ("mijn.essent.nl") by defaulting to https://, trim
 // surrounding whitespace, then validate as a real URL. Without this, omitting
@@ -269,22 +234,6 @@ export const AuthProfileCreate = z.object({
 });
 export type AuthProfileCreate = z.infer<typeof AuthProfileCreate>;
 
-export const Preflight = z.object({
-  id: z.number().int(),
-  name: z.string(),
-  description: z.string(),
-  steps_json: z.string(),
-  // Retry/restart policy, applied when the preflight runs as a whole (Replay,
-  // or as a scenario's preflight prefix). Mirrors the scenario columns.
-  retries: z.number().int().nonnegative(),
-  retry_wait_before_ms: z.number().int().nonnegative(),
-  retry_wait_after_ms: z.number().int().nonnegative(),
-  restart_on_failure: z.number().int().nonnegative(),
-  created_at: z.string(),
-  updated_at: z.string(),
-  deleted_at: z.string().nullable(),
-});
-export type Preflight = z.infer<typeof Preflight>;
 
 export const PreflightCreate = z.object({
   name: PreflightName,
@@ -316,27 +265,3 @@ export const ScenarioStep = z.object({
   payload_json: z.string(),
 });
 export type ScenarioStep = z.infer<typeof ScenarioStep>;
-
-export const Schedule = z.object({
-  id: z.number().int(),
-  scenario_id: z.number().int(),
-  cron_expr: z.string(),
-  enabled: z.boolean(),
-  last_run_at: z.string().nullable(),
-  last_status: z.string().nullable(),
-});
-export type Schedule = z.infer<typeof Schedule>;
-
-export const RunStatus = z.enum(['queued', 'running', 'success', 'failed']);
-export type RunStatus = z.infer<typeof RunStatus>;
-
-export const Run = z.object({
-  id: z.number().int(),
-  scenario_id: z.number().int(),
-  started_at: z.string(),
-  finished_at: z.string().nullable(),
-  status: RunStatus,
-  log_text: z.string(),
-  screenshot_paths_json: z.string(),
-});
-export type Run = z.infer<typeof Run>;

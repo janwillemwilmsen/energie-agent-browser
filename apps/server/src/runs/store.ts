@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Database } from 'better-sqlite3';
+import type { RunStatus } from '@eab/shared';
 
 // The Run module: owns the `runs` table, the per-Run screenshot directory
 // (data/screenshots/<run_id>/) and the invariant that binds them — a Run and
@@ -11,7 +12,7 @@ import type { Database } from 'better-sqlite3';
 // The seam is createRunStore({ db, dataDir }): the app builds one over its
 // sqlite file; tests build one over an in-memory database and a temp dir.
 
-export type RunStatus = 'queued' | 'running' | 'success' | 'failed';
+export type { RunStatus };
 
 export interface RunRow {
   id: number;
