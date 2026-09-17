@@ -1,10 +1,10 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { AuthProfileCreate } from '@eab/shared';
-import { run, runWithStdin, PREFLIGHT_RECORDER_SESSION } from '../agentBrowser/driver.js';
+import { run, runWithStdin, DEFAULT_SESSION } from '../agentBrowser/driver.js';
 import { getAuthSelectors, setAuthSelectors, deleteAuthSelectors } from '../authSelectors.js';
 
-const RUN_OPTS = { session: PREFLIGHT_RECORDER_SESSION, timeoutMs: 8_000 };
+const RUN_OPTS = { session: DEFAULT_SESSION, timeoutMs: 8_000 };
 
 // agent-browser's CLI always tries to bootstrap a browserless connection on
 // startup, even for purely-local commands like `auth list`. When no daemon is

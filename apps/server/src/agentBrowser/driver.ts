@@ -5,6 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { browserlessCdpUrl, config, localBrowserArgs } from '../config.js';
+import { planOpen, type OpenIntent } from './sessionPlan.js';
+export type { OpenIntent } from './sessionPlan.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -101,6 +103,13 @@ async function drainInflight(session: string, maxMs = 5_000): Promise<void> {
 // assume mismatch on the next call, and closeSession would skip the
 // in-memory-state flush because it has nothing to flush to. Empty value
 // means "started without --session-name".
+/**
+ * The one session every page, run, preflight and the AI agent share. The
+ * user bootstraps it once (Terminal / Editor) and the live preview shows it.
+ * Other sessions exist only when someone creates them from the terminal.
+ */
+export const DEFAULT_SESSION = 'default';
+
 function sessionNameMarker(session: string): string {
   return path.join(os.homedir(), '.agent-browser', `${session}.session-name`);
 }
@@ -669,7 +678,7 @@ async function connectSession(
   );
 }
 
-export interface EnsureSessionOptions {
+interface EnsureSessionOptions {
   /**
    * agent-browser `--session-name`. When set, the daemon for `session` must be
    * running with this exact session-name; if the live daemon was started with
@@ -717,40 +726,35 @@ async function ensureSessionLocked(
   await connectSession(session, wantName, skipStateLoad);
 }
 
-export async function ensureSession(
-  session = 'default',
-  opts: EnsureSessionOptions = {},
-): Promise<void> {
-  await withSessionLock(session, () => ensureSessionLocked(session, opts));
-}
-
-export interface RestartSessionOptions extends EnsureSessionOptions {
-  /**
-   * Runs after the old daemon is fully closed and before the new one is
-   * spawned, with the session lock still held — so nothing (e.g. the live
-   * preview's screenshot loop) can sneak in and bootstrap an unnamed daemon
-   * in between. Use it for "wipe persisted state" style work.
-   */
-  between?: () => Promise<void> | void;
-}
-
-// Close + re-bootstrap as ONE locked operation. Prefer this over a manual
-// `closeSession(); ensureSession()` pair whenever other callers (preview,
-// recorder exec-step, …) might be issuing commands on the same session.
-export async function restartSession(
-  session: string,
-  opts: RestartSessionOptions = {},
-): Promise<void> {
-  const wantName = opts.sessionName ?? null;
+/**
+ * Bring `session` into the state a caller wants (see OpenIntent) as ONE
+ * locked operation, so nothing else on the session (the live preview's
+ * screenshot loop, the recorder) can slip a command or an unnamed bootstrap
+ * between the steps. The ordering rules live in planOpen (sessionPlan.ts).
+ */
+export async function openSession(session: string, intent: OpenIntent): Promise<void> {
   await withSessionLock(session, async () => {
-    await closeSessionLocked(session).catch(() => undefined);
-    if (opts.between) await opts.between();
-    await connectSession(session, wantName, opts.skipStateLoad ?? false);
+    const plan = planOpen(intent, { alive: isSessionAlive(session), boundName: readSessionName(session) });
+    if (plan.close) await closeSessionLocked(session).catch(() => undefined);
+    if (plan.wipeName) {
+      // Give agent-browser a moment to finish writing state on shutdown before
+      // we remove it; it writes synchronously today, so this is a safety margin.
+      await new Promise((r) => setTimeout(r, 300));
+      clearPersistedSessionState(plan.wipeName);
+    }
+    if (plan.connect) {
+      await connectSession(session, plan.sessionName, !plan.loadState);
+    } else if (plan.loadState && plan.sessionName) {
+      // Already bound to the name: re-apply the on-disk state anyway. The
+      // in-memory jar drifts between calls, and "bind" means "this
+      // preflight's state, now", not "whatever the browser happens to hold".
+      await loadPersistedStateIntoDaemon(session, plan.sessionName);
+    }
   });
 }
 
 export async function run(args: string[], opts: RunOptions = {}): Promise<RunResult> {
-  const session = opts.session ?? 'default';
+  const session = opts.session ?? DEFAULT_SESSION;
   // Make sure the daemon is up AND register the command as in-flight while
   // still holding the lock, then let the command itself run unlocked.
   const { cmd } = await withSessionLock(session, async () => {
@@ -775,7 +779,7 @@ export async function runWithStdin(
   stdinLine: string,
   opts: RunOptions = {},
 ): Promise<RunResult> {
-  const session = opts.session ?? 'default';
+  const session = opts.session ?? DEFAULT_SESSION;
   const fullArgs = ['--session', session, ...args];
   const timeoutMs = opts.timeoutMs ?? CMD_TIMEOUT_MS;
   const start = (): Promise<RunResult> => new Promise((resolve) => {
@@ -935,14 +939,6 @@ async function closeSessionLocked(session: string): Promise<void> {
   await waitForDaemonPortClosed(session, knownPort);
 }
 
-// /preflight recording targets the same 'default' daemon scenarios use, so
-// the preview shows the live browser the moment that daemon is alive — no
-// second daemon to keep in sync, no separate "session not running" gate to
-// confuse the user. ensureSession(..., {sessionName}) handles binding the
-// daemon to the right --session-name when recording or running with a
-// preflight; on mismatch it restarts, on match it reuses for free.
-export const PREFLIGHT_RECORDER_SESSION = 'default';
-
 // Close every daemon currently tracked on disk (any session with a
 // .session-name marker — i.e. one we know was started under a --session-name).
 // The signal handler in index.ts calls this on Ctrl+C / SIGTERM so the
@@ -979,15 +975,6 @@ export function clearPersistedSessionState(sessionName: string): void {
   ]) {
     try { fs.rmSync(candidate, { recursive: true, force: true }); } catch { /* ignore */ }
   }
-}
-
-// Wait for agent-browser to flush any pending state to disk after a daemon
-// shuts down. We only need this when stopping a recording session so the
-// next scenario can pick up the updated state. agent-browser writes the
-// state file synchronously on shutdown today, so this is a generous safety
-// margin rather than a hard requirement.
-export async function flushSessionState(): Promise<void> {
-  await new Promise((r) => setTimeout(r, 300));
 }
 
 export { browserlessCdpUrl, config, pidFile };

@@ -1,11 +1,11 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { run, runJson } from '../agentBrowser/driver.js';
+import { DEFAULT_SESSION, run, runJson } from '../agentBrowser/driver.js';
 import { parseSnapshotText } from '../agentBrowser/parser.js';
 
 const SnapshotBody = z.object({
   url: z.string().url().optional(),
-  session: z.string().default('default'),
+  session: z.string().default(DEFAULT_SESSION),
   compact: z.boolean().default(true),
   interactiveOnly: z.boolean().default(false),
 });

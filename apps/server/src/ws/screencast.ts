@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { config } from '../config.js';
-import { ensureSession, run } from '../agentBrowser/driver.js';
+import { openSession, run, DEFAULT_SESSION } from '../agentBrowser/driver.js';
 
 function sessionPidAlive(session: string): boolean {
   try {
@@ -26,7 +26,7 @@ export async function screencastWsRoute(app: FastifyInstance) {
     '/ws/screencast',
     { websocket: true },
     (socket, req) => {
-      const session = (req.query.session ?? 'default').replace(/[^a-zA-Z0-9_-]/g, '');
+      const session = (req.query.session ?? DEFAULT_SESSION).replace(/[^a-zA-Z0-9_-]/g, '');
       if (!session) {
         socket.close(1008, 'invalid session');
         return;
@@ -101,7 +101,7 @@ export async function screencastWsRoute(app: FastifyInstance) {
             socket.send(
               JSON.stringify({ type: 'status', message: 'Starting browser session…' }),
             );
-            await ensureSession(session);
+            await openSession(session, { intent: 'reuse' });
           } catch (e: any) {
             if (socket.readyState === socket.OPEN) {
               socket.send(

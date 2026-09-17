@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
-import { ensureSession, closeSession } from '../agentBrowser/driver.js';
+import { openSession, closeSession, DEFAULT_SESSION } from '../agentBrowser/driver.js';
 
 function sessionPidAlive(session: string): { alive: boolean; pid: number | null } {
   try {
@@ -18,14 +18,14 @@ function sessionPidAlive(session: string): { alive: boolean; pid: number | null 
 
 export async function sessionsRoutes(app: FastifyInstance) {
   app.get<{ Params: { name: string } }>('/api/sessions/:name/status', async (req) => {
-    const name = req.params.name.replace(/[^a-zA-Z0-9_-]/g, '') || 'default';
+    const name = req.params.name.replace(/[^a-zA-Z0-9_-]/g, '') || DEFAULT_SESSION;
     return { name, ...sessionPidAlive(name) };
   });
 
   app.post<{ Params: { name: string } }>('/api/sessions/:name/bootstrap', async (req, reply) => {
-    const name = req.params.name.replace(/[^a-zA-Z0-9_-]/g, '') || 'default';
+    const name = req.params.name.replace(/[^a-zA-Z0-9_-]/g, '') || DEFAULT_SESSION;
     try {
-      await ensureSession(name);
+      await openSession(name, { intent: 'reuse' });
       return { name, ...sessionPidAlive(name) };
     } catch (e: any) {
       return reply.code(502).send({ error: 'bootstrap_failed', message: e?.message ?? String(e) });
@@ -33,7 +33,7 @@ export async function sessionsRoutes(app: FastifyInstance) {
   });
 
   app.post<{ Params: { name: string } }>('/api/sessions/:name/close', async (req) => {
-    const name = req.params.name.replace(/[^a-zA-Z0-9_-]/g, '') || 'default';
+    const name = req.params.name.replace(/[^a-zA-Z0-9_-]/g, '') || DEFAULT_SESSION;
     await closeSession(name);
     return { name, closed: true };
   });

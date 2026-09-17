@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { getDb } from '../db/index.js';
-import { closeSession, ensureSession } from '../agentBrowser/driver.js';
+import { closeSession, openSession, DEFAULT_SESSION } from '../agentBrowser/driver.js';
 import { cliBrowser } from '../agentBrowser/cliBrowser.js';
 import { getAuthSelectors } from '../authSelectors.js';
 import {
@@ -241,9 +241,9 @@ export function startRun(scenarioId: number, opts: StartRunOptions = {}): Starte
   const log: string[] = [];
   const screenshots: string[] = [];
   let status: 'success' | 'failed' = 'success';
-  // All work uses the shared `default` session — the user bootstraps it once
-  // from any Terminal/Editor tab and every run + the live preview share it.
-  const session = 'default';
+  // All work uses the shared session — the user bootstraps it once from any
+  // Terminal/Editor tab and every run + the live preview share it.
+  const session = DEFAULT_SESSION;
   const browser = cliBrowser(session);
   const maxRestarts = Math.max(0, scenario.restart_on_failure ?? 0);
   // Video recording is opened/closed by `record_start` / `record_stop` steps;
@@ -349,26 +349,17 @@ export function startRun(scenarioId: number, opts: StartRunOptions = {}): Starte
               await closeSession(session).catch(() => undefined);
             }
             if (useCookiesOnly) {
-              // Load the persisted state (default ensureSession behavior) and do
-              // NOT run the steps.
-              await ensureSession(session, { sessionName: name });
+              // Bound to the preflight with its saved cookies loaded; the steps
+              // are NOT run.
+              await openSession(session, { intent: 'bind', sessionName: name });
               appendLog(ctx, `preflight "${name}": cookies loaded`);
             } else {
-              // Fresh-browser guarantee: a daemon reused from a previous run still
-              // holds that run's in-memory cookies — ensureSession reuses on a
-              // session-name match, and skipStateLoad only skips the on-disk state
-              // load, not the live jar. A leftover consent cookie would hide the
-              // banner and fail the "click consent" step, so always restart the
-              // daemon before a steps-mode preflight. (attempt > 0 already closed
-              // above; the extra close is then a cheap no-op.)
-              if (attempt === 0) await closeSession(session).catch(() => undefined);
-              // skipStateLoad: run the preflight in a genuinely CLEAN browser. We
-              // re-execute its steps from scratch (login, cookie-consent, …), so
-              // loading the preflight's saved cookies would be counter-productive —
-              // e.g. a restored consent cookie means the consent banner never
-              // appears and the "click consent" step fails. Binding the name
-              // (without loading) keeps any future save landing in the right slot.
-              await ensureSession(session, { sessionName: name, skipStateLoad: true });
+              // A genuinely clean browser bound to the preflight, WITHOUT its
+              // saved state: the steps re-run from scratch (login, consent, …),
+              // and a restored consent cookie would hide the banner the "click
+              // consent" step is looking for. Binding the name keeps a future
+              // save landing in the right slot.
+              await openSession(session, { intent: 'preflight-steps', sessionName: name });
               // NOTE: recording is deliberately NOT started here. The preflight
               // navigates (login), and `record start` poisons the next navigation —
               // so we wait and start recording after the scenario's first navigation.
@@ -414,7 +405,7 @@ export function startRun(scenarioId: number, opts: StartRunOptions = {}): Starte
             if (preflightName) {
               await applyPreflight(preflightName);
             } else {
-              await ensureSession(session);
+              await openSession(session, { intent: 'reuse' });
             }
             appendLog(ctx, 'browser connection reset; re-running scenario from the top');
           } catch (e: any) {

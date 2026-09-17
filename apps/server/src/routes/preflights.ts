@@ -5,14 +5,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { PreflightCreate, PreflightUpdate, PreflightStep, parseStepPayload } from '@eab/shared';
 import { getDb } from '../db/index.js';
-import {
-  ensureSession,
-  restartSession,
-  flushSessionState,
-  clearPersistedSessionState,
-  persistSessionState,
-  PREFLIGHT_RECORDER_SESSION,
-} from '../agentBrowser/driver.js';
+import { openSession, persistSessionState, DEFAULT_SESSION } from '../agentBrowser/driver.js';
 import { cliBrowser } from '../agentBrowser/cliBrowser.js';
 import { getAuthSelectors } from '../authSelectors.js';
 import { executeStep, executeSteps, type StepContext } from '../scenarios/stepExecutor.js';
@@ -21,7 +14,7 @@ import { executeStep, executeSteps, type StepContext } from '../scenarios/stepEx
 // Step executor, so a preflight step behaves exactly as it will inside a
 // scenario run. No artifacts/recorder: preflights don't screenshot or record.
 function recorderStepContext(log: (line: string) => void = () => {}): StepContext {
-  return { browser: cliBrowser(PREFLIGHT_RECORDER_SESSION), log, authSelectors: getAuthSelectors };
+  return { browser: cliBrowser(DEFAULT_SESSION), log, authSelectors: getAuthSelectors };
 }
 
 
@@ -84,13 +77,13 @@ export async function preflightsRoutes(app: FastifyInstance) {
       const markerPath = path.join(
         os.homedir(),
         '.agent-browser',
-        `${PREFLIGHT_RECORDER_SESSION}.session-name`,
+        `${DEFAULT_SESSION}.session-name`,
       );
       const activeName = fs.existsSync(markerPath)
         ? fs.readFileSync(markerPath, 'utf-8').trim()
         : '';
       if (activeName && activeName === body.name) {
-        await persistSessionState(PREFLIGHT_RECORDER_SESSION, body.name);
+        await persistSessionState(DEFAULT_SESSION, body.name);
       }
     } catch {
       /* best-effort — the DB row is already created */
@@ -158,13 +151,13 @@ export async function preflightsRoutes(app: FastifyInstance) {
       const markerPath = path.join(
         os.homedir(),
         '.agent-browser',
-        `${PREFLIGHT_RECORDER_SESSION}.session-name`,
+        `${DEFAULT_SESSION}.session-name`,
       );
       const activeName = fs.existsSync(markerPath)
         ? fs.readFileSync(markerPath, 'utf-8').trim()
         : '';
       if (activeName && activeName === nextName) {
-        await persistSessionState(PREFLIGHT_RECORDER_SESSION, nextName);
+        await persistSessionState(DEFAULT_SESSION, nextName);
       }
     } catch {
       /* best-effort — DB row is already saved, state save is a bonus */
@@ -198,11 +191,11 @@ export async function preflightsRoutes(app: FastifyInstance) {
   app.post('/api/preflights/recorder/start', async (req, reply) => {
     const { name } = RecorderStartBody.parse(req.body);
     try {
-      // ensureSession with a sessionName mismatch closes + respawns. A match
-      // is free. So clicking "Start recording" when the default daemon is
-      // already bound to this preflight is essentially a no-op.
-      await ensureSession(PREFLIGHT_RECORDER_SESSION, { sessionName: name });
-      return { ok: true, session: PREFLIGHT_RECORDER_SESSION, sessionName: name };
+      // A daemon already bound to this preflight is reused (state re-applied);
+      // one bound elsewhere is restarted. So clicking "Start recording" when
+      // the daemon is already on this preflight is essentially a no-op.
+      await openSession(DEFAULT_SESSION, { intent: 'bind', sessionName: name });
+      return { ok: true, session: DEFAULT_SESSION, sessionName: name };
     } catch (e: any) {
       return reply.code(502).send({ ok: false, error: e?.message ?? String(e) });
     }
@@ -282,26 +275,18 @@ export async function preflightsRoutes(app: FastifyInstance) {
         // against a truly blank browser (no leftover cookies, localStorage, or
         // IndexedDB from a previous record/replay).
         //
-        // One locked restart, not close → wipe → ensure as separate calls: the
-        // live preview on /preflight keeps issuing `screenshot` every 1.5 s,
-        // and with a gap between close and re-bootstrap it would slip in,
-        // auto-launch its own (unnamed) daemon and collide with ours —
-        // surfacing as "⚠ Daemon version mismatch detected, restarting..." /
-        // "started concurrently with different daemon configuration".
-        await restartSession(PREFLIGHT_RECORDER_SESSION, {
-          sessionName: row.name,
-          between: async () => {
-            await flushSessionState();
-            clearPersistedSessionState(row.name);
-          },
-        });
+        // One locked operation (close → wipe → bootstrap bound): the live
+        // preview on /preflight keeps issuing `screenshot` every 1.5 s, and
+        // with a gap between close and re-bootstrap it would slip in and
+        // auto-launch its own unnamed daemon, colliding with ours.
+        await openSession(DEFAULT_SESSION, { intent: 'replay', sessionName: row.name });
         await executeSteps(recorderStepContext(), indexed, policy);
 
         // Replay completed → persist the freshly-built state to disk. This is
         // the ONE place (along with the Save preflight handler) that's allowed
         // to mutate the canonical auth.json: closeSession no longer auto-flushes,
         // so anything we don't save here is gone the moment the daemon dies.
-        await persistSessionState(PREFLIGHT_RECORDER_SESSION, row.name);
+        await persistSessionState(DEFAULT_SESSION, row.name);
         return { ok: true };
       } catch (e: any) {
         lastErr = e;

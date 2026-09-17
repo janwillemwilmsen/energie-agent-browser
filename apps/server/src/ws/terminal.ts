@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config, browserlessCdpUrl, localBrowserArgs } from '../config.js';
+import { DEFAULT_SESSION } from '../agentBrowser/driver.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -48,7 +49,7 @@ function ptyEnv(): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     PATH: `${binDirs.join(pathSep)}${pathSep}${currentPath}`,
-    AGENT_BROWSER_SESSION: 'default',
+    AGENT_BROWSER_SESSION: DEFAULT_SESSION,
   };
   if (config.browser.mode === 'local') {
     // Match the driver's local-mode wiring so agent-browser commands typed in

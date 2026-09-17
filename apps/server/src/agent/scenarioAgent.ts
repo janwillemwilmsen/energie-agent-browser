@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { getDb } from '../db/index.js';
 import { getSetting, setSetting } from '../settings.js';
-import { restartSession } from '../agentBrowser/driver.js';
+import { openSession, DEFAULT_SESSION } from '../agentBrowser/driver.js';
 import { cliBrowser } from '../agentBrowser/cliBrowser.js';
 import { executeStep, type StepContext } from '../scenarios/stepExecutor.js';
 import { parseStepPayload, type A11yNode, type A11yTree, type SelectorStrategy } from '@eab/shared';
@@ -55,7 +55,6 @@ export function agentAvailable(): boolean {
 
 const MAX_ACTIONS = 20;
 const MAX_CONSECUTIVE_FAILURES = 3;
-const SESSION = 'default';
 
 // --- Job store ------------------------------------------------------------------
 export interface AgentJob {
@@ -115,9 +114,9 @@ async function chatCompletion(model: string, messages: ChatMessage[]): Promise<s
 }
 
 // --- Perception -------------------------------------------------------------------
-// Everything the agent does to the page goes through the shared 'default'
-// session, via the same Browser seam the Step executor uses.
-const browser = cliBrowser(SESSION);
+// Everything the agent does to the page goes through the shared session, via
+// the same Browser seam the Step executor uses.
+const browser = cliBrowser(DEFAULT_SESSION);
 
 // Flatten the tree into a compact "role \"name\"" listing the model can pick
 // selectors from. Interactive/content roles only, deduped, capped — the model
@@ -341,7 +340,7 @@ async function runLoop(job: AgentJob): Promise<void> {
   job.log.push('resetting browser session…');
   // One locked close+start so a concurrent preview/command can't wedge in
   // between and race the bootstrap.
-  await restartSession(SESSION);
+  await openSession(DEFAULT_SESSION, { intent: 'fresh' });
   // Marker line: the modal turns on its live preview when it sees this, so the
   // preview WS doesn't race the daemon restart (it rejects when no pid exists).
   job.log.push('browser ready — live preview on');
