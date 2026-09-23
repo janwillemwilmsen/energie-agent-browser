@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import type { SelectorStrategy } from '../api.js';
+import type { FindBy, FindLocator, SelectorStrategy } from '../api.js';
 import type { StepStore } from './store.js';
 
 // The "+ …" buttons that create Steps. Which buttons appear follows from the
@@ -36,6 +36,11 @@ function askText(message: string, defaultValue?: string): string | null {
 // The by-selector dialog: kinds that take a selector, in the order the prompt lists them.
 const SELECTOR_KINDS = ['click', 'fill', 'type', 'select', 'check', 'uncheck', 'wait', 'scroll'] as const;
 
+// The find dialog: `agent-browser find` only offers click / fill / check (and
+// the executor polls its `text` action for wait), so the choice is narrower.
+const FIND_KINDS = ['click', 'fill', 'check', 'wait'] as const;
+const FIND_BY: readonly FindBy[] = ['role', 'text', 'label', 'placeholder', 'alt', 'title', 'testid'];
+
 export function AddStepControls(props: AddStepControlsProps) {
   const { store, kinds, defaultUrl, authProfiles, disabledReason, onError, children } = props;
   const selectorWait = props.selectorWait ?? true;
@@ -45,6 +50,7 @@ export function AddStepControls(props: AddStepControlsProps) {
   const add = (kind: string, payload: Record<string, unknown>) => void store.add(kind, payload);
 
   const selectorKinds = SELECTOR_KINDS.filter((k) => allowed.has(k) && (k !== 'wait' || selectorWait));
+  const findKinds = FIND_KINDS.filter((k) => allowed.has(k) && (k !== 'wait' || selectorWait));
 
   function addBySelector() {
     // Precise targeting when several elements share a role+name: any
@@ -81,6 +87,68 @@ export function AddStepControls(props: AddStepControlsProps) {
     } else {
       add(action, { selector });
     }
+  }
+
+  function addByFind() {
+    // agent-browser's semantic locators (getByRole / getByLabel / …): the
+    // browser tool resolves them in the live page, so they see through shadow
+    // DOM and match names loosely — handy when the a11y-tree name carries
+    // invisible glyphs, or a label isn't associated with its input.
+    const byRaw = (askText(`Find by? ${FIND_BY.join(' / ')}`, 'role') ?? '').trim().toLowerCase();
+    if (!byRaw) return;
+    if (!FIND_BY.includes(byRaw as FindBy)) {
+      alert(`Unknown find strategy "${byRaw}". Use one of: ${FIND_BY.join(', ')}`);
+      return;
+    }
+    const by = byRaw as FindBy;
+    const value = askText(
+      by === 'role' ? 'Role? (button, checkbox, textbox, link, heading, …)'
+      : by === 'testid' ? 'data-testid value?'
+      : `${by[0]!.toUpperCase()}${by.slice(1)} text?`,
+    );
+    if (value == null || !value.trim()) return;
+    const find: FindLocator = { by, value: value.trim() };
+    if (by === 'role') {
+      const name = askText('Accessible name? (case-insensitive substring; leave blank for any)');
+      if (name == null) return;
+      if (name.trim()) find.name = name.trim();
+    }
+    if ((askText('Exact, case-sensitive match? (y/N)', 'n') ?? 'n').trim().toLowerCase().startsWith('y')) {
+      find.exact = true;
+    }
+    const action = (askText(`Action? ${findKinds.join(' / ')}`, findKinds[0]) ?? '').trim().toLowerCase();
+    if (!findKinds.includes(action as (typeof FIND_KINDS)[number])) {
+      alert(`Unknown action. agent-browser find supports: ${findKinds.join(', ')}`);
+      return;
+    }
+    const selector: SelectorStrategy = { role: '', name: '', find };
+    if (action === 'fill') {
+      const v = askText('Fill with?');
+      if (v != null) add('fill', { selector, value: v });
+    } else {
+      add(action, { selector });
+    }
+  }
+
+  function addPress() {
+    // Sent to whatever has focus after the previous step. Key names are
+    // agent-browser's (Playwright's): a name, a single character, or a chord.
+    const key = askText(
+      'Press which key? (agent-browser press <key>)\n\n' +
+        'Common keys:\n' +
+        '  Enter      submit a form / activate the focused button or link\n' +
+        '  Tab        move focus to the next field   (Shift+Tab: previous)\n' +
+        '  Space      toggle the focused checkbox / radio / button\n' +
+        '  Escape     close a dialog, dropdown or tooltip\n' +
+        '  ArrowDown  ArrowUp  ArrowLeft  ArrowRight   move in a list or select\n' +
+        '  Home  End  PageDown  PageUp   scroll or jump\n' +
+        '  Backspace  Delete\n' +
+        '  Chords with +:  Control+a   Control+Enter   Shift+Tab   Alt+ArrowLeft\n' +
+        '  A single character types it:  a   1   /',
+      'Enter',
+    );
+    if (key == null || !key.trim()) return;
+    add('press', { key: key.trim() });
   }
 
   function addNavigate() {
@@ -144,6 +212,24 @@ export function AddStepControls(props: AddStepControlsProps) {
           title={title('Add a step that targets an element by a precise locator (#id, CSS, [data-testid], text=, xpath=) instead of role+name')}
         >
           + by selector…
+        </button>
+      )}
+      {findKinds.length > 0 && (
+        <button
+          onClick={addByFind}
+          disabled={disabled}
+          title={title('Add a step that targets an element with agent-browser find (by role, text, label, placeholder, alt, title or data-testid) — resolved in the live page, loose name matching')}
+        >
+          + find…
+        </button>
+      )}
+      {allowed.has('press') && (
+        <button
+          onClick={addPress}
+          disabled={disabled}
+          title={title('Press a key or chord on the focused element (Enter, Tab, Space, Escape, Control+a, …) — agent-browser press')}
+        >
+          + press key…
         </button>
       )}
       {allowed.has('screenshot') && (

@@ -13,7 +13,7 @@ One instruction in a Scenario or Preflight: navigate, click, type, fill, select,
 _Avoid_: action, command, instruction
 
 **Selector**:
-How a Step names its target element: either a raw locator handed to the browser as-is, or a role plus name resolved against the page's accessibility tree.
+How a Step names its target element: a raw locator handed to the browser as-is, a role plus name resolved against the page's accessibility tree, or a find (a semantic locator the browser tool resolves in the live page — `agent-browser find`).
 _Avoid_: target, element ref
 
 **Preflight**:

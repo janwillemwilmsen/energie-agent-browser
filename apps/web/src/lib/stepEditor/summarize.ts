@@ -3,6 +3,10 @@ import type { SelectorStrategy } from '../api.js';
 // Human label for a selector: role "name", plus the locator / ordinal when
 // present so you can see at a glance how a step will be targeted.
 export function selectorLabel(s: Partial<SelectorStrategy> | null | undefined): string {
+  if (s?.find) {
+    const f = s.find;
+    return `find ${f.by} "${f.value}"${f.name ? ` name "${f.name}"` : ''}${f.exact ? ' (exact)' : ''}`;
+  }
   const base = s?.role || s?.name ? `${s.role ?? ''} "${s.name ?? ''}"` : '';
   const extra = s?.locator ? `${s.locator}` : typeof s?.ordinal === 'number' ? `#${s.ordinal}` : '';
   return [base, extra].filter(Boolean).join(' ');
@@ -48,6 +52,8 @@ export function summarizeStep(kind: string, p: Record<string, unknown>): string 
       return '⏹ stop video recording';
     case 'close':
       return '✕ close browser session';
+    case 'press':
+      return `⌨ ${p.key ?? ''}`;
     default:
       return JSON.stringify(p);
   }

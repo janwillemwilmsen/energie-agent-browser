@@ -11,9 +11,24 @@ A scenario is an ordered list of steps executed top-to-bottom against a live bro
 | `scroll` | Scroll to an element, or to the bottom (triggers lazy-loading) |
 | `screenshot` | Capture the page — see below |
 | `wait` | Fixed delay or wait for a selector |
+| `press` | Press a key or chord on the focused element — `Enter`, `Tab`, `Space`, `Escape`, `ArrowDown`, `Control+a`, `Shift+Tab` (agent-browser `press`). No selector: focus comes from the previous click/fill |
 | `evaluate` | Run a JavaScript snippet in the page |
 | `record_start` / `record_stop` | Bracket a video recording segment |
 | `close` | Close the page |
+
+## Targeting an element
+
+A step's selector can be one of three things:
+
+- **role + name** (what the snapshot picker records): resolved against the accessibility tree before each attempt; `ordinal` / `ancestorPath` disambiguate duplicates.
+- **locator** (`+ by selector…`): a raw agent-browser locator handed to the CLI as-is — `#id`, CSS, `[data-testid="x"]`, `text=Submit`, `xpath=//button`.
+- **find** (`+ find…`): an agent-browser semantic locator, `agent-browser find <by> <value> …`, resolved by the browser tool in the live page. `by` is `role` (with an optional accessible-name filter), `text`, `label`, `placeholder`, `alt`, `title` or `testid`. Names match as a case-insensitive substring unless **exact**. Useful when the snapshot name carries invisible characters or a label isn't associated with its input. Only `click`, `fill`, `check` and `wait` accept a find selector — the actions `find` offers. Two limits seen with agent-browser 0.38: `text` only matches elements without child elements (a label that also contains an icon or tooltip is skipped), and `label` finds the *input* a label describes, so a label without `for=` that doesn't wrap its input matches nothing.
+
+Payload example:
+
+```json
+{ "selector": { "role": "", "name": "", "find": { "by": "role", "value": "checkbox", "name": "Ik heb zonnepanelen" } } }
+```
 
 ## Editing steps
 

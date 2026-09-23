@@ -39,6 +39,11 @@ describe('summarizeStep', () => {
       .toBe('textbox "Email" #1 "a@b"');
     expect(summarizeStep('select', { selector: { role: 'combobox', name: 'Land' }, value: 'NL' }))
       .toBe('combobox "Land" → "NL"');
+    expect(summarizeStep('check', { selector: { role: '', name: '', find: { by: 'role', value: 'checkbox', name: 'Zonnepanelen', exact: true } } }))
+      .toBe('find role "checkbox" name "Zonnepanelen" (exact)');
+    expect(summarizeStep('fill', { selector: { role: '', name: '', find: { by: 'label', value: 'Email' } }, value: 'a@b' }))
+      .toBe('find label "Email" "a@b"');
+    expect(summarizeStep('press', { key: 'Control+a' })).toBe('⌨ Control+a');
   });
 
   it('describes the run-shaped kinds', () => {

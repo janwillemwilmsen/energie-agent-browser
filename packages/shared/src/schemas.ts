@@ -3,6 +3,25 @@ import { z } from 'zod';
 export const ViewportPreset = z.enum(['desktop', 'mobile', 'both']);
 export type ViewportPreset = z.infer<typeof ViewportPreset>;
 
+// agent-browser's semantic locators (`agent-browser find <by> <value> …`):
+// Playwright-style getByRole / getByText / getByLabel / … resolved in the live
+// page by the browser tool itself, not against our snapshot of the a11y tree.
+// Pierces shadow DOM, auto-waits, and matches names as a case-insensitive
+// substring unless `exact`.
+export const FindBy = z.enum(['role', 'text', 'label', 'placeholder', 'alt', 'title', 'testid']);
+export type FindBy = z.infer<typeof FindBy>;
+
+export const FindLocator = z.object({
+  by: FindBy,
+  // The role, text, label, placeholder, alt text, title or data-testid.
+  value: z.string().min(1),
+  // Accessible-name filter; only meaningful with by: 'role'.
+  name: z.string().optional(),
+  // Exact, case-sensitive match instead of a case-insensitive substring.
+  exact: z.boolean().optional(),
+});
+export type FindLocator = z.infer<typeof FindLocator>;
+
 export const SelectorStrategy = z.object({
   role: z.string(),
   name: z.string(),
@@ -17,6 +36,10 @@ export const SelectorStrategy = z.object({
   // elements share the same role+name and ordinal/ancestorPath can't tell
   // them apart reliably. role/name stay as the human-readable label.
   locator: z.string().optional(),
+  // Semantic locator, run through `agent-browser find`. Takes precedence over
+  // locator and role/name. Only click, fill, check and wait Steps support it —
+  // those are the actions `find` offers.
+  find: FindLocator.optional(),
 });
 export type SelectorStrategy = z.infer<typeof SelectorStrategy>;
 
@@ -45,6 +68,10 @@ export const StepKind = z.enum([
   // Tear down the browser session (agent-browser close). Useful as a final step
   // to end a scenario cleanly; later steps re-bootstrap the session on demand.
   'close',
+  // Send a key or chord to the focused element (agent-browser press <key>):
+  // Enter, Tab, Escape, Space, ArrowDown, Control+a, … No selector — focus
+  // comes from the previous step (a click or fill).
+  'press',
 ]);
 export type StepKind = z.infer<typeof StepKind>;
 
@@ -115,6 +142,10 @@ const StepEvaluate = z.object({ kind: z.literal('evaluate'), js: z.string() });
 const StepRecordStart = z.object({ kind: z.literal('record_start') });
 const StepRecordStop = z.object({ kind: z.literal('record_stop') });
 const StepClose = z.object({ kind: z.literal('close') });
+// Key names follow agent-browser / Playwright: "Enter", "Tab", "Escape",
+// "Space", "ArrowDown", "F5", a single character, or a chord joined with "+"
+// ("Control+a", "Shift+Tab").
+const StepPress = z.object({ kind: z.literal('press'), key: z.string().trim().min(1) });
 // Single-form login via agent-browser's encrypted Auth Vault. The username +
 // password live in ~/.agent-browser/auth/<name>.json (AES-GCM encrypted), so
 // credentials never appear in a step payload. Only Preflights may contain this
@@ -139,6 +170,7 @@ export const ScenarioStepPayload = z.discriminatedUnion('kind', [
   StepRecordStart,
   StepRecordStop,
   StepClose,
+  StepPress,
 ]);
 export type ScenarioStepPayload = z.infer<typeof ScenarioStepPayload>;
 
@@ -199,6 +231,8 @@ export const PreflightStep = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('type'), selector: SelectorStrategy, text: z.string() }),
   // Pick an option in a native <select>; selector targets the combobox itself.
   z.object({ kind: z.literal('select'), selector: SelectorStrategy, value: z.string() }),
+  // Enter to submit a login form, Escape to dismiss a dialog.
+  StepPress,
   // Single-form login via agent-browser's encrypted Auth Vault. The actual
   // username + password live in ~/.agent-browser/auth/<name>.json (AES-GCM
   // encrypted), keeping credentials out of preflight steps_json in the DB.

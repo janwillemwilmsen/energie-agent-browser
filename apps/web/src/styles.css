@@ -436,6 +436,7 @@ code { background: rgba(255,255,255,0.06); padding: 2px 4px; border-radius: 3px;
 .step-kind-record_start,
 .step-kind-record_stop { background: rgba(232, 121, 249, 0.16); color: #e879f9; }
 .step-kind-close { background: rgba(148, 163, 184, 0.16); color: #94a3b8; }
+.step-kind-press { background: rgba(129, 140, 248, 0.16); color: #818cf8; }
 /* Preflight-only kind. */
 .step-kind-auth-login { background: rgba(250, 204, 21, 0.16); color: #facc15; }
 

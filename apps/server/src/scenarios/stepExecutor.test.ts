@@ -114,6 +114,57 @@ describe('Step executor', () => {
     expect(ctx.lines.some((l) => /via shadow-DOM fallback/.test(l))).toBe(true);
   });
 
+  // agent-browser's semantic locators are a separate subcommand
+  // (`find <by> <value> <action> [value] [--name] [--exact]`), resolved by the
+  // browser tool in the live page — no snapshot on our side.
+  describe('find selectors', () => {
+    const NOT_FOUND: RunResult = {
+      stdout: '',
+      stderr: "✗ No element found by testid 'nope'. Verify the selector, role, or name is correct and the element exists in the DOM.",
+      exitCode: 1,
+    };
+
+    it('runs click / fill / check through `find`, with the role name filter and exact flag', async () => {
+      const b = fakeBrowser([]);
+      const ctx = context(b);
+      await executeStep(ctx, parseStep('click', { selector: { role: '', name: '', find: { by: 'role', value: 'button', name: 'Submit' } } }));
+      await executeStep(ctx, parseStep('fill', { selector: { role: '', name: '', find: { by: 'label', value: 'Email' } }, value: 'a@b.c' }));
+      await executeStep(ctx, parseStep('check', { selector: { role: '', name: '', find: { by: 'role', value: 'checkbox', name: 'Ik heb zonnepanelen', exact: true } } }));
+      expect(ran(b, 'find')).toEqual([
+        ['find', 'role', 'button', 'click', '--name', 'Submit'],
+        ['find', 'label', 'Email', 'fill', 'a@b.c'],
+        ['find', 'role', 'checkbox', 'check', '--name', 'Ik heb zonnepanelen', '--exact'],
+      ]);
+      expect(b.snapshots).toBe(0);
+      // A find-click settles like any click.
+      expect(b.calls[1]).toEqual(['wait', '--load', 'load']);
+    });
+
+    it('surfaces the CLI diagnostic when nothing matches', async () => {
+      const b = fakeBrowser([], [(a) => (a[0] === 'find' ? NOT_FOUND : undefined)]);
+      await expect(
+        executeStep(context(b), parseStep('click', { selector: { role: '', name: '', find: { by: 'testid', value: 'nope' } } })),
+      ).rejects.toThrow(/click failed: .*No element found by testid 'nope'/);
+    });
+
+    it('waits by polling `find … text` until it succeeds', async () => {
+      let calls = 0;
+      const b = fakeBrowser([], [(a) => (a[0] === 'find' && ++calls < 3 ? NOT_FOUND : undefined)]);
+      await executeStep(context(b), parseStep('wait', { selector: { role: '', name: '', find: { by: 'text', value: 'Welcome' } } }));
+      expect(ran(b, 'find')).toHaveLength(3);
+      expect(ran(b, 'find')[0]).toEqual(['find', 'text', 'Welcome', 'text']);
+    });
+
+    it('refuses the actions `find` does not offer', async () => {
+      const b = fakeBrowser([]);
+      const sel = { role: '', name: '', find: { by: 'testid' as const, value: 'x' } };
+      await expect(executeStep(context(b), parseStep('type', { selector: sel, text: 'hi' }))).rejects.toThrow(/type does not support a find selector/);
+      await expect(executeStep(context(b), parseStep('uncheck', { selector: sel }))).rejects.toThrow(/uncheck does not support a find selector/);
+      await expect(executeStep(context(b), parseStep('scroll', { selector: sel }))).rejects.toThrow(/scroll does not support a find selector/);
+      expect(b.calls).toHaveLength(0);
+    });
+  });
+
   it('sets a native <select> in-page when the selector targets an option', async () => {
     const b = fakeBrowser(
       [tree(`- combobox "Country"\n  - option "Netherlands" [ref=e3]`)],
@@ -158,6 +209,14 @@ describe('Step executor', () => {
       ),
     ).rejects.toThrow(/click failed: boom/);
     expect(ran(b, 'click')).toHaveLength(2);
+  });
+
+  it('presses a key on the focused element and lets a navigation settle', async () => {
+    const b = fakeBrowser([]);
+    await executeStep(context(b), parseStep('press', { key: ' Enter ' }));
+    expect(b.calls).toEqual([['press', 'Enter'], ['wait', '--load', 'load']]);
+    expect(b.snapshots).toBe(0);
+    expect(() => parseStep('press', { key: '  ' })).toThrow(/invalid press step at key/);
   });
 
   it('rejects a malformed step before the browser is touched', () => {

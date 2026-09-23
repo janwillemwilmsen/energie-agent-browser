@@ -53,6 +53,8 @@ export type {
   Schedule,
   ScenarioStepPayload,
   SelectorStrategy,
+  FindBy,
+  FindLocator,
   StepKind,
   StepPayload,
 } from '@eab/shared';

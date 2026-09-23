@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import sharp from 'sharp';
 import { encodeSlot } from '@eab/shared';
-import type { A11yNode, A11yTree, SelectorStrategy, StepPayload } from '@eab/shared';
+import type { A11yNode, A11yTree, FindLocator, SelectorStrategy, StepPayload } from '@eab/shared';
 import type { AuthSelectors } from '../authSelectors.js';
 import { resolveSelector } from './selector.js';
 import { isOptionSelector, execSelectOptionFallback } from './selectFallback.js';
@@ -133,12 +133,27 @@ export function describeStep(step: StepPayload): string {
     case 'record_start': return 'record start';
     case 'record_stop': return 'record stop';
     case 'close': return 'close browser session';
+    case 'press': return `press ${step.key}`;
   }
 }
 
 function selectorLabel(s: SelectorStrategy): string {
+  if (s.find) return `find ${findArgs(s.find).join(' ')}`;
   if (s.locator?.trim()) return s.locator.trim();
   return `${s.role} "${s.name}"${typeof s.ordinal === 'number' ? ` #${s.ordinal}` : ''}`;
+}
+
+/** The `<by> <value>` head of an `agent-browser find` command. */
+function findArgs(f: FindLocator): string[] {
+  return [f.by, f.value];
+}
+
+/** The `[--name] [--exact]` tail of an `agent-browser find` command. */
+function findOptions(f: FindLocator): string[] {
+  const out: string[] = [];
+  if (f.by === 'role' && f.name?.trim()) out.push('--name', f.name.trim());
+  if (f.exact) out.push('--exact');
+  return out;
 }
 
 // --- Sequence + retries -----------------------------------------------------------
@@ -243,6 +258,25 @@ export async function executeStep(ctx: StepContext, step: StepPayload, position 
         step.kind === 'type' ? step.text
         : step.kind === 'fill' || step.kind === 'select' ? step.value
         : undefined;
+      if (selector.find) {
+        // Semantic locator: the browser tool finds AND acts in one command,
+        // so there is no ref to resolve and nothing for the fallbacks to do
+        // (Playwright locators already pierce shadow DOM).
+        if (step.kind !== 'click' && step.kind !== 'fill' && step.kind !== 'check') {
+          throw new Error(
+            `${step.kind} does not support a find selector (agent-browser find offers click, fill and check` +
+            `${step.kind === 'type' ? ' — use fill' : ''}); use a locator or role+name instead`,
+          );
+        }
+        const args = ['find', ...findArgs(selector.find), step.kind];
+        if (value !== undefined) args.push(value);
+        args.push(...findOptions(selector.find));
+        log(args.join(' '));
+        const r = await browser.run(args, { timeoutMs: 30_000 });
+        if (r.exitCode !== 0) throw new Error(`${step.kind} failed: ${failureText(r)}`);
+        if (step.kind === 'click') await settleAfterInteraction(browser, timing);
+        return;
+      }
       const ref = await resolveRef(ctx, timing, selector);
       // A select step whose selector targets the OPTION (not the dropdown)
       // means the a11y tree had no ref-addressable combobox (e.g. Chromium's
@@ -285,6 +319,9 @@ export async function executeStep(ctx: StepContext, step: StepPayload, position 
       // view" — resolve the selector like click.
       if (step.selector) {
         const sel = step.selector;
+        if (sel.find) {
+          throw new Error('scroll does not support a find selector (agent-browser find has no scroll action); use a locator or role+name instead');
+        }
         const ref = await resolveRef(ctx, timing, sel);
         log(`scroll into view ${ref}`);
         const r = await browser.run(['scrollintoview', ref], { timeoutMs: 30_000 });
@@ -335,6 +372,13 @@ export async function executeStep(ctx: StepContext, step: StepPayload, position 
         // polls the live page for a substring match, which is what the user
         // actually means by "wait for the button labelled X".
         const sel = step.selector;
+        if (sel.find) {
+          // `find` has no wait action, but its read-only `text` action fails
+          // with exit 1 while the element is absent — poll that within the
+          // same implicit-wait budget a role+name selector gets.
+          await waitForFind(ctx, timing, sel.find);
+          return;
+        }
         const locator = sel.locator?.trim();
         const text = sel.name?.trim();
         if (!locator && !text) {
@@ -363,6 +407,16 @@ export async function executeStep(ctx: StepContext, step: StepPayload, position 
       if (r.exitCode !== 0) {
         throw new Error(`wait failed (exit=${r.exitCode}): ${r.stderr.trim() || r.stdout.trim() || 'no output'}`);
       }
+      return;
+    }
+    case 'press': {
+      // Goes to whatever has focus — the element the previous click/fill
+      // left focused, or the page. Enter/Space commonly submit or navigate,
+      // so settle like a click.
+      log(`press ${step.key}`);
+      const r = await browser.run(['press', step.key], { timeoutMs: 30_000 });
+      if (r.exitCode !== 0) throw new Error(`press failed: ${failureText(r)}`);
+      await settleAfterInteraction(browser, timing);
       return;
     }
     case 'evaluate': {
@@ -419,6 +473,20 @@ async function resolveRef(ctx: StepContext, timing: Timing, selector: SelectorSt
     catch (e: any) { lastErr = e; }
   }
   throw new Error(diagnoseFailure(selector, lastTree, lastErr, Date.now() - startedAt));
+}
+
+async function waitForFind(ctx: StepContext, timing: Timing, find: FindLocator): Promise<void> {
+  const args = ['find', ...findArgs(find), 'text', ...findOptions(find)];
+  ctx.log(`wait for ${args.join(' ')}`);
+  const startedAt = Date.now();
+  const deadline = startedAt + timing.selectorWaitMs;
+  let last: RunResult;
+  do {
+    last = await ctx.browser.run(args, { timeoutMs: 30_000 });
+    if (last.exitCode === 0) return;
+    await timing.sleep(timing.selectorPollMs);
+  } while (Date.now() < deadline);
+  throw new Error(`wait failed (waited ${Date.now() - startedAt}ms): ${failureText(last)}`);
 }
 
 function collectAllNodes(node: A11yNode, out: A11yNode[]): void {
