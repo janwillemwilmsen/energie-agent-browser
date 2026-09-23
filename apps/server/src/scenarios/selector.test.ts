@@ -110,6 +110,36 @@ describe('resolveSelector', () => {
     ).toBe('@e2');
   });
 
+  // Icon fonts put private-use glyphs (here U+E022, a checkmark) into the
+  // accessible name. They render as nothing in the tree view, so a name typed
+  // in the step editor never contains them.
+  describe('invisible characters in the name', () => {
+    const GLYPH = String.fromCharCode(0xe022);
+    const NBSP = String.fromCharCode(0xa0);
+
+    it('falls back to ignoring icon-font glyphs and whitespace runs', () => {
+      const iconFont = parseSnapshotText(
+        `- LabelText [ref=e1] clickable [cursor:pointer]
+  - generic
+    - checkbox "${GLYPH} Accept${NBSP} terms" [checked=false, ref=e2]`,
+        '',
+      );
+      expect(resolveSelector({ role: 'checkbox', name: 'Accept terms' }, iconFont)).toBe('@e2');
+    });
+
+    // The fallback must never change a step that resolves today: an icon-only
+    // button recorded from the picker matches by its glyph, not as "unnamed".
+    it('prefers the strict match, so icon-only buttons stay unique', () => {
+      const iconOnly = parseSnapshotText(
+        `- button "${GLYPH}" [ref=e1]
+- button [ref=e2]
+- button [ref=e3]`,
+        '',
+      );
+      expect(resolveSelector({ role: 'button', name: GLYPH }, iconOnly)).toBe('@e1');
+    });
+  });
+
   it('throws NotFound when nothing matches', () => {
     expect(() =>
       resolveSelector({ role: 'button', name: 'Submit' }, tree),

@@ -56,6 +56,16 @@ function norm(s: string): string {
   return s.trim().toLowerCase();
 }
 
+// The name as a person reads it in the tree view. Icon fonts put private-use
+// glyphs (Unicode category Co) into the accessible name — a checkbox can be
+// "<U+E022> Accept terms" — and they render as nothing, so a name typed in the
+// step editor never contains them. Whitespace runs (incl. nbsp) are just as
+// invisible. Only used as a FALLBACK when the strict match finds nothing, so a
+// step that resolves today keeps resolving to the same element.
+function normLoose(s: string): string {
+  return norm(s.replace(/\p{Co}/gu, '').replace(/\s+/g, ' '));
+}
+
 function matchesAncestorPath(
   ancestors: A11yNode[],
   path: { role: string; name: string }[],
@@ -77,7 +87,8 @@ function matchesAncestorPath(
  *
  * Algorithm:
  *   1. Filter by role (case-insensitive exact match).
- *   2. Among those, exact-trim match on accessible name (case-insensitive).
+ *   2. Among those, exact-trim match on accessible name (case-insensitive);
+ *      if that finds nothing, retry ignoring invisible characters (normLoose).
  *   3. If multiple remain, require textContains (case-insensitive substring of name or text).
  *   4. If multiple remain, require ancestorPath match.
  *   5. If multiple remain, use ordinal (0-indexed in document order).
@@ -96,6 +107,13 @@ export function resolveSelector(strategy: SelectorStrategy, tree: A11yTree): str
   let candidates = all.filter(
     (c) => norm(c.node.role) === wantRole && norm(c.node.name) === wantName,
   );
+
+  if (candidates.length === 0) {
+    const looseName = normLoose(strategy.name);
+    candidates = all.filter(
+      (c) => norm(c.node.role) === wantRole && normLoose(c.node.name) === looseName,
+    );
+  }
 
   if (candidates.length === 0) {
     const roleMatches = all.filter((c) => norm(c.node.role) === wantRole).map((c) => c.node);
