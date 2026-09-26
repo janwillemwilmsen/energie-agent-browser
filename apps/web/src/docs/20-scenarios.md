@@ -40,7 +40,9 @@ Payload example:
 
 Screenshot steps support a per-step **file format** — `png` (lossless, default), `jpeg`, or `webp` — plus a **quality** (1–100) for the lossy formats. Full-page captures of long pages shrink dramatically with `webp` at quality 70–85. Diffs keep working across format changes: runs pair screenshots by label + viewport, ignoring the extension.
 
-Other screenshot options: **full page** vs viewport, a one-off **mobile viewport** capture, and **annotate** (numbered labels on interactive elements, legend in the run log).
+Other screenshot options: **capture area** (full page vs viewport), a one-off **mobile viewport** capture, and **annotate** (numbered labels on interactive elements, legend in the run log).
+
+> **Screenshotting a modal or dialog?** Use a **viewport** capture. A full-page capture renders the page beyond the viewport, and fixed overlays (the dialog and its backdrop) are not drawn in that mode — you get the dimmed page but no modal. The ✎ editor on a screenshot step switches the capture area; "+ screenshot (viewport)" adds one directly.
 
 ## Retries, recording, preflights
 

@@ -104,9 +104,20 @@ export function StepEditModal({
               <span>Label</span>
               <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="screenshot" />
             </label>
-            <label style={row}>
-              <input type="checkbox" checked={fullPage} onChange={(e) => setFullPage(e.target.checked)} />
-              Full page (entire scrollable page, not just the viewport)
+            {/* An explicit choice rather than a lone "Full page" checkbox: it
+                was not obvious that unchecking it meant "viewport", and the
+                viewport capture is the one that works for modals. */}
+            <label style={col}>
+              <span>Capture area</span>
+              <select value={fullPage ? 'full' : 'viewport'} onChange={(e) => setFullPage(e.target.value === 'full')}>
+                <option value="full">Full page — the entire scrollable page</option>
+                <option value="viewport">Viewport — only what is on screen</option>
+              </select>
+              <span className="muted" style={{ fontSize: 12 }}>
+                {fullPage
+                  ? 'Fixed overlays such as modals and dialogs are not drawn in a full-page capture — use Viewport for those.'
+                  : 'Captures the visible area, including open modals and dialogs.'}
+              </span>
             </label>
             <label style={row}>
               <input type="checkbox" checked={mobile} onChange={(e) => setMobile(e.target.checked)} />
