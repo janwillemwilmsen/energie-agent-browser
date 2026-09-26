@@ -22,6 +22,7 @@ export function StepEditModal({
   // Screenshot-friendly fields.
   const [label, setLabel] = useState(String(initial.label ?? ''));
   const [fullPage, setFullPage] = useState(initial.fullPage !== false);
+  const [expandScrollers, setExpandScrollers] = useState(initial.expandScrollers === true);
   const [mobile, setMobile] = useState(initial.viewport === 'mobile');
   const [annotate, setAnnotate] = useState(initial.annotate === true);
   const [format, setFormat] = useState<string>(
@@ -41,6 +42,7 @@ export function StepEditModal({
     let payload: Record<string, unknown>;
     if (isScreenshot) {
       const next: Record<string, unknown> = { ...initial, label: label.trim() || 'screenshot', fullPage };
+      if (fullPage && expandScrollers) next.expandScrollers = true; else delete next.expandScrollers;
       if (mobile) next.viewport = 'mobile'; else delete next.viewport;
       if (annotate) next.annotate = true; else delete next.annotate;
       if (format === 'png') {
@@ -119,6 +121,24 @@ export function StepEditModal({
                   : 'Captures the visible area, including open modals and dialogs.'}
               </span>
             </label>
+            {fullPage && (
+              <label style={{ ...row, alignItems: 'flex-start' }}>
+                <input
+                  type="checkbox"
+                  checked={expandScrollers}
+                  onChange={(e) => setExpandScrollers(e.target.checked)}
+                  style={{ marginTop: 2 }}
+                />
+                <span>
+                  Expand inner scroll containers
+                  <span className="muted" style={{ display: 'block', fontSize: 12 }}>
+                    For pages where only an inner panel scrolls (the full-page shot comes out
+                    viewport-sized): temporarily unlocks it so the whole content is captured,
+                    then restores the layout.
+                  </span>
+                </span>
+              </label>
+            )}
             <label style={row}>
               <input type="checkbox" checked={mobile} onChange={(e) => setMobile(e.target.checked)} />
               Mobile viewport (switch device, capture, switch back)

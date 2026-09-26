@@ -8,6 +8,11 @@ import { TerminalShell, type TerminalShellHandle } from '../lib/TerminalShell.js
 
 const SESSION = 'default';
 
+// "compact" next to the Steps heading: cap the step list's height and scroll
+// inside it, so a long scenario doesn't push the add-step controls and the
+// Run button off screen. Remembered across scenarios like the sidebar state.
+const COMPACT_STEPS_KEY = 'eab.scenarioEditor.compactSteps';
+
 // Every Scenario Step kind the visual editor offers. `evaluate` is left to the
 // admin raw editor and the AI builder.
 const SCENARIO_KINDS = StepKind.options.filter((k) => k !== 'evaluate');
@@ -67,6 +72,20 @@ export function ScenarioEditor() {
   const [bootstrapping, setBootstrapping] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [aiModalOpen, setAiModalOpen] = useState(false);
+  const [compactSteps, setCompactSteps] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(COMPACT_STEPS_KEY) === '1';
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem(COMPACT_STEPS_KEY, compactSteps ? '1' : '0');
+    } catch {
+      /* ignore — storage may be unavailable (private mode, etc.) */
+    }
+  }, [compactSteps]);
   const [sessionAlive, setSessionAlive] = useState<boolean | null>(null);
   const [playStatus, setPlayStatus] = useState<string | null>(null);
   const [lastRunId, setLastRunId] = useState<number | null>(null);
@@ -360,7 +379,20 @@ export function ScenarioEditor() {
               title="Open this scenario in the raw steps editor (Admin)"
             >
               edit raw
-            </Link>
+            </Link>{' '}
+            <button
+              type="button"
+              className={`steps-raw-link${compactSteps ? ' active' : ''}`}
+              aria-pressed={compactSteps}
+              title={
+                compactSteps
+                  ? 'Show the full step list (no inner scrollbar)'
+                  : 'Cap the step list height and scroll inside it — handy for long scenarios'
+              }
+              onClick={() => setCompactSteps((v) => !v)}
+            >
+              {compactSteps ? 'compact ✓' : 'compact'}
+            </button>
           </h2>
           <div className="retry-policy">
             <span className="muted">On step failure, retry</span>
@@ -406,10 +438,12 @@ export function ScenarioEditor() {
               <span>times</span>
             </label>
           </div>
-          <StepList
-            store={stepStore}
-            empty="No steps yet. Take a snapshot, then click any node to add a step."
-          />
+          <div className={compactSteps ? 'step-list-compact' : undefined}>
+            <StepList
+              store={stepStore}
+              empty="No steps yet. Take a snapshot, then click any node to add a step."
+            />
+          </div>
 
           <AddStepControls
             store={stepStore}

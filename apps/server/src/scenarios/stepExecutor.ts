@@ -6,6 +6,7 @@ import type { A11yNode, A11yTree, FindLocator, SelectorStrategy, StepPayload } f
 import type { AuthSelectors } from '../authSelectors.js';
 import { resolveSelector } from './selector.js';
 import { isOptionSelector, execSelectOptionFallback } from './selectFallback.js';
+import { expandScrollers, restoreScrollers } from './expandScrollers.js';
 import { isElementNotFound, runLocatorFallback, waitForLocatorFallback } from './shadowFallback.js';
 
 // The Step executor: the ONE place a Step is carried out against a Browser.
@@ -626,6 +627,9 @@ async function screenshot(
   // agent-browser's screenshot default is VIEWPORT-only; --full captures the
   // entire scrollable page.
   const fullPage = step.fullPage !== false;
+  // App-shell pages scroll inside an inner container, which makes --full
+  // viewport-sized; see expandScrollers.ts. Only meaningful for full page.
+  const expand = fullPage && step.expandScrollers === true;
   // --annotate overlays numbered labels on interactive elements and prints a
   // legend (label [N] -> @eN role/name) to stdout.
   const annotate = step.annotate === true;
@@ -647,18 +651,30 @@ async function screenshot(
   if (annotate) args.push('--annotate');
   args.push(capturePath);
   log(
-    `screenshot${fullPage ? ' (full)' : ' (viewport)'}${mobileShot ? ' (mobile)' : ''}${annotate ? ' (annotated)' : ''}${format !== 'png' ? ` (${format} q${quality})` : ''} → ${filename}`,
+    `screenshot${fullPage ? ' (full)' : ' (viewport)'}${expand ? ' (expanded)' : ''}${mobileShot ? ' (mobile)' : ''}${annotate ? ' (annotated)' : ''}${format !== 'png' ? ` (${format} q${quality})` : ''} → ${filename}`,
   );
-  // Chrome refuses to capture while a navigation is mid-flight (the new
-  // document has no layout yet). That's transient — typically the step right
-  // after a click that navigated elsewhere. Wait for the load state and retry
-  // a few times before giving up.
-  let r = await browser.run(args, { timeoutMs: 60_000 });
-  for (let attempt = 1; r.exitCode !== 0 && isPageNotReadyError(r.stderr, r.stdout) && attempt <= SCREENSHOT_NOT_READY_RETRIES; attempt++) {
-    log(`screenshot: page not ready yet (${(r.stderr || r.stdout).trim().split('\n')[0]}) — waiting for load and retrying (${attempt}/${SCREENSHOT_NOT_READY_RETRIES})`);
-    await timing.sleep(500);
-    await waitForLoad(browser, 10_000);
+  if (expand) {
+    log(`expand scrollers: ${await expandScrollers(browser)}`);
+    // Give the browser a frame to relayout at the new document height.
+    await timing.sleep(100);
+  }
+  let r;
+  try {
+    // Chrome refuses to capture while a navigation is mid-flight (the new
+    // document has no layout yet). That's transient — typically the step right
+    // after a click that navigated elsewhere. Wait for the load state and retry
+    // a few times before giving up.
     r = await browser.run(args, { timeoutMs: 60_000 });
+    for (let attempt = 1; r.exitCode !== 0 && isPageNotReadyError(r.stderr, r.stdout) && attempt <= SCREENSHOT_NOT_READY_RETRIES; attempt++) {
+      log(`screenshot: page not ready yet (${(r.stderr || r.stdout).trim().split('\n')[0]}) — waiting for load and retrying (${attempt}/${SCREENSHOT_NOT_READY_RETRIES})`);
+      await timing.sleep(500);
+      await waitForLoad(browser, 10_000);
+      r = await browser.run(args, { timeoutMs: 60_000 });
+    }
+  } finally {
+    // Always put the page's layout back, even when the capture failed —
+    // the following steps must see the site as it really is.
+    if (expand) await restoreScrollers(browser).catch(() => {});
   }
   if (r.exitCode !== 0) throw new Error(`screenshot failed: ${r.stderr || r.stdout}`);
   if (format === 'webp') {

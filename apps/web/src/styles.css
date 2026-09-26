@@ -197,6 +197,26 @@ body {
   vertical-align: middle;
 }
 .steps-raw-link:hover { color: var(--accent); border-color: var(--accent); }
+/* The same pill as a <button> (the "compact" toggle) — strip the default
+   button chrome so it sits flush with the "edit raw" link. */
+button.steps-raw-link {
+  background: transparent;
+  cursor: pointer;
+  line-height: inherit;
+  font-family: inherit;
+}
+button.steps-raw-link.active { color: var(--accent); border-color: var(--accent); }
+
+/* "compact" on: the step list gets a fixed height and scrolls inside, so a
+   long scenario keeps the add-step controls and Run button in view. */
+.step-list-compact {
+  max-height: 420px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px 6px 4px;
+  margin-bottom: 4px;
+}
 
 /* Raw scenario-steps editor (Admin → Raw scenario steps). */
 .admin-scenario-pick { display: flex; flex-direction: column; gap: 4px; max-width: 480px; margin: 12px 0; }

@@ -31,7 +31,7 @@ export function summarizeStep(kind: string, p: Record<string, unknown>): string 
       return `${selectorLabel(sel)} → ${JSON.stringify(p.value ?? '')}`;
     case 'screenshot': {
       const format = typeof p.format === 'string' && p.format !== 'png' ? p.format : null;
-      return `${p.label ?? 'screenshot'}${p.fullPage ? ' (full)' : ''}${p.viewport === 'mobile' ? ' (mobile)' : ''}${p.annotate ? ' (annotated)' : ''}${format ? ` (${format}${p.quality ? ` q${p.quality}` : ''})` : ''}`;
+      return `${p.label ?? 'screenshot'}${p.fullPage ? (p.expandScrollers ? ' (full, expanded)' : ' (full)') : ''}${p.viewport === 'mobile' ? ' (mobile)' : ''}${p.annotate ? ' (annotated)' : ''}${format ? ` (${format}${p.quality ? ` q${p.quality}` : ''})` : ''}`;
     }
     case 'scroll': {
       if (sel) return `into view: ${selectorLabel(sel)}`;

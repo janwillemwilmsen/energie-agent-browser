@@ -120,6 +120,13 @@ const StepScreenshot = z.object({
   // Falls back to `step-<position>` when absent.
   label: z.string().optional(),
   fullPage: z.boolean().default(true),
+  // Full page only. Some sites ("app shell" layouts) pin html/body to the
+  // viewport height and scroll inside an inner container, so the document's
+  // scroll height equals the viewport and a full-page capture comes out
+  // viewport-sized. When true, the runner temporarily unlocks those inner
+  // scrollers (overflow visible, height auto) so the document grows to the
+  // real content height, captures, then restores the styles.
+  expandScrollers: z.boolean().optional(),
   // When 'mobile', the runner temporarily switches to the mobile device,
   // captures, then restores the run's viewport.
   viewport: z.enum(['mobile']).optional(),
