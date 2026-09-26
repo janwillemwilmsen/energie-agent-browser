@@ -124,7 +124,9 @@ export function AdminScenarioIO() {
         Copy scenarios between instances (e.g. dev → production) without touching the
         database directly. Export produces a portable JSON bundle — no database ids or
         timestamps, preflights referenced by name — and Import recreates each scenario
-        and its steps through the API on this instance.
+        and its steps through the API on this instance. Preflights themselves are copied
+        via <Link to="/admin/preflights-io">Export / import preflights</Link>; import those
+        first so the names resolve here.
       </p>
 
       {err && <p className="error">{err}</p>}

@@ -9,6 +9,7 @@ Everything under **/admin** is operational tooling — things you need occasiona
 | **Terminal** | Bootstrap the agent-browser session and run CLI commands directly |
 | **Raw scenario steps** | Hand-edit step rows: position, kind, raw `payload_json`. No validation beyond well-formed JSON — edit with care |
 | **Export / import scenarios** | Move scenarios between instances (e.g. dev → prod) as a portable bundle |
+| **Export / import preflights** | Same for preflights (name, description, steps, retry policy). Import these first — scenario import links preflights by name. The saved browser state is not exported; Replay on the target to rebuild it |
 | **Network inspector** | Terminal + helpers to inspect the live session's network traffic |
 | **Session state files** | List/delete persisted `--session-name` cookie/state files |
 | **Storage** | Database + screenshot/recording disk usage; delete runs or recordings to free space |

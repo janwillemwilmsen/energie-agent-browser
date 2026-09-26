@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { ArrowRightLeft, Braces, Cookie, FileCog, HardDrive, Network, Sparkles, Terminal as TerminalIcon } from 'lucide-react';
+import { ArrowRightLeft, Braces, Cookie, FileCog, HardDrive, KeyRound, Network, Sparkles, Terminal as TerminalIcon } from 'lucide-react';
 
 // Admin landing page. Gathers lower-level / operational tools that don't belong
 // in the main navigation. The Terminal lives here now instead of the top menu.
@@ -29,6 +29,13 @@ export function Admin() {
           <span>
             <strong>Export / import scenarios</strong>
             <span className="muted"> — copy scenarios between instances (e.g. dev → prod)</span>
+          </span>
+        </Link>
+        <Link to="/admin/preflights-io" className="admin-link">
+          <KeyRound size={18} aria-hidden />
+          <span>
+            <strong>Export / import preflights</strong>
+            <span className="muted"> — copy preflights (steps + retry policy, not browser state) between instances</span>
           </span>
         </Link>
         <Link to="/admin/network" className="admin-link">
