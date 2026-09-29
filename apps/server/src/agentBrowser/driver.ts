@@ -318,8 +318,6 @@ export function isSessionAlive(session: string): boolean {
   return sessionHasPidFile(session);
 }
 
-const LAUNCH_HELPER = path.join(__dirname, 'launchConnect.cjs');
-
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 // On Windows, agent-browser's CLI decides "is a daemon running?" by opening a

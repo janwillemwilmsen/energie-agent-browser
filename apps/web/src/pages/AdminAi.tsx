@@ -2,6 +2,17 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../lib/api.js';
 
+// Vercel's "go to dashboard" redirect: resolves to the current team's AI
+// Gateway page, where the credit balance is shown and topped up.
+const GATEWAY_DASHBOARD_URL = 'https://vercel.com/d?to=%2F%5Bteam%5D%2F%7E%2Fai-gateway';
+
+// The gateway bills in USD and reports amounts as decimal strings.
+const usd = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
+function formatUsd(s: string): string {
+  const n = Number(s);
+  return Number.isFinite(n) ? usd.format(n) : `$${s}`;
+}
+
 // Admin page for the AI scenario builder: pick which model the "✨ AI task"
 // agent uses. The choice is stored server-side (app_settings) and takes effect
 // on the next task — no restart needed. Clearing it falls back to the
@@ -16,6 +27,10 @@ export function AdminAi() {
     available: boolean;
   } | null>(null);
   const [models, setModels] = useState<string[]>([]);
+  const [credits, setCredits] = useState<
+    { balance: string; totalUsed: string } | null | undefined
+  >(undefined); // undefined = loading, null = unavailable
+  const [creditsError, setCreditsError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -33,6 +48,16 @@ export function AdminAi() {
   useEffect(() => {
     void refresh();
     api.listAiModels().then((r) => setModels(r.models)).catch(() => undefined);
+    api
+      .getAiCredits()
+      .then((r) => {
+        setCredits(r.credits);
+        setCreditsError(r.error);
+      })
+      .catch((e) => {
+        setCredits(null);
+        setCreditsError(e?.message ?? String(e));
+      });
   }, []);
 
   async function save(next: string) {
@@ -89,6 +114,27 @@ export function AdminAi() {
             <tr>
               <th>Built-in default</th>
               <td><code>{current.defaultModel}</code></td>
+            </tr>
+            <tr>
+              <th>Gateway credits</th>
+              <td>
+                {credits === undefined ? (
+                  <span className="muted">loading…</span>
+                ) : credits ? (
+                  <>
+                    <strong>{formatUsd(credits.balance)}</strong> remaining{' '}
+                    <span className="muted">({formatUsd(credits.totalUsed)} used to date)</span>
+                  </>
+                ) : (
+                  <span className="muted" title={creditsError ?? undefined}>
+                    unavailable{creditsError ? ` — ${creditsError}` : ''}
+                  </span>
+                )}
+                {' · '}
+                <a href={GATEWAY_DASHBOARD_URL} target="_blank" rel="noreferrer">
+                  Top up on Vercel ↗
+                </a>
+              </td>
             </tr>
           </tbody>
         </table>

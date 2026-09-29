@@ -9,6 +9,7 @@ import {
   currentModel,
   setModelSetting,
   listGatewayModels,
+  getGatewayCredits,
   DEFAULT_MODEL,
 } from '../agent/scenarioAgent.js';
 
@@ -91,6 +92,17 @@ export async function agentTasksRoutes(app: FastifyInstance) {
       return { models: await listGatewayModels() };
     } catch {
       return { models: [] };
+    }
+  });
+
+  // Remaining gateway credits (USD). Best-effort like the model list: a
+  // gateway error yields `credits: null` and the UI shows a hint instead.
+  app.get('/api/admin/ai-credits', async () => {
+    if (!agentAvailable()) return { credits: null, error: 'AI_GATEWAY_API_KEY not configured' };
+    try {
+      return { credits: await getGatewayCredits(), error: null };
+    } catch (e: any) {
+      return { credits: null, error: e?.message ?? String(e) };
     }
   });
 

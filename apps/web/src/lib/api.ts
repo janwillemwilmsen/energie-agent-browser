@@ -393,6 +393,10 @@ export const api = {
       body: JSON.stringify({ model }),
     }),
   listAiModels: () => req<{ models: string[] }>('/api/admin/ai-models'),
+  getAiCredits: () =>
+    req<{ credits: { balance: string; totalUsed: string } | null; error: string | null }>(
+      '/api/admin/ai-credits',
+    ),
   pushVapidKey: () => req<{ publicKey: string }>('/api/push/vapid-public-key'),
   pushSubscribe: (body: {
     subscription: { endpoint: string; keys: { p256dh: string; auth: string } };

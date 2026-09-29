@@ -49,6 +49,24 @@ export async function listGatewayModels(): Promise<string[]> {
     .sort();
 }
 
+// Team credit balance for the admin page (GET /v1/credits). The gateway bills
+// in USD and returns the amounts as decimal strings; passed through as-is so
+// the UI can format them.
+export interface GatewayCredits {
+  balance: string;
+  totalUsed: string;
+}
+
+export async function getGatewayCredits(): Promise<GatewayCredits> {
+  const res = await fetch(`${GATEWAY_URL}/v1/credits`, {
+    headers: { authorization: `Bearer ${process.env.AI_GATEWAY_API_KEY}` },
+  });
+  if (!res.ok) throw new Error(`gateway /v1/credits: ${res.status}`);
+  const json = (await res.json()) as { balance?: string | number; total_used?: string | number };
+  if (json.balance === undefined) throw new Error('gateway /v1/credits: no balance in response');
+  return { balance: String(json.balance), totalUsed: String(json.total_used ?? '0') };
+}
+
 export function agentAvailable(): boolean {
   return Boolean(process.env.AI_GATEWAY_API_KEY);
 }

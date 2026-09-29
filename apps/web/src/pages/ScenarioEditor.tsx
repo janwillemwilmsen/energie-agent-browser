@@ -2,9 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { StepKind } from '@eab/shared';
 import { api, type Preflight, type ScenarioDetail } from '../lib/api.js';
-import { AddStepControls, SnapshotPane, StepList, useServerStepStore } from '../lib/stepEditor/index.js';
+import { AddStepControls, SnapshotPane, StepEditorDnd, StepList, useServerStepStore } from '../lib/stepEditor/index.js';
 import { PreviewStream } from '../lib/screencast.js';
-import { TerminalShell, type TerminalShellHandle } from '../lib/TerminalShell.js';
 
 const SESSION = 'default';
 
@@ -12,6 +11,9 @@ const SESSION = 'default';
 // inside it, so a long scenario doesn't push the add-step controls and the
 // Run button off screen. Remembered across scenarios like the sidebar state.
 const COMPACT_STEPS_KEY = 'eab.scenarioEditor.compactSteps';
+// The scenario settings form folds away behind a <details>; the <summary>
+// still shows the scenario name, so a folded editor stays identifiable.
+const META_OPEN_KEY = 'eab.scenarioEditor.metaOpen';
 
 // Every Scenario Step kind the visual editor offers. `evaluate` is left to the
 // admin raw editor and the AI builder.
@@ -69,8 +71,6 @@ export function ScenarioEditor() {
   const [data, setData] = useState<ScenarioDetail | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [previewActive, setPreviewActive] = useState(false);
-  const [bootstrapping, setBootstrapping] = useState(false);
-  const [resetting, setResetting] = useState(false);
   const [aiModalOpen, setAiModalOpen] = useState(false);
   const [compactSteps, setCompactSteps] = useState<boolean>(() => {
     try {
@@ -86,17 +86,28 @@ export function ScenarioEditor() {
       /* ignore — storage may be unavailable (private mode, etc.) */
     }
   }, [compactSteps]);
-  const [sessionAlive, setSessionAlive] = useState<boolean | null>(null);
+  const [metaOpen, setMetaOpen] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(META_OPEN_KEY) !== '0';
+    } catch {
+      return true;
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem(META_OPEN_KEY, metaOpen ? '1' : '0');
+    } catch {
+      /* ignore */
+    }
+  }, [metaOpen]);
   const [playStatus, setPlayStatus] = useState<string | null>(null);
   const [lastRunId, setLastRunId] = useState<number | null>(null);
   const [draft, setDraft] = useState<MetaDraft>(emptyDraft());
   const [savingMeta, setSavingMeta] = useState(false);
   const [metaSavedAt, setMetaSavedAt] = useState<number | null>(null);
   const [preflights, setPreflights] = useState<Preflight[]>([]);
-  const termRef = useRef<TerminalShellHandle | null>(null);
 
   useEffect(() => {
-    api.sessionStatus(SESSION).then((s) => setSessionAlive(s.alive)).catch(() => undefined);
     api.listPreflights().then(setPreflights).catch(() => undefined);
   }, []);
 
@@ -138,32 +149,6 @@ export function ScenarioEditor() {
     }
   }
 
-  async function runNow() {
-    setErr(null);
-    try {
-      const run = await api.startRun(scenarioId);
-      alert(`Run #${run.id} started (status: ${run.status}). See Runs page.`);
-    } catch (e: any) {
-      setErr(e.message);
-    }
-  }
-
-  async function resetSession() {
-    setErr(null);
-    setResetting(true);
-    setSessionAlive(false);
-    try {
-      await api.closeSession(SESSION).catch(() => undefined);
-      const res = await api.bootstrapSession(SESSION);
-      setSessionAlive(res.alive);
-      if (!res.alive) setErr('Reset finished but the session did not come back up.');
-    } catch (e: any) {
-      setErr(e.message ?? String(e));
-    } finally {
-      setResetting(false);
-    }
-  }
-
   async function playScenario(opts: { reset?: boolean } = {}) {
     setErr(null);
     setPlayStatus(null);
@@ -196,25 +181,6 @@ export function ScenarioEditor() {
     }
   }
 
-  async function bootstrap() {
-    // The agent-browser native exe needs a real Windows console to start;
-    // spawning headless silently fails. The server endpoint accepts a brief
-    // console popup so the daemon can come up — a flash, then it's gone.
-    setErr(null);
-    setBootstrapping(true);
-    setSessionAlive(false);
-    try {
-      const res = await api.bootstrapSession(SESSION);
-      setSessionAlive(res.alive);
-      if (!res.alive) {
-        setErr('Bootstrap returned but session did not come up. Try clicking Bootstrap again.');
-      }
-    } catch (e: any) {
-      setErr(e.message ?? String(e));
-    } finally {
-      setBootstrapping(false);
-    }
-  }
 
   async function saveMeta(e?: React.FormEvent) {
     e?.preventDefault();
@@ -255,6 +221,23 @@ export function ScenarioEditor() {
 
   return (
     <section>
+      <details
+        className="scenario-meta"
+        open={metaOpen}
+        onToggle={(e) => setMetaOpen((e.currentTarget as HTMLDetailsElement).open)}
+      >
+        <summary className="scenario-meta-summary">
+          <span className="scenario-meta-summary-name">{data.name}</span>
+          {(data.brand || data.type) && (
+            <span className="muted">
+              {[data.brand, data.type].filter(Boolean).join(' · ')}
+            </span>
+          )}
+          {dirty && <span className="tag scenario-meta-dirty">unsaved changes</span>}
+          <span className="muted scenario-meta-summary-hint">
+            {metaOpen ? 'hide settings' : 'show settings'}
+          </span>
+        </summary>
       <form onSubmit={saveMeta} className="scenario-meta-form">
         <div className="scenario-meta-row">
           <label className="scenario-meta-name">
@@ -367,8 +350,12 @@ export function ScenarioEditor() {
           <span className="muted">uses session <code>{SESSION}</code></span>
         </div>
       </form>
+      </details>
       {err && <p className="error">{err}</p>}
 
+      {/* One drag context spans the step list and the snapshot pane, so a
+          pick button can be dragged from a snapshot row into the list. */}
+      <StepEditorDnd store={stepStore}>
       <div className="editor-grid scenario-editor">
         <div>
           <h2>
@@ -451,9 +438,6 @@ export function ScenarioEditor() {
             defaultUrl={data.url}
             onError={setErr}
           >
-            <button onClick={runNow} disabled={data.steps.length === 0}>
-              ▶ Run now
-            </button>
             <button
               onClick={() => setAiModalOpen(true)}
               title="Describe a task in plain language — an AI drives the browser and each action it takes is appended to this scenario as a replayable step"
@@ -486,14 +470,14 @@ export function ScenarioEditor() {
               {previewActive ? 'stop' : 'start'}
             </button>{' '}
             <button onClick={() => playScenario()} disabled={data.steps.length === 0}>
-              ▶ Play scenario
+              Play scenario
             </button>{' '}
             <button
               onClick={() => playScenario({ reset: true })}
-              disabled={data.steps.length === 0 || resetting}
+              disabled={data.steps.length === 0}
               title="Reset the browser session, then play the scenario"
             >
-              ↻▶ Reset &amp; play
+              Reset &amp; play
             </button>{' '}
             {playStatus &&
               (lastRunId != null ? (
@@ -506,41 +490,19 @@ export function ScenarioEditor() {
           </h2>
           <PreviewStream session={SESSION} active={previewActive} />
 
-          <h2 style={{ marginTop: 24 }}>Snapshot</h2>
+          {/* The snapshot buttons sit in the heading, like Preview's. The
+              terminal (bootstrap/reset, ad-hoc commands) lives on /terminal. */}
           <SnapshotPane
             store={stepStore}
             kinds={SCENARIO_KINDS}
             session={SESSION}
             defaultUrl={data.url}
             onError={setErr}
+            title="Snapshot"
           />
         </div>
       </div>
-
-      <h2 style={{ marginTop: 32 }}>Terminal</h2>
-      <p className="muted">
-        First-run setup: click <strong>Bootstrap default session</strong>. The URL is read from{' '}
-        <code>BROWSERLESS_URL</code> + <code>BROWSERLESS_TOKEN</code> in <code>.env</code> and
-        exposed as <code>%BROWSERLESS_CDP_URL%</code> — you never have to type it.
-      </p>
-      <div className="actions">
-        <button onClick={bootstrap} disabled={bootstrapping || resetting}>
-          {bootstrapping ? 'Bootstrapping…' : sessionAlive ? '✓ Session up — re-bootstrap' : 'Bootstrap default session'}
-        </button>
-        <button onClick={resetSession} disabled={resetting || bootstrapping}>
-          {resetting ? 'Resetting…' : 'Reset session'}
-        </button>
-        <button onClick={() => termRef.current?.send(`agent-browser --session ${SESSION} get url`)}>
-          get url
-        </button>
-        <button onClick={() => termRef.current?.send(`agent-browser --session ${SESSION} snapshot`)}>
-          snapshot
-        </button>
-        <button onClick={() => termRef.current?.send('agent-browser session list')}>
-          session list
-        </button>
-      </div>
-      <TerminalShell ref={termRef} height={340} />
+      </StepEditorDnd>
     </section>
   );
 }

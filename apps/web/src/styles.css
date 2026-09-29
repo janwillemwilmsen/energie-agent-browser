@@ -585,6 +585,35 @@ code { background: rgba(255,255,255,0.06); padding: 2px 4px; border-radius: 3px;
   opacity: 0.35;
   cursor: not-allowed;
 }
+/* Dragging a snapshot pick button into the step list: the row under the
+   pointer shows where the new step will go (before it), the end zone appears
+   below the list, and a chip follows the pointer. */
+.step-list li.step-insert-before {
+  box-shadow: inset 0 2px 0 var(--accent);
+  background: rgba(56, 189, 248, 0.08);
+}
+.step-drop-end {
+  margin: 6px 0 4px 20px;
+  padding: 8px 12px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}
+.step-drop-end.over { border-color: var(--accent); color: var(--accent); background: rgba(56, 189, 248, 0.08); }
+.pick-drag-overlay {
+  padding: 4px 10px;
+  background: var(--panel);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  font-size: 13px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+  white-space: nowrap;
+}
+.a11y-tree .picker button { cursor: grab; touch-action: none; }
+.a11y-tree .picker button.dragging { opacity: 0.4; }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
 .actions button { padding: 4px 10px; font-size: 12px; }
 
@@ -598,7 +627,7 @@ code { background: rgba(255,255,255,0.06); padding: 2px 4px; border-radius: 3px;
   border-radius: 6px;
   background: rgba(0,0,0,0.2);
   padding: 8px 12px;
-  max-height: 60vh;
+  max-height: 50vh;
   overflow: auto;
 }
 .a11y-tree li { display: flex; align-items: center; gap: 6px; padding: 1px 6px; border-radius: 4px; }
@@ -1068,15 +1097,51 @@ code { background: rgba(255,255,255,0.06); padding: 2px 4px; border-radius: 3px;
 .inline-tag-input:hover { border-color: var(--border); }
 .inline-tag-input:focus { border-color: var(--accent); outline: none; background: var(--bg); }
 
-.scenario-meta-form {
+/* The scenario settings panel: a <details> whose <summary> keeps the scenario
+   name visible when folded, with the form inside. (Preflight.tsx reuses the
+   form styles without the <details>, hence the split.) */
+.scenario-meta {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 14px 16px;
   margin: 0 0 16px;
+  max-width: 720px;
+}
+.scenario-meta-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 16px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+.scenario-meta-summary::-webkit-details-marker { display: none; }
+.scenario-meta-summary::before {
+  content: '▸';
+  color: var(--muted);
+  font-size: 12px;
+  transition: transform 0.12s ease;
+}
+.scenario-meta[open] > .scenario-meta-summary::before { transform: rotate(90deg); }
+.scenario-meta-summary:hover { color: var(--accent); }
+.scenario-meta-summary-name { font-weight: 600; font-size: 15px; }
+.scenario-meta-summary-hint { margin-left: auto; font-size: 12px; }
+.scenario-meta-dirty { background: rgba(245, 158, 11, 0.18); color: #fbbf24; }
+.scenario-meta[open] > .scenario-meta-summary { border-bottom: 1px solid var(--border); }
+.scenario-meta-form {
+  padding: 14px 16px;
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+/* The Preflight page uses the form styles standalone — keep its panel look. */
+.scenario-meta-form:not(.scenario-meta > .scenario-meta-form) {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin: 0 0 16px;
   max-width: 720px;
 }
 .scenario-meta-form label {

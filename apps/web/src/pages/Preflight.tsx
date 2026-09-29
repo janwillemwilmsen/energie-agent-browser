@@ -1,7 +1,7 @@
 import { Fragment, useMemo, useState } from 'react';
 import { PreflightStep as PreflightStepSchema } from '@eab/shared';
 import { api, type AuthProfile, type Preflight, type PreflightStep } from '../lib/api.js';
-import { AddStepControls, SnapshotPane, StepList, useDraftStepStore } from '../lib/stepEditor/index.js';
+import { AddStepControls, SnapshotPane, StepEditorDnd, StepList, useDraftStepStore } from '../lib/stepEditor/index.js';
 import { PreviewStream } from '../lib/screencast.js';
 import { useResource } from '../lib/resource.js';
 
@@ -403,6 +403,9 @@ export function PreflightPage() {
         onError={setError}
       />
 
+      {/* One drag context spans the step list and the snapshot pane (drag a
+          pick button into the list to insert a step at a position). */}
+      <StepEditorDnd store={stepStore}>
       <div className="editor-grid preflight-editor">
         <div className="pf-steps">
           <h2>Steps</h2>
@@ -512,6 +515,7 @@ export function PreflightPage() {
           <PreviewStream session={RECORDER_SESSION} active={previewActive} />
         </div>
       </div>
+      </StepEditorDnd>
     </section>
   );
 }

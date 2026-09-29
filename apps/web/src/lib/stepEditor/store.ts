@@ -26,6 +26,11 @@ export interface StepStore {
   busy: boolean;
   /** Append a Step. Failures are reported through the adapter's onError. */
   add(kind: string, payload: Record<string, unknown>): Promise<void>;
+  /**
+   * Insert a Step before the one at `index` (`index >= steps.length` appends).
+   * Used by drag-and-drop from the snapshot picker into the list.
+   */
+  insertAt(index: number, kind: string, payload: Record<string, unknown>): Promise<void>;
   /** Replace a Step's payload. Rejects on failure so an edit form can show it. */
   update(id: StepId, payload: Record<string, unknown>): Promise<void>;
   remove(id: StepId): Promise<void>;
@@ -103,6 +108,25 @@ export function useServerStepStore(opts: ServerStepStoreOptions): StepStore {
     busy,
     add: (kind, payload) =>
       mutate(() => api.addStep(scenarioId, { position: rows.length, kind, payload }).then(() => undefined)),
+    insertAt: (index, kind, payload) =>
+      mutate(async () => {
+        // The API appends; the insert is the append plus a reorder that
+        // splices the new id in (the insert endpoint does not shift positions).
+        // The reorder is built from the server's current list, not this
+        // page's — the scenario may have been edited elsewhere meanwhile, and
+        // the reorder endpoint rejects an id list that does not match.
+        const created = await api.addStep(scenarioId, { position: rows.length, kind, payload });
+        const fresh = await api.getScenario(scenarioId);
+        const ids = fresh.steps
+          .slice()
+          .sort((a, b) => a.position - b.position || a.id - b.id)
+          .map((r) => r.id)
+          .filter((id) => id !== created.id);
+        const at = Math.min(Math.max(0, index), ids.length);
+        if (at === ids.length) return; // appended already
+        ids.splice(at, 0, created.id);
+        await api.reorderSteps(scenarioId, ids);
+      }),
     update: async (id, payload) => {
       const row = rows.find((r) => r.id === id);
       if (!row) throw new Error('step no longer exists');
@@ -163,6 +187,22 @@ export function useDraftStepStore<T extends { kind: string }>(opts: DraftStepSto
       }
       if (onAdd) await onAdd(step);
       else setSteps((prev) => [...prev, step]);
+    },
+    insertAt: async (index, kind, payload) => {
+      // A plain splice into the draft — deliberately not `onAdd`, which on the
+      // Preflight page executes the step live (that only makes sense at the end).
+      let step: T;
+      try {
+        step = editableToDraft<T>(kind, payload);
+      } catch (e: any) {
+        onError(e?.message ?? String(e));
+        return;
+      }
+      setSteps((prev) => {
+        const next = prev.slice();
+        next.splice(Math.min(Math.max(0, index), next.length), 0, step);
+        return next;
+      });
     },
     update: async (id, payload) => {
       const index = Number(id);

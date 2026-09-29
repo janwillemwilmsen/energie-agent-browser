@@ -1,70 +1,46 @@
 import { useState, type ReactNode } from 'react';
-import {
-  DndContext,
-  KeyboardSensor,
-  PointerSensor,
-  closestCenter,
-  useSensor,
-  useSensors,
-  type DragEndEvent,
-} from '@dnd-kit/core';
-import {
-  SortableContext,
-  arrayMove,
-  sortableKeyboardCoordinates,
-  useSortable,
-  verticalListSortingStrategy,
-} from '@dnd-kit/sortable';
+import { useDroppable } from '@dnd-kit/core';
+import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { StepEditModal } from './StepEditModal.js';
 import { summarizeStep } from './summarize.js';
+import { STEP_LIST_END, useStepDnd } from './StepDnd.js';
 import type { EditableStep, StepStore } from './store.js';
 
 // The ordered, drag-reorderable list of Steps with edit / move / delete on
 // every row and the edit modal. Everything persists through the StepStore.
+// Drag-and-drop (reordering, and dropping a snapshot pick into the list) is
+// provided by the surrounding <StepEditorDnd>; this component only marks the
+// rows sortable and offers the drop targets.
 export function StepList({ store, empty }: { store: StepStore; empty: ReactNode }) {
   const [editing, setEditing] = useState<EditableStep | null>(null);
-  const sensors = useSensors(
-    // A small drag threshold so a click on the handle still works as a click.
-    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
-  );
-
-  function onDragEnd(event: DragEndEvent) {
-    const { active, over } = event;
-    if (!over || active.id === over.id) return;
-    const ids = store.steps.map((s) => s.id);
-    const from = ids.indexOf(active.id as EditableStep['id']);
-    const to = ids.indexOf(over.id as EditableStep['id']);
-    if (from === -1 || to === -1) return;
-    void store.reorder(arrayMove(ids, from, to));
-  }
+  const { activePick } = useStepDnd();
 
   return (
     <>
       {store.steps.length === 0 ? (
         <p className="muted">{empty}</p>
       ) : (
-        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
-          <SortableContext items={store.steps.map((s) => s.id)} strategy={verticalListSortingStrategy}>
-            <ol className="step-list">
-              {store.steps.map((s, idx) => (
-                <StepRow
-                  key={s.id}
-                  step={s}
-                  idx={idx}
-                  total={store.steps.length}
-                  busy={store.busy}
-                  onEdit={() => setEditing(s)}
-                  onMoveUp={() => void store.move(s.id, 'up')}
-                  onMoveDown={() => void store.move(s.id, 'down')}
-                  onDelete={() => void store.remove(s.id)}
-                />
-              ))}
-            </ol>
-          </SortableContext>
-        </DndContext>
+        <SortableContext items={store.steps.map((s) => s.id)} strategy={verticalListSortingStrategy}>
+          <ol className="step-list">
+            {store.steps.map((s, idx) => (
+              <StepRow
+                key={s.id}
+                step={s}
+                idx={idx}
+                total={store.steps.length}
+                busy={store.busy}
+                pickDragging={activePick != null}
+                onEdit={() => setEditing(s)}
+                onMoveUp={() => void store.move(s.id, 'up')}
+                onMoveDown={() => void store.move(s.id, 'down')}
+                onDelete={() => void store.remove(s.id)}
+              />
+            ))}
+          </ol>
+        </SortableContext>
       )}
+      <EndDropZone visible={activePick != null} />
 
       {editing && (
         <StepEditModal
@@ -80,11 +56,24 @@ export function StepList({ store, empty }: { store: StepStore; empty: ReactNode 
   );
 }
 
+// Where a dragged pick lands to become the LAST step. Only shown mid-drag so
+// it costs no space otherwise; also the only target when the list is empty.
+function EndDropZone({ visible }: { visible: boolean }) {
+  const { setNodeRef, isOver } = useDroppable({ id: STEP_LIST_END });
+  if (!visible) return null;
+  return (
+    <div ref={setNodeRef} className={`step-drop-end${isOver ? ' over' : ''}`}>
+      drop here to add as the last step
+    </div>
+  );
+}
+
 function StepRow({
   step,
   idx,
   total,
   busy,
+  pickDragging,
   onEdit,
   onMoveUp,
   onMoveDown,
@@ -94,12 +83,13 @@ function StepRow({
   idx: number;
   total: number;
   busy: boolean;
+  pickDragging: boolean;
   onEdit: () => void;
   onMoveUp: () => void;
   onMoveDown: () => void;
   onDelete: () => void;
 }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging, isOver } = useSortable({
     id: step.id,
   });
   const style: React.CSSProperties = {
@@ -107,8 +97,10 @@ function StepRow({
     transition,
     opacity: isDragging ? 0.5 : 1,
   };
+  // A pick hovering this row will be inserted BEFORE it.
+  const insertBefore = pickDragging && isOver;
   return (
-    <li ref={setNodeRef} style={style}>
+    <li ref={setNodeRef} style={style} className={insertBefore ? 'step-insert-before' : undefined}>
       <button
         className="step-drag"
         title="Drag to reorder"

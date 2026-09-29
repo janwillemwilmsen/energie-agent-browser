@@ -70,7 +70,7 @@ export function Admin() {
           <Sparkles size={18} aria-hidden />
           <span>
             <strong>AI scenario builder</strong>
-            <span className="muted"> — choose which model the ✨ AI task agent uses</span>
+            <span className="muted"> — choose which model the ✨ AI task agent uses, and see AI budget remaining</span>
           </span>
         </Link>
       </div>
