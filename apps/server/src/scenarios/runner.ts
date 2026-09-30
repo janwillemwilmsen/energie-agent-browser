@@ -364,6 +364,11 @@ export function startRun(scenarioId: number, opts: StartRunOptions = {}): Starte
               // navigates (login), and `record start` poisons the next navigation —
               // so we wait and start recording after the scenario's first navigation.
               if (preflightSteps.length > 0) {
+                // Same viewport as the run's first pass, so the preflight sees the
+                // page the scenario will see. A fresh daemon starts at agent-
+                // browser's default (1280×720), and a consent dialog can render
+                // differently — or with a different button — across that breakpoint.
+                await applyViewport(browser, viewports[0] ?? 'desktop', preflightCtx.log);
                 await executeSteps(preflightCtx, preflightSteps, preflightPolicy);
                 appendLog(ctx, `preflight "${name}": ok`);
               }

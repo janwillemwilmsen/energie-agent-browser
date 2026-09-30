@@ -4,7 +4,8 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { browserlessApiBase, browserlessCdpUrl, config, localBrowserArgs } from '../config.js';
+import { config } from '../config.js';
+import { backendEnv, bootstrapArgs, currentBackend, isRemote } from './backend.js';
 import { planOpen, type OpenIntent } from './sessionPlan.js';
 export type { OpenIntent } from './sessionPlan.js';
 
@@ -204,45 +205,17 @@ function killProcessTree(pid: number): void {
 const DEBUG = process.env.AB_DRIVER_DEBUG === '1';
 
 /**
- * The environment every agent-browser process gets: the local-vs-browserless
- * wiring and the stealth knobs. The terminal's shell builds on it too.
+ * The environment every agent-browser process gets: the wiring for the
+ * configured backend (local / cdp / browserless.io) plus the stealth knobs.
+ * The terminal's shell builds on it too.
  */
 export function agentBrowserEnv(): NodeJS.ProcessEnv {
-  if (config.browser.mode === 'local') {
-    // Local mode: agent-browser launches its own installed browser, so there is
-    // no wss `launch` query to fold the Chromium args into — they travel via
-    // AGENT_BROWSER_ARGS instead. No BROWSERLESS_* wiring (setting it would make
-    // agent-browser try to auto-connect to a remote it shouldn't touch here).
-    const env: NodeJS.ProcessEnv = { ...process.env };
-    env.AGENT_BROWSER_ARGS = localBrowserArgs();
-    if (config.browser.executablePath) {
-      env.AGENT_BROWSER_EXECUTABLE_PATH = config.browser.executablePath;
-    }
-    if (config.stealth.enabled) {
-      if (config.stealth.userAgent) env.AGENT_BROWSER_USER_AGENT = config.stealth.userAgent;
-      if (config.stealth.initScript) env.AGENT_BROWSER_INIT_SCRIPTS = config.stealth.initScript;
-    }
-    return env;
-  }
+  return backendEnv(currentBackend().backend);
+}
 
-  // Make BROWSERLESS_API_KEY available so spawned commands never trigger an
-  // auto-launch error, but do NOT set AGENT_BROWSER_PROVIDER — the self-hosted
-  // browserless lacks the REST API the provider mode expects. We always go
-  // through explicit `connect wss://...` instead.
-  const env: NodeJS.ProcessEnv = {
-    ...process.env,
-    BROWSERLESS_API_KEY: config.browserless.token,
-    BROWSERLESS_API_URL: browserlessApiBase(),
-  };
-  if (config.stealth.enabled) {
-    // We connect to a REMOTE browser via CDP, so Chromium-launch args go via
-    // the wss `launch` query (in browserlessCdpUrl()) rather than AGENT_BROWSER_ARGS.
-    // The two runtime-applied knobs still travel via env so every agent-browser
-    // invocation gets them.
-    if (config.stealth.userAgent) env.AGENT_BROWSER_USER_AGENT = config.stealth.userAgent;
-    if (config.stealth.initScript) env.AGENT_BROWSER_INIT_SCRIPTS = config.stealth.initScript;
-  }
-  return env;
+/** The native agent-browser binary the driver spawns (for admin tools like doctor/install). */
+export function nativeBin(): string {
+  return NATIVE_BIN;
 }
 
 function runRaw(args: string[], timeoutMs: number): Promise<RunResult> {
@@ -496,12 +469,13 @@ async function spawnConnectDetached(session: string, sessionName?: string | null
   // up. That chicken-and-egg makes the very first `--session-name` bootstrap
   // fail with "Could not configure browser … No such file or directory
   // (os error 2)". Pre-create it so binding a brand-new preflight works.
+  const { backend } = currentBackend();
   const cliArgs = ['--session', session];
   if (sessionName) {
     try {
       fs.mkdirSync(path.join(os.homedir(), '.agent-browser', 'sessions'), { recursive: true });
     } catch { /* best-effort; agent-browser may still create it itself */ }
-    // Only wss/browserless mode passes --session-name to the CLI. In LOCAL mode
+    // Only remote backends pass --session-name to the CLI. In LOCAL mode
     // we deliberately do NOT: --session-name turns on agent-browser's own
     // auto-save/auto-restore of session state, which is a no-op over wss but
     // fully active against the local on-disk store. That auto behavior re-seeds
@@ -514,17 +488,12 @@ async function spawnConnectDetached(session: string, sessionName?: string | null
     // on Save/Replay), so a wiped state file must mean a truly empty browser.
     // writeSessionName still records the binding for reuse detection, so this
     // only disables the redundant, racy auto path — not "already logged in".
-    if (config.browser.mode !== 'local') cliArgs.push('--session-name', sessionName);
+    if (isRemote(backend)) cliArgs.push('--session-name', sessionName);
   }
-  if (config.browser.mode === 'local') {
-    // Boot agent-browser's locally-installed browser and keep the session
-    // daemon alive. There's no remote to `connect` to; opening a cheap,
-    // side-effect-free page is what spawns the daemon + launches the browser.
-    // The recorder's first real navigation replaces about:blank.
-    cliArgs.push('open', 'about:blank');
-  } else {
-    cliArgs.push('connect', browserlessCdpUrl());
-  }
+  // Local / cloud provider: opening a cheap, side-effect-free page is what
+  // spawns the daemon + launches (or creates) the browser; the recorder's
+  // first real navigation replaces about:blank. cdp: connect to the remote.
+  cliArgs.push(...bootstrapArgs(backend));
 
   // Spawn the daemon via a PLAIN child spawn. Up to agent-browser 0.28 the
   // Windows exe needed a pty (conpty) to start its CDP client, but 0.29+
@@ -704,6 +673,14 @@ export async function openSession(session: string, intent: OpenIntent): Promise<
       // we remove it; it writes synchronously today, so this is a safety margin.
       await new Promise((r) => setTimeout(r, 300));
       clearPersistedSessionState(plan.wipeName);
+    } else if (plan.connect && plan.sessionName && !plan.loadState) {
+      // "Clean daemon bound to the name" (preflight steps mode): the app's own
+      // state file stays, but agent-browser's auto-saved copy must go — it is
+      // written at every shutdown of a bound daemon and re-applied on start,
+      // and a restored consent cookie hides the banner the preflight's first
+      // click is looking for (Vandebron: "Alle cookies accepteren" never found).
+      await new Promise((r) => setTimeout(r, 300));
+      clearAutoSavedState(session, plan.sessionName);
     }
     if (plan.connect) {
       await connectSession(session, plan.sessionName, !plan.loadState);
@@ -895,9 +872,18 @@ async function closeSessionLocked(session: string): Promise<void> {
   //   - Save preflight (PUT /api/preflights/:id) writes when the daemon is
   //     currently bound to that preflight's --session-name.
 
-  // Skip the graceful-close CLI round-trip (3-10 s on Windows). Just kill the
-  // process and wipe the session marker files — the browserless side will
-  // garbage-collect the wss session on its own idle timeout.
+  // Local browser: skip the graceful-close CLI round-trip (3-10 s on Windows).
+  // Just kill the process and wipe the session marker files.
+  //
+  // Remote browser (cdp / browserless.io): ask the daemon to close first, so
+  // the remote session is released now rather than at the provider's idle
+  // TTL. A hosted plan has a small concurrency cap (browserless.io free: 2)
+  // and QUEUES connections beyond it — every "fresh session" restart that
+  // left its predecessor alive was one slot burned for up to TTL, and the
+  // third run in a row simply hung. Bounded: a stuck daemon still gets killed.
+  if (isRemote(currentBackend().backend) && isSessionAlive(session)) {
+    await runRaw(['--session', session, 'close'], 10_000).catch(() => undefined);
+  }
   const knownPort = readPortMarker(session);
   try {
     const pid = Number(
@@ -966,4 +952,17 @@ export function clearPersistedSessionState(sessionName: string): void {
   ]) {
     try { fs.rmSync(candidate, { recursive: true, force: true }); } catch { /* ignore */ }
   }
+  clearAutoSavedState(DEFAULT_SESSION, sessionName);
+}
+
+// agent-browser's own auto-save for a daemon bound to a --session-name lives
+// at sessions/<name>-<session>.json (distinct from the app's canonical
+// sessions/<name>.json). It is rewritten on every shutdown of that daemon and
+// loaded again on the next start — including on a local backend, where the
+// driver never passes --session-name (the name marker alone is enough for
+// agent-browser 0.38). Remove it when the caller wants a genuinely clean
+// browser; the app's explicit state load/save is unaffected.
+export function clearAutoSavedState(session: string, sessionName: string): void {
+  const file = path.join(os.homedir(), '.agent-browser', 'sessions', `${sessionName}-${session}.json`);
+  try { fs.rmSync(file, { force: true }); } catch { /* ignore */ }
 }

@@ -3,8 +3,8 @@ import * as pty from 'node-pty';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { config, browserlessCdpUrl } from '../config.js';
 import { agentBrowserEnv, DEFAULT_SESSION } from '../agentBrowser/driver.js';
+import { cdpConnectUrl, currentBackend } from '../agentBrowser/backend.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -46,7 +46,7 @@ function ptyEnv(): NodeJS.ProcessEnv {
   ];
   const pathSep = process.platform === 'win32' ? ';' : ':';
   const currentPath = process.env.PATH ?? '';
-  // The same wiring every agent-browser process gets (local vs browserless,
+  // The same wiring every agent-browser process gets (the configured backend,
   // stealth), plus what a shell needs: the bin dirs on PATH, the shared
   // session as the default --session, and the CDP URL for a manual `connect`.
   const env: NodeJS.ProcessEnv = {
@@ -54,7 +54,8 @@ function ptyEnv(): NodeJS.ProcessEnv {
     PATH: `${binDirs.join(pathSep)}${pathSep}${currentPath}`,
     AGENT_BROWSER_SESSION: DEFAULT_SESSION,
   };
-  if (config.browser.mode !== 'local') env.BROWSERLESS_CDP_URL = browserlessCdpUrl();
+  const { backend } = currentBackend();
+  if (backend.kind === 'cdp') env.BROWSERLESS_CDP_URL = cdpConnectUrl(backend);
   return env;
 }
 

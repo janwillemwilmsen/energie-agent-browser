@@ -45,6 +45,7 @@ import { AdminPreflightIO } from './pages/AdminPreflightIO.js';
 import { AdminNetwork } from './pages/AdminNetwork.js';
 import { AdminSessionStates } from './pages/AdminSessionStates.js';
 import { AdminAi } from './pages/AdminAi.js';
+import { AdminBrowser } from './pages/AdminBrowser.js';
 import { AdminStorage } from './pages/AdminStorage.js';
 import { AdminEnv } from './pages/AdminEnv.js';
 
@@ -227,6 +228,7 @@ export function App() {
           <Route path="/admin/network" element={<AdminNetwork />} />
           <Route path="/admin/session-states" element={<AdminSessionStates />} />
           <Route path="/admin/ai" element={<AdminAi />} />
+          <Route path="/admin/browser" element={<AdminBrowser />} />
           <Route path="/admin/storage" element={<AdminStorage />} />
           <Route path="/admin/env" element={<AdminEnv />} />
           <Route path="/preflight" element={<PreflightPage />} />

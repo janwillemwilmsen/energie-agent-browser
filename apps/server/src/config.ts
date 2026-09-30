@@ -38,6 +38,8 @@ export interface Config {
   dataDir: string;
   migrationsDir: string;
   browser: {
+    // Env fallback for the browser backend (an admin setting overrides it,
+    // see agentBrowser/backend.ts):
     // 'browserless' → the session daemon connects to a remote CDP over wss
     //   (the original behaviour; requires BROWSERLESS_URL/TOKEN).
     // 'local'       → the session daemon launches agent-browser's locally-installed
@@ -199,56 +201,5 @@ export const config: Config = {
   get email() { return resolved().email; },
 };
 
-/** The browserless HTTP API base for its configured wss URL (wss→https, ws→http). */
-export function browserlessApiBase(): string {
-  return config.browserless.url
-    .replace(/^wss:\/\//, 'https://')
-    .replace(/^ws:\/\//, 'http://')
-    .replace(/\/+$/, '');
-}
-
-export function browserlessCdpUrl(): string {
-  const u = new URL(config.browserless.url);
-  // Browserless v2 expects the CDP WebSocket on /chromium (or /devtools/browser/<id>
-  // for re-attach). The bare root is documented as a backward-compat alias but
-  // the v2.x build here returns 404 on root and only honours /chromium.
-  if (!u.pathname || u.pathname === '/' || u.pathname === '') {
-    u.pathname = '/chromium';
-  }
-  u.searchParams.set('token', config.browserless.token);
-
-  if (config.stealth.enabled) {
-    const launch: Record<string, unknown> = {};
-    const args = config.stealth.launchArgs.split(/\s+/).map((s) => s.trim()).filter(Boolean);
-    if (args.length) launch.args = args;
-    const ignore = config.stealth.ignoreDefaultArgs.split(/\s+/).map((s) => s.trim()).filter(Boolean);
-    if (ignore.length) launch.ignoreDefaultArgs = ignore;
-    if (config.stealth.userAgent) launch.userAgent = config.stealth.userAgent;
-    if (Object.keys(launch).length) {
-      // Browserless v2 accepts JSON or base64 here. Base64 is more reliable
-      // because URL-encoded JSON sometimes confuses query parsers (commas in
-      // values, especially the trailing `}` getting interpreted oddly).
-      const b64 = Buffer.from(JSON.stringify(launch)).toString('base64');
-      u.searchParams.set('launch', b64);
-    }
-  }
-
-  return u.toString();
-}
-
-// Chromium launch args for local mode, comma-joined for AGENT_BROWSER_ARGS
-// (agent-browser accepts comma- or newline-separated). Starts from the same
-// stealth args that browserless mode folds into the wss `launch` query, then
-// appends the two flags Chromium needs to run inside a container: it can't use
-// its sandbox as root, and the default /dev/shm is too small so shared memory
-// must go to /tmp. Both are harmless on a dev box, so we add them in every
-// local-mode environment rather than gating on "is this a container".
-export function localBrowserArgs(): string {
-  const args = config.stealth.enabled
-    ? config.stealth.launchArgs.split(/\s+/).map((s) => s.trim()).filter(Boolean)
-    : [];
-  for (const req of ['--no-sandbox', '--disable-dev-shm-usage']) {
-    if (!args.includes(req)) args.push(req);
-  }
-  return args.join(',');
-}
+// The env-derived browser backend is only the fallback; the resolved one
+// (admin setting → env) and its URL/env builders live in agentBrowser/backend.ts.

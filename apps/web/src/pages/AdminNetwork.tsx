@@ -1,6 +1,8 @@
 import { useRef } from 'react';
 import { Link } from 'react-router-dom';
+import { api, type BrowserHealth } from '../lib/api.js';
 import { TerminalShell, type TerminalShellHandle } from '../lib/TerminalShell.js';
+import { useResource } from '../lib/resource.js';
 
 // Admin → Network inspector. Reuses the shared TerminalShell component and adds
 // a button bar built around agent-browser's `network` subcommand, so an operator
@@ -13,6 +15,11 @@ const ab = (cmd: string) => `agent-browser --session ${SESSION} ${cmd}`;
 export function AdminNetwork() {
   const termRef = useRef<TerminalShellHandle | null>(null);
   const run = (cmd: string) => termRef.current?.send(cmd);
+  // The bootstrap line depends on BROWSER_MODE (local: open a page; browserless:
+  // connect to the remote CDP), so the server tells us which one applies.
+  const { data: health } = useResource(() => api.browserHealth(), {
+    initial: null as BrowserHealth | null,
+  });
 
   // Navigate the live session somewhere so there's traffic to inspect. Quote the
   // URL so query strings / special chars survive the shell.
@@ -63,8 +70,9 @@ export function AdminNetwork() {
         </button>
         {/* The terminal can't inspect anything until a daemon is alive. */}
         <button
-          onClick={() => run(`agent-browser --session ${SESSION} connect "%BROWSERLESS_CDP_URL%"`)}
-          title="Start the default agent-browser daemon if it isn't already running"
+          disabled={!health}
+          onClick={() => health && run(health.bootstrapCommand)}
+          title={health?.bootstrapCommand ?? "Start the default agent-browser daemon if it isn't already running"}
         >
           Bootstrap session
         </button>

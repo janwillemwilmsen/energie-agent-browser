@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { ArrowRightLeft, Braces, Cookie, FileCog, HardDrive, KeyRound, Network, Sparkles, Terminal as TerminalIcon } from 'lucide-react';
+import { AppWindow, ArrowRightLeft, Braces, Cookie, FileCog, HardDrive, KeyRound, Network, Sparkles, Terminal as TerminalIcon } from 'lucide-react';
 
 // Admin landing page. Gathers lower-level / operational tools that don't belong
 // in the main navigation. The Terminal lives here now instead of the top menu.
@@ -15,6 +15,13 @@ export function Admin() {
           <span>
             <strong>Terminal</strong>
             <span className="muted"> — bootstrap the agent-browser session and run commands</span>
+          </span>
+        </Link>
+        <Link to="/admin/browser" className="admin-link">
+          <AppWindow size={18} aria-hidden />
+          <span>
+            <strong>Browser</strong>
+            <span className="muted"> — choose local / self-hosted browserless / browserless.io, test it, install the local browser</span>
           </span>
         </Link>
         <Link to="/admin/scenario-steps" className="admin-link">

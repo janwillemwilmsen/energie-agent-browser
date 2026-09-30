@@ -15,7 +15,9 @@ on-demand or on a weekly cron.
 
 ```sh
 cp .env.example .env
-# Fill in BROWSERLESS_TOKEN
+# BROWSER_MODE=local (the default in every deployment config) runs agent-browser's
+# own installed browser: `npx agent-browser install --with-deps` once.
+# BROWSER_MODE=browserless connects to a remote instance and needs BROWSERLESS_URL/TOKEN.
 
 npm install
 npm run migrate
@@ -28,9 +30,13 @@ npm run dev
 ## Bootstrapping a browser session
 
 The first time you load the editor or terminal, no agent-browser daemon is running.
-You bootstrap a named session via the **Terminal** tab in the UI:
+You bootstrap a named session via the **Terminal** tab in the UI (the
+**Bootstrap default session** button sends the right line for the configured mode):
 
 ```
+# BROWSER_MODE=local — opening a page is what launches the local browser
+agent-browser --session editor open about:blank
+# BROWSER_MODE=browserless — the terminal shell exports BROWSERLESS_CDP_URL
 agent-browser --session editor connect "%BROWSERLESS_CDP_URL%"
 ```
 

@@ -5,7 +5,7 @@ import { getDb } from '../db/index.js';
 import { boundSessionName, openSession, persistSessionState, DEFAULT_SESSION } from '../agentBrowser/driver.js';
 import { cliBrowser } from '../agentBrowser/cliBrowser.js';
 import { getAuthSelectors } from '../authSelectors.js';
-import { executeStep, executeSteps, type StepContext } from '../scenarios/stepExecutor.js';
+import { applyViewport, executeStep, executeSteps, type StepContext } from '../scenarios/stepExecutor.js';
 
 // The recorder and Replay both drive the shared recorder session through the
 // Step executor, so a preflight step behaves exactly as it will inside a
@@ -261,7 +261,11 @@ export async function preflightsRoutes(app: FastifyInstance) {
         // with a gap between close and re-bootstrap it would slip in and
         // auto-launch its own unnamed daemon, colliding with ours.
         await openSession(DEFAULT_SESSION, { intent: 'replay', sessionName: row.name });
-        await executeSteps(recorderStepContext(), indexed, policy);
+        // Replay at the desktop run viewport, as a scenario run applies it
+        // before the preflight steps — not agent-browser's 1280×720 default.
+        const replayCtx = recorderStepContext();
+        await applyViewport(replayCtx.browser, 'desktop', replayCtx.log);
+        await executeSteps(replayCtx, indexed, policy);
 
         // Replay completed → persist the freshly-built state to disk. This is
         // the ONE place (along with the Save preflight handler) that's allowed

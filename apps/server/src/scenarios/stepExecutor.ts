@@ -292,7 +292,17 @@ export async function executeStep(ctx: StepContext, step: StepPayload, position 
       // selector targets the combobox itself (options have no box model).
       if (value !== undefined) args.push(value);
       log(`${step.kind} ${ref}`);
-      const r = await browser.run(args, { timeoutMs: 30_000 });
+      let r = await browser.run(args, { timeoutMs: 30_000 });
+      // Refs are bound to one snapshot; if the DOM re-rendered between our
+      // snapshot and the click (a cookie banner still hydrating — wider window
+      // on a remote browser), agent-browser answers "Unknown ref". Resolve the
+      // same role+name against the page as it is now and try once more.
+      if (r.exitCode !== 0 && !selector.locator && /unknown ref/i.test(r.stderr + r.stdout)) {
+        const again = await resolveRef(ctx, timing, selector);
+        log(`${step.kind}: ${ref} went stale — re-resolved to ${again}, retrying`);
+        args[1] = again;
+        r = await browser.run(args, { timeoutMs: 30_000 });
+      }
       if (r.exitCode !== 0) {
         // CSS/text/xpath locators don't pierce shadow DOM in agent-browser;
         // retry in-page via a deep query over open shadow roots.
@@ -536,9 +546,19 @@ function diagnoseFailure(
 // browser's --session-name state-load path and the new command. Verify the
 // URL really changed; if it stays blank for a few seconds, re-issue the open
 // and try again.
+//
+// A snapshot that keeps FAILING is a different problem (the daemon stopped
+// answering after the load — seen with remote browsers on heavy pages), so
+// the log names that instead of pretending the URL was blank.
 const NAV_ATTEMPTS = 3;
 async function navigate(ctx: StepContext, timing: Timing, url: string): Promise<void> {
   let lastUrl = '';
+  let lastSnapshotErr: string | null = null;
+  let snapshotsOk = 0;
+  const state = () =>
+    snapshotsOk === 0 && lastSnapshotErr
+      ? `no snapshot answered (last error: ${lastSnapshotErr})`
+      : `URL still "${lastUrl || 'about:blank'}"`;
   for (let attempt = 1; attempt <= NAV_ATTEMPTS; attempt++) {
     const r = await ctx.browser.run(['open', url], { timeoutMs: 60_000 });
     if (r.exitCode !== 0) throw new Error(`navigate failed: ${r.stderr || r.stdout}`);
@@ -546,16 +566,17 @@ async function navigate(ctx: StepContext, timing: Timing, url: string): Promise<
     do {
       try {
         const tree = await ctx.browser.snapshot();
+        snapshotsOk++;
         lastUrl = tree.url || '';
         if (lastUrl && lastUrl !== 'about:blank' && !lastUrl.startsWith('chrome://')) return;
-      } catch { /* keep polling */ }
+      } catch (e: any) {
+        lastSnapshotErr = (e?.message ?? String(e)).slice(0, 200);
+      }
       await timing.sleep(timing.navPollMs);
     } while (Date.now() < deadline);
-    if (attempt < NAV_ATTEMPTS) ctx.log(`navigate: URL still "${lastUrl || 'about:blank'}" — re-issuing open (${attempt}/${NAV_ATTEMPTS})`);
+    if (attempt < NAV_ATTEMPTS) ctx.log(`navigate: ${state()} — re-issuing open (${attempt}/${NAV_ATTEMPTS})`);
   }
-  throw new Error(
-    `navigate did not stick: tried open(${url}) ${NAV_ATTEMPTS}× but URL stayed at "${lastUrl || 'about:blank'}".`,
-  );
+  throw new Error(`navigate did not stick: tried open(${url}) ${NAV_ATTEMPTS}×; ${state()}.`);
 }
 
 // Best-effort `wait --load load`: returns as soon as the current document has

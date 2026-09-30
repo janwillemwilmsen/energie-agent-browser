@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
-import { api, type BrowserlessHealth } from '../lib/api.js';
+import { Link } from 'react-router-dom';
+import { api, type BrowserHealth } from '../lib/api.js';
 import { TerminalShell, type TerminalShellHandle } from '../lib/TerminalShell.js';
 import { useResource, usePolling } from '../lib/resource.js';
 
@@ -10,8 +11,8 @@ export function Terminal() {
   const [openUrl, setOpenUrl] = useState('https://example.com');
 
   const { data: health, refreshing: checking, error: healthErr, refresh: refreshHealth } = useResource(
-    () => api.browserlessHealth(),
-    { initial: null as BrowserlessHealth | null },
+    () => api.browserHealth(),
+    { initial: null as BrowserHealth | null },
   );
   usePolling(refreshHealth, HEALTH_POLL_MS);
 
@@ -19,7 +20,7 @@ export function Terminal() {
     <section>
       <h1>Terminal</h1>
 
-      <BrowserlessHealthPanel
+      <BrowserHealthPanel
         health={health}
         checking={checking}
         error={healthErr}
@@ -27,15 +28,26 @@ export function Terminal() {
       />
 
       <p className="muted">
-        The session uses <code>%BROWSERLESS_CDP_URL%</code>, which the server derives from{' '}
-        <code>BROWSERLESS_URL</code> + <code>BROWSERLESS_TOKEN</code> in <code>.env</code>.
-        Click below to bootstrap a session, or type any <code>agent-browser</code> command directly.
+        {health?.kind === 'cdp' ? (
+          <>
+            The session connects to your browserless instance over{' '}
+            <code>%BROWSERLESS_CDP_URL%</code>, which the shell exports from the configured URL + token.
+          </>
+        ) : health?.kind === 'browserless-cloud' || health?.kind === 'browserbase' ? (
+          <>The session is created on {health.kind === 'browserbase' ? 'Browserbase' : 'browserless.io'} through agent-browser's provider; opening a page is what starts it.</>
+        ) : (
+          <>
+            The session runs agent-browser's locally installed browser; opening a page is what launches it.
+          </>
+        )}{' '}
+        Configure and test the browser under <Link to="/admin/browser">Admin → Browser</Link>. Click below
+        to bootstrap a session, or type any <code>agent-browser</code> command directly.
       </p>
       <div className="actions">
         <button
-          onClick={() =>
-            termRef.current?.send('agent-browser --session default connect "%BROWSERLESS_CDP_URL%"')
-          }
+          disabled={!health}
+          title={health?.bootstrapCommand}
+          onClick={() => health && termRef.current?.send(health.bootstrapCommand)}
         >
           Bootstrap default session
         </button>
@@ -80,13 +92,13 @@ export function Terminal() {
   );
 }
 
-function BrowserlessHealthPanel({
+function BrowserHealthPanel({
   health,
   checking,
   error,
   onRefresh,
 }: {
-  health: BrowserlessHealth | null;
+  health: BrowserHealth | null;
   checking: boolean;
   error: string | null;
   onRefresh: () => void;
@@ -96,15 +108,24 @@ function BrowserlessHealthPanel({
     !health && !error ? 'pending' : health?.ok ? 'ok' : 'fail';
   const badgeClass =
     state === 'ok' ? 'status-success' : state === 'fail' ? 'status-failed' : 'status-running';
-  const badgeText = state === 'ok' ? 'healthy' : state === 'fail' ? 'unreachable' : 'checking…';
+  const label =
+    health?.kind === 'cdp' ? 'browserless'
+      : health?.kind === 'browserless-cloud' ? 'browserless.io'
+        : health?.kind === 'browserbase' ? 'browserbase' : 'browser';
+  const badgeText =
+    state === 'pending' ? 'checking…'
+      : state === 'fail' ? 'unreachable'
+        : health?.kind === 'local' ? 'local' : 'healthy';
+  const remote = health?.remote ?? null;
 
   return (
     <div className="bl-health">
       <div className="bl-health-row">
-        <span className={`status ${badgeClass}`}>browserless: {badgeText}</span>
+        <span className={`status ${badgeClass}`}>{label}: {badgeText}</span>
         {health && (
           <span className="muted">
-            {health.latencyMs}ms · checked {new Date(health.checkedAt).toLocaleTimeString()}
+            session {health.session.alive ? `alive (pid ${health.session.pid})` : 'not running'}
+            {remote ? ` · ${health.latencyMs}ms` : ''} · checked {new Date(health.checkedAt).toLocaleTimeString()}
           </span>
         )}
         <button onClick={onRefresh} disabled={checking} style={{ marginLeft: 'auto' }}>
@@ -114,29 +135,40 @@ function BrowserlessHealthPanel({
 
       {error && <p className="error" style={{ margin: '6px 0 0' }}>{error}</p>}
 
-      {health && (
+      {health && health.kind === 'local' && (
         <dl className="bl-health-grid">
-          <dt>CDP URL</dt>
-          <dd><code>{health.cdp.configuredUrl}</code></dd>
+          <dt>Executable</dt>
+          <dd>
+            {health.executablePath
+              ? <code>{health.executablePath}</code>
+              : <span className="muted">auto-detected — see Admin → Browser → doctor</span>}
+          </dd>
+        </dl>
+      )}
+
+      {remote && (
+        <dl className="bl-health-grid">
+          <dt>Endpoint</dt>
+          <dd><code>{remote.configuredUrl}</code></dd>
 
           <dt>Probe (<code>/docs</code>)</dt>
           <dd>
-            <code>{health.docs.url}</code>{' '}
-            {health.docs.status != null ? (
-              <span className={health.docs.ok ? 'muted' : 'error'}>→ {health.docs.status}</span>
+            <code>{remote.docs.url}</code>{' '}
+            {remote.docs.status != null ? (
+              <span className={remote.docs.ok ? 'muted' : 'error'}>→ {remote.docs.status}</span>
             ) : (
-              <span className="error">→ {health.docs.error}</span>
+              <span className="error">→ {remote.docs.error}</span>
             )}
           </dd>
 
-          {health.version && (
+          {remote.version && (
             <>
               <dt>Browser</dt>
-              <dd>{health.version.browser ?? '—'}</dd>
+              <dd>{remote.version.browser ?? '—'}</dd>
               <dt>CDP protocol</dt>
-              <dd>{health.version.protocolVersion ?? '—'}</dd>
+              <dd>{remote.version.protocolVersion ?? '—'}</dd>
               <dt>wss debugger URL</dt>
-              <dd><code>{health.version.webSocketDebuggerUrl ?? '—'}</code></dd>
+              <dd><code>{remote.version.webSocketDebuggerUrl ?? '—'}</code></dd>
             </>
           )}
         </dl>

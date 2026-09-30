@@ -109,25 +109,84 @@ export interface CompareRunsResult {
   onlyTarget: string[];
 }
 
-export interface BrowserlessHealth {
+// Which browser the session daemon drives. Mirrors the server's BackendSchema
+// (agentBrowser/backend.ts); secrets come back redacted as `••••xxxx`, and
+// sending that hint back on save means "keep the stored value".
+export type BrowserBackend =
+  | { kind: 'local'; executablePath: string }
+  | { kind: 'cdp'; url: string; token: string }
+  | {
+      kind: 'browserless-cloud';
+      apiKey: string;
+      apiUrl: string;
+      browserType: 'chromium' | 'chrome';
+      ttlMs: number;
+      stealth: boolean;
+    }
+  | { kind: 'browserbase'; apiKey: string };
+export type BrowserBackendKind = BrowserBackend['kind'];
+
+export interface BrowserSettings {
+  backend: BrowserBackend;
+  source: 'setting' | 'env';
+  envBackend: BrowserBackend;
+  cloudPrefill: Partial<Extract<BrowserBackend, { kind: 'browserless-cloud' }>>;
+  browserbasePrefill: { apiKey?: string };
+  stealthEnabled: boolean;
+}
+
+// The active backend plus a reachability probe. `remote` is null for the
+// local backend (nothing to probe — `doctor` is the real check there).
+export interface BrowserHealth {
+  kind: BrowserBackendKind;
+  source: 'setting' | 'env';
   ok: boolean;
   checkedAt: string;
   latencyMs: number;
-  docs: {
-    url: string;
-    status: number | null;
-    ok: boolean;
-    error: string | null;
-  };
-  version: {
-    browser: string | null;
-    protocolVersion: string | null;
-    userAgent: string | null;
-    webSocketDebuggerUrl: string | null;
-  } | null;
-  cdp: {
+  // The exact CLI line that boots the shared session (mirrors the driver).
+  bootstrapCommand: string;
+  session: { alive: boolean; pid: number | null };
+  // Local only; null → agent-browser auto-detects its installed browser.
+  executablePath: string | null;
+  remote: {
     configuredUrl: string;
-  };
+    docs: {
+      url: string;
+      status: number | null;
+      ok: boolean;
+      error: string | null;
+    };
+    version: {
+      browser: string | null;
+      protocolVersion: string | null;
+      userAgent: string | null;
+      webSocketDebuggerUrl: string | null;
+    } | null;
+  } | null;
+}
+
+export interface BrowserTestResult {
+  ok: boolean;
+  kind: BrowserBackendKind;
+  ms: number;
+  steps: Array<{ step: string; ok: boolean; detail: string; ms: number }>;
+}
+
+export interface DoctorResult {
+  kind: BrowserBackendKind;
+  exitCode: number;
+  timedOut: boolean;
+  checks: Array<{ category: string; id: string; message: string; status: string; fix?: string }> | null;
+  raw: string | null;
+}
+
+export interface InstallJob {
+  args: string[];
+  running: boolean;
+  log: string;
+  exitCode: number | null;
+  startedAt: string | null;
+  finishedAt: string | null;
 }
 
 export interface SnapshotResponse {
@@ -500,8 +559,22 @@ export const api = {
       `/api/sessions/${encodeURIComponent(name)}/close`,
       { method: 'POST', body: JSON.stringify({}) },
     ),
-  browserlessHealth: () =>
-    req<BrowserlessHealth>('/api/browserless/health'),
+  browserHealth: () =>
+    req<BrowserHealth>('/api/browser/health'),
+  getBrowserSettings: () => req<BrowserSettings>('/api/admin/browser'),
+  saveBrowserSettings: (backend: BrowserBackend | null) =>
+    req<{ backend: BrowserBackend; source: 'setting' | 'env' }>('/api/admin/browser', {
+      method: 'PUT',
+      body: JSON.stringify({ backend }),
+    }),
+  testBrowser: () => req<BrowserTestResult>('/api/admin/browser/test', { method: 'POST' }),
+  browserDoctor: () => req<DoctorResult>('/api/admin/browser/doctor'),
+  startBrowserInstall: (withDeps: boolean) =>
+    req<{ started: true; args: string[] }>('/api/admin/browser/install', {
+      method: 'POST',
+      body: JSON.stringify({ withDeps }),
+    }),
+  browserInstallStatus: () => req<InstallJob>('/api/admin/browser/install'),
   listComparisons: (scenarioId?: number) =>
     req<Comparison[]>(
       `/api/comparisons${scenarioId != null ? `?scenario_id=${scenarioId}` : ''}`,

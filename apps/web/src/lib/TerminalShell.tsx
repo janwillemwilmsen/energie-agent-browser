@@ -9,7 +9,7 @@ export interface TerminalShellHandle {
 }
 
 export const TerminalShell = forwardRef<TerminalShellHandle, { height?: number | string }>(
-  function TerminalShell({ height = 'calc(100vh - 200px)' }, ref) {
+  function TerminalShell({ height = 'calc(100vh - 320px)' }, ref) {
     const elRef = useRef<HTMLDivElement | null>(null);
     const wsRef = useRef<WebSocket | null>(null);
 

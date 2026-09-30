@@ -23,7 +23,7 @@ import { pushRoutes } from './routes/push.js';
 import { emailRoutes } from './routes/email.js';
 import { agentTasksRoutes } from './routes/agentTasks.js';
 import { adminEnvRoutes } from './routes/adminEnv.js';
-import { browserlessHealthRoutes } from './routes/browserlessHealth.js';
+import { adminBrowserRoutes } from './routes/adminBrowser.js';
 import { storageRoutes } from './routes/storage.js';
 import { screenshotsZipRoutes } from './routes/screenshotsZip.js';
 import { terminalWsRoute } from './ws/terminal.js';
@@ -99,7 +99,7 @@ export async function createApp(opts: CreateAppOptions = {}): Promise<FastifyIns
   await app.register(emailRoutes);
   await app.register(agentTasksRoutes);
   await app.register(adminEnvRoutes);
-  await app.register(browserlessHealthRoutes);
+  await app.register(adminBrowserRoutes);
   await app.register(storageRoutes);
   await app.register(screenshotsZipRoutes);
   await app.register(terminalWsRoute);
