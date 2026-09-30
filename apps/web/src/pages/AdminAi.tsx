@@ -25,7 +25,10 @@ export function AdminAi() {
     defaultModel: string;
     envModel: string | null;
     available: boolean;
+    askModel: string;
+    askSource: 'setting' | 'agent';
   } | null>(null);
+  const [askModel, setAskModel] = useState('');
   const [models, setModels] = useState<string[]>([]);
   const [credits, setCredits] = useState<
     { balance: string; totalUsed: string } | null | undefined
@@ -40,6 +43,7 @@ export function AdminAi() {
       const s = await api.getAiSettings();
       setCurrent(s);
       setModel(s.source === 'setting' ? s.model : '');
+      setAskModel(s.askSource === 'setting' ? s.askModel : '');
     } catch (e: any) {
       setError(e?.message ?? String(e));
     }
@@ -67,6 +71,21 @@ export function AdminAi() {
     try {
       const r = await api.saveAiSettings(next);
       setNotice(`Saved — the AI task agent now uses ${r.model}.`);
+      await refresh();
+    } catch (e: any) {
+      setError(e?.message ?? String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveAsk(next: string) {
+    setBusy(true);
+    setNotice(null);
+    setError(null);
+    try {
+      const r = await api.saveAskModel(next);
+      setNotice(next ? `Saved — Ask now uses ${r.model}.` : 'Ask override removed — it follows the AI task model again.');
       await refresh();
     } catch (e: any) {
       setError(e?.message ?? String(e));
@@ -172,6 +191,37 @@ export function AdminAi() {
             title="Remove the override and fall back to the env var / built-in default"
           >
             Reset to default
+          </button>
+        </div>
+      </div>
+
+      <h2 style={{ marginTop: 28 }}>Ask (scenario review)</h2>
+      <p className="muted">
+        The model behind the <strong>Ask</strong> page. It must accept images (the run screenshots go
+        in as pictures); a long context helps. Without an override it follows the AI task model above.
+      </p>
+      {current && (
+        <p style={{ margin: '4px 0 8px' }}>
+          Active: <code>{current.askModel}</code>{' '}
+          <span className="muted">({current.askSource === 'setting' ? 'Ask override' : 'follows the AI task model'})</span>
+        </p>
+      )}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxWidth: 640 }}>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 13 }}>
+          <span>Ask model override</span>
+          <input
+            list="ai-model-options"
+            value={askModel}
+            onChange={(e) => setAskModel(e.target.value)}
+            placeholder="e.g. anthropic/claude-sonnet-4.6 or google/gemini-2.5-flash"
+          />
+        </label>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={() => void saveAsk(askModel)} disabled={busy || !askModel.trim()}>
+            {busy ? 'Saving…' : '💾 Save Ask override'}
+          </button>
+          <button onClick={() => void saveAsk('')} disabled={busy || current?.askSource !== 'setting'}>
+            Follow AI task model
           </button>
         </div>
       </div>

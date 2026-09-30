@@ -12,6 +12,7 @@ import {
   getGatewayCredits,
   DEFAULT_MODEL,
 } from '../agent/scenarioAgent.js';
+import { askModel, setAskModelSetting } from '../ask/llm.js';
 
 const StartBody = z.object({ prompt: z.string().trim().min(1).max(4000) });
 const ModelBody = z.object({ model: z.string().trim().max(200) });
@@ -74,7 +75,16 @@ export async function agentTasksRoutes(app: FastifyInstance) {
       defaultModel: DEFAULT_MODEL,
       envModel: process.env.AI_GATEWAY_MODEL ?? null,
       available: agentAvailable(),
+      // The Ask page's model: its own override, else it follows the agent model.
+      askModel: askModel().model,
+      askSource: askModel().source, // 'setting' | 'agent'
     };
+  });
+
+  app.put('/api/admin/ai-settings/ask', async (req) => {
+    const { model } = ModelBody.parse(req.body);
+    setAskModelSetting(model || null);
+    return askModel();
   });
 
   app.put('/api/admin/ai-settings', async (req) => {

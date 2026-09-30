@@ -1711,3 +1711,127 @@ code { background: rgba(255,255,255,0.06); padding: 2px 4px; border-radius: 3px;
   .storage-maint-row { flex-direction: column; align-items: stretch; }
   .storage-maint-actions { justify-content: flex-start; }
 }
+
+/* ───────────────────────── Ask (LLM scenario review) ─────────────────────────
+   Two columns: a thread rail and the review. assistant-ui's primitives are
+   headless; the `aui-*` classes below are their only styling. The thread
+   fills the viewport height so the composer stays pinned at the bottom. */
+.ask {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 16px;
+  height: calc(100vh - 48px);
+  min-height: 400px;
+}
+.ask-rail { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+.ask-new { display: inline-flex; align-items: center; gap: 6px; }
+.ask-threads { list-style: none; margin: 0; padding: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
+.ask-threads li { display: flex; align-items: stretch; gap: 2px; border-radius: 6px; }
+.ask-threads li.active .ask-thread { border-color: var(--accent); }
+.ask-thread {
+  flex: 1; min-width: 0; text-align: left; background: var(--panel); color: var(--text);
+  border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; font-weight: 400;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.ask-thread strong { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 13px; }
+.ask-thread .muted { font-size: 11px; }
+.ask-thread-del { background: transparent; color: var(--muted); padding: 0 6px; }
+.ask-thread-del:hover { color: var(--error); filter: none; }
+.ask-main { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+
+/* New thread: scenario picker */
+.ask-new-thread h1 { margin-top: 0; }
+.ask-picker-bar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.ask-picker-bar input { flex: 1; min-width: 180px; }
+.ask-picker { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; overflow-y: auto; padding-bottom: 16px; }
+.ask-pick {
+  display: flex; flex-direction: column; gap: 4px; padding: 0 0 8px; text-align: left;
+  background: var(--panel); color: var(--text); border: 2px solid var(--border); border-radius: 8px; overflow: hidden; font-weight: 400;
+}
+.ask-pick:hover { filter: none; border-color: var(--muted); }
+.ask-pick.on { border-color: var(--accent); }
+.ask-pick.norun { opacity: 0.55; cursor: not-allowed; }
+.ask-pick img, .ask-pick-empty { width: 100%; aspect-ratio: 16 / 10; object-fit: cover; object-position: top; background: var(--bg); display: block; }
+.ask-pick-empty { display: grid; place-items: center; color: var(--muted); font-size: 12px; }
+.ask-pick-name { padding: 0 8px; font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ask-pick .muted { padding: 0 8px; font-size: 11px; }
+
+/* Thread view */
+.ask-thread-view { display: flex; flex-direction: column; min-height: 0; flex: 1; gap: 10px; }
+.ask-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.ask-head h1 { margin: 0; font-size: 20px; }
+.ask-context { display: flex; flex-direction: column; gap: 6px; }
+.ask-ctx { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; }
+.ask-ctx-head { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; font-size: 13px; }
+.ask-ctx-head .linkish { margin-left: auto; }
+.ask-ctx-shots { display: flex; gap: 6px; overflow-x: auto; padding: 6px 0 2px; }
+.ask-ctx-shots img { height: 64px; width: 96px; object-fit: cover; object-position: top; border: 1px solid var(--border); border-radius: 4px; background: var(--bg); }
+.ask-ctx-steps { margin: 6px 0 0; padding-left: 22px; font-size: 12px; color: var(--muted); columns: 2; column-gap: 24px; }
+button.linkish { background: transparent; color: var(--accent); padding: 0; font-weight: 500; font-size: 12px; }
+button.linkish:hover { filter: none; text-decoration: underline; }
+
+/* assistant-ui primitives */
+.aui-thread { flex: 1; min-height: 0; display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); }
+.aui-viewport { flex: 1; min-height: 0; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+.ask-presets { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.ask-presets p { width: 100%; margin: 0 0 4px; }
+.ask-preset { background: var(--panel); color: var(--text); border: 1px solid var(--border); font-weight: 500; }
+.ask-preset:hover { border-color: var(--accent); filter: none; }
+.aui-msg { display: flex; }
+.aui-user { justify-content: flex-end; }
+.aui-assistant { justify-content: flex-start; }
+.aui-bubble { max-width: min(860px, 92%); padding: 10px 14px; border-radius: 10px; line-height: 1.5; font-size: 14px; position: relative; }
+.aui-user .aui-bubble { background: var(--panel); border: 1px solid var(--border); white-space: pre-wrap; }
+.aui-assistant .aui-bubble { background: transparent; border: 1px solid var(--border); }
+.aui-tag { display: block; margin-top: 6px; font-size: 11px; color: var(--muted); }
+.aui-usage { display: block; margin-top: 8px; font-size: 11px; }
+.aui-cursor::after { content: '▍'; color: var(--accent); animation: aui-blink 1s steps(2) infinite; }
+@keyframes aui-blink { 50% { opacity: 0; } }
+.aui-md > :first-child { margin-top: 0; }
+.aui-md > :last-child { margin-bottom: 0; }
+.aui-md h1, .aui-md h2, .aui-md h3 { font-size: 15px; margin: 14px 0 6px; }
+.aui-md h1 { font-size: 17px; }
+.aui-md p, .aui-md ul, .aui-md ol { margin: 6px 0; }
+.aui-md li { margin: 2px 0; }
+.aui-md table { border-collapse: collapse; font-size: 13px; margin: 8px 0; }
+.aui-md th, .aui-md td { border: 1px solid var(--border); padding: 4px 8px; text-align: left; vertical-align: top; }
+.aui-md code { background: var(--panel); padding: 1px 4px; border-radius: 3px; font-size: 12.5px; }
+.aui-md pre { background: var(--panel); padding: 8px 10px; border-radius: 6px; overflow-x: auto; }
+.aui-md blockquote { border-left: 3px solid var(--border); margin: 6px 0; padding-left: 10px; color: var(--muted); }
+.aui-footer { position: sticky; bottom: 0; display: flex; flex-direction: column; align-items: center; gap: 6px; padding-top: 6px; background: var(--bg); }
+.aui-scroll-bottom { background: var(--panel); color: var(--text); border: 1px solid var(--border); font-weight: 500; font-size: 12px; padding: 3px 10px; border-radius: 999px; }
+.aui-scroll-bottom:disabled { display: none; }
+.aui-composer { width: 100%; display: flex; gap: 8px; align-items: flex-end; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 8px; }
+.aui-composer:focus-within { border-color: var(--accent); }
+.aui-input { flex: 1; resize: none; background: transparent; border: 0; color: var(--text); font: inherit; font-size: 14px; line-height: 1.4; max-height: 200px; outline: none; padding: 4px; }
+.aui-send { display: inline-grid; place-items: center; width: 32px; height: 32px; padding: 0; border-radius: 8px; }
+.aui-send:disabled { opacity: 0.4; cursor: not-allowed; }
+.aui-stop { background: var(--error); }
+
+@media (max-width: 900px) {
+  .ask { grid-template-columns: 1fr; height: auto; }
+  .ask-rail { max-height: 180px; }
+  .ask-ctx-steps { columns: 1; }
+}
+
+/* Ask: model picker, selection chips, prompts editor */
+.ask-secondary { background: var(--panel); color: var(--text); border: 1px solid var(--border); }
+.ask-model { max-width: 320px; font-size: 13px; }
+.ask-head .ask-model { margin-left: auto; }
+.ask-selection { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 12px; min-height: 26px; }
+.ask-chip { display: inline-flex; align-items: center; gap: 4px; background: var(--panel); border: 1px solid var(--accent); border-radius: 999px; padding: 2px 6px 2px 10px; font-size: 13px; }
+.ask-chip button { background: transparent; color: var(--muted); padding: 2px; display: inline-grid; place-items: center; }
+.ask-chip button:hover { color: var(--error); filter: none; }
+.ask-prompts { display: flex; flex-direction: column; gap: 12px; max-width: 860px; overflow-y: auto; padding-bottom: 16px; }
+.ask-prompts h1 { margin: 0; }
+.ask-prompt { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+.ask-prompt-head { display: flex; gap: 6px; align-items: center; }
+.ask-prompt-head input { flex: 1; }
+.ask-prompt textarea { width: 100%; box-sizing: border-box; resize: vertical; font: inherit; font-size: 13px; }
+button.ask-danger { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+button.ask-danger:hover { color: var(--error); border-color: var(--error); filter: none; }
+/* The picker scrolls inside the page, not the page itself. */
+.ask-new-thread { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.ask-new-thread > p, .ask-new-thread > h1 { flex: none; }
+.ask-picker { flex: 1; min-height: 0; }
+.ask-picker { grid-auto-rows: max-content; align-content: start; }

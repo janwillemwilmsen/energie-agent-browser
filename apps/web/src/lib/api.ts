@@ -180,6 +180,84 @@ export interface DoctorResult {
   raw: string | null;
 }
 
+// --- Ask (LLM review of scenarios) --------------------------------------------
+export interface AskScenario {
+  id: number;
+  name: string;
+  url: string;
+  brand: string | null;
+  type: string | null;
+  viewport_preset: string;
+  run: { id: number; status: string; startedAt: string; screenshots: number; thumb: string | null } | null;
+}
+
+export interface AskUsage {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  total_tokens?: number;
+  cost?: number;
+}
+
+export interface AskMessage {
+  id: number;
+  role: 'user' | 'assistant';
+  text: string;
+  withContext: boolean;
+  usage: AskUsage | null;
+  error: string | null;
+  createdAt: string;
+}
+
+export interface AskModel {
+  id: string;
+  name: string;
+  vision: boolean;
+  contextWindow: number | null;
+}
+
+export interface AskPreset {
+  id: number;
+  label: string;
+  prompt: string;
+  position: number;
+}
+
+export interface AskThreadSummary {
+  id: number;
+  title: string;
+  scenarioIds: number[];
+  runIds: (number | null)[];
+  /** '' = follows the admin default. */
+  model: string;
+  effectiveModel: string;
+  createdAt: string;
+  updatedAt: string;
+  messageCount: number;
+  lastReply: string;
+}
+
+export interface AskContext {
+  scenarioId: number;
+  name: string;
+  url: string;
+  viewport: string;
+  runId: number | null;
+  runStatus: string | null;
+  runStartedAt: string | null;
+  steps: string[];
+  screenshots: { file: string; thumb: string | null }[];
+}
+
+export interface AskThread extends Omit<AskThreadSummary, 'messageCount' | 'lastReply'> {
+  messages: AskMessage[];
+  context: AskContext[];
+}
+
+export type AskStreamEvent =
+  | { userMessageId: number }
+  | { delta: string }
+  | { done: true; messageId: number; usage: AskUsage | null; error: string | null };
+
 export interface InstallJob {
   args: string[];
   running: boolean;
@@ -445,6 +523,8 @@ export const api = {
       defaultModel: string;
       envModel: string | null;
       available: boolean;
+      askModel: string;
+      askSource: 'setting' | 'agent';
     }>('/api/admin/ai-settings'),
   saveAiSettings: (model: string) =>
     req<{ model: string; source: string }>('/api/admin/ai-settings', {
@@ -575,6 +655,56 @@ export const api = {
       body: JSON.stringify({ withDeps }),
     }),
   browserInstallStatus: () => req<InstallJob>('/api/admin/browser/install'),
+  saveAskModel: (model: string) =>
+    req<{ model: string; source: 'setting' | 'agent' }>('/api/admin/ai-settings/ask', {
+      method: 'PUT',
+      body: JSON.stringify({ model }),
+    }),
+  askScenarios: () => req<AskScenario[]>('/api/ask/scenarios'),
+  askThreads: () => req<AskThreadSummary[]>('/api/ask/threads'),
+  askThread: (id: number) => req<AskThread>(`/api/ask/threads/${id}`),
+  createAskThread: (body: { title?: string; scenarioIds: number[]; runIds?: (number | null)[]; model?: string }) =>
+    req<AskThreadSummary>('/api/ask/threads', { method: 'POST', body: JSON.stringify(body) }),
+  updateAskThread: (id: number, body: { title?: string; model?: string }) =>
+    req<AskThreadSummary>(`/api/ask/threads/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  askModels: () =>
+    req<{ models: AskModel[]; default: string; defaultSource: 'setting' | 'agent' }>('/api/ask/models'),
+  askPresets: () => req<AskPreset[]>('/api/ask/presets'),
+  createAskPreset: (body: { label: string; prompt: string }) =>
+    req<AskPreset>('/api/ask/presets', { method: 'POST', body: JSON.stringify(body) }),
+  updateAskPreset: (id: number, body: { label?: string; prompt?: string; position?: number }) =>
+    req<AskPreset>(`/api/ask/presets/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  deleteAskPreset: (id: number) => req<void>(`/api/ask/presets/${id}`, { method: 'DELETE' }),
+  deleteAskThread: (id: number) => req<void>(`/api/ask/threads/${id}`, { method: 'DELETE' }),
+  // Streams the assistant reply as SSE frames; `onEvent` gets each parsed frame.
+  askSend: async (
+    id: number,
+    text: string,
+    onEvent: (ev: AskStreamEvent) => void,
+    signal?: AbortSignal,
+  ): Promise<void> => {
+    const res = await requestRaw(`/api/ask/threads/${id}/messages`, {
+      method: 'POST',
+      body: JSON.stringify({ text }),
+      signal,
+    });
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let nl: number;
+      while ((nl = buf.indexOf('\n\n')) >= 0) {
+        const frame = buf.slice(0, nl);
+        buf = buf.slice(nl + 2);
+        const line = frame.split('\n').find((l) => l.startsWith('data:'));
+        if (!line) continue;
+        try { onEvent(JSON.parse(line.slice(5)) as AskStreamEvent); } catch { /* skip malformed frame */ }
+      }
+    }
+  },
   listComparisons: (scenarioId?: number) =>
     req<Comparison[]>(
       `/api/comparisons${scenarioId != null ? `?scenario_id=${scenarioId}` : ''}`,

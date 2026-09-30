@@ -16,6 +16,7 @@ import {
   Video,
   Workflow,
   type LucideIcon,
+  MessageSquareText,
 } from 'lucide-react';
 import { Home } from './pages/Home.js';
 import { Scenarios } from './pages/Scenarios.js';
@@ -46,6 +47,7 @@ import { AdminNetwork } from './pages/AdminNetwork.js';
 import { AdminSessionStates } from './pages/AdminSessionStates.js';
 import { AdminAi } from './pages/AdminAi.js';
 import { AdminBrowser } from './pages/AdminBrowser.js';
+import { Ask } from './pages/Ask.js';
 import { AdminStorage } from './pages/AdminStorage.js';
 import { AdminEnv } from './pages/AdminEnv.js';
 
@@ -68,6 +70,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/screenshots', label: 'Screenshots', icon: Images },
   { to: '/recordings', label: 'Recordings', icon: Video },
   { to: '/diffs', label: 'Diffs', icon: GitCompare },
+  { to: '/ask', label: 'Ask', icon: MessageSquareText },
 ];
 
 const COLLAPSE_KEY = 'eab.nav.collapsed';
@@ -229,6 +232,8 @@ export function App() {
           <Route path="/admin/session-states" element={<AdminSessionStates />} />
           <Route path="/admin/ai" element={<AdminAi />} />
           <Route path="/admin/browser" element={<AdminBrowser />} />
+          <Route path="/ask" element={<Ask />} />
+          <Route path="/ask/:id" element={<Ask />} />
           <Route path="/admin/storage" element={<AdminStorage />} />
           <Route path="/admin/env" element={<AdminEnv />} />
           <Route path="/preflight" element={<PreflightPage />} />
