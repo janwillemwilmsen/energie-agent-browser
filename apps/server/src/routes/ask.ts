@@ -1,9 +1,10 @@
+import fs from 'node:fs';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { getDb } from '../db/index.js';
 import { runStore } from '../runs/index.js';
 import { askModel, listGatewayModelsDetailed, streamChat, type ChatMessage, type Usage } from '../ask/llm.js';
-import { ASK_SYSTEM_PROMPT, buildPacks, packToContent, pickRun, screenshotUrl } from '../ask/context.js';
+import { ASK_SYSTEM_PROMPT, assetKey, buildPacks, packToContent, pickRun, screenshotUrl } from '../ask/context.js';
 import { createPreset, deletePreset, listPresets, updatePreset } from '../ask/presets.js';
 
 // Ask: chat threads that review one or more scenarios with the LLM.
@@ -25,7 +26,7 @@ import { createPreset, deletePreset, listPresets, updatePreset } from '../ask/pr
 
 interface ThreadRow {
   id: number; title: string; scenario_ids_json: string; run_ids_json: string; model: string;
-  created_at: string; updated_at: string;
+  excluded_json: string; created_at: string; updated_at: string;
 }
 interface MessageRow {
   id: number; thread_id: number; role: 'user' | 'assistant'; text: string; with_context: number;
@@ -41,6 +42,8 @@ const CreateBody = z.object({
 const UpdateBody = z.object({
   title: z.string().trim().min(1).max(200).optional(),
   model: z.string().trim().max(200).optional(),
+  // "<runId>/<file>" keys of assets removed from the context.
+  excluded: z.array(z.string().max(300)).max(500).optional(),
 });
 const MessageBody = z.object({ text: z.string().trim().min(1).max(20_000) });
 const PresetBody = z.object({
@@ -63,6 +66,7 @@ function threadOut(t: ThreadRow) {
     // '' = follows the admin default; effectiveModel is what a message would use now.
     model: t.model,
     effectiveModel: t.model || askModel().model,
+    excluded: JSON.parse(t.excluded_json || '[]') as string[],
     createdAt: t.created_at,
     updatedAt: t.updated_at,
   };
@@ -156,14 +160,28 @@ export async function askRoutes(app: FastifyInstance) {
     const thread = threadOut(t);
     const messages = (db.prepare('SELECT * FROM ask_messages WHERE thread_id = ? ORDER BY id').all(t.id) as MessageRow[]).map(messageOut);
     // Context preview: what the first turn sends, minus the image bytes. The
-    // UI shows it as chips + a thumbnail strip.
+    // UI shows it as chips + a thumbnail strip. Lists EVERY asset of the run,
+    // with the excluded ones flagged, so a removed asset can be restored.
+    const excludedSet = new Set(thread.excluded);
     const packs = await buildPacks(thread.scenarioIds, thread.runIds, { withImages: false });
-    const context = packs.map((p) => ({
-      scenarioId: p.scenarioId, name: p.name, url: p.url, viewport: p.viewport,
-      runId: p.runId, runStatus: p.runStatus, runStartedAt: p.runStartedAt,
-      steps: p.steps,
-      screenshots: p.screenshots.map((f) => ({ file: f, thumb: p.runId ? screenshotUrl(p.runId, f, 240) : null })),
-    }));
+    const context = packs.map((p) => {
+      const runId = p.runId;
+      const asset = (file: string) => ({ file, key: runId ? assetKey(runId, file) : file, excluded: runId ? excludedSet.has(assetKey(runId, file)) : false });
+      return {
+        scenarioId: p.scenarioId, name: p.name, url: p.url, viewport: p.viewport,
+        runId, runStatus: p.runStatus, runStartedAt: p.runStartedAt,
+        steps: p.steps,
+        screenshots: (runId ? runStore().screenshots(runId) ?? [] : []).map((f) => ({
+          ...asset(f), thumb: runId ? screenshotUrl(runId, f, 240) : null, url: runId ? `/api/runs/${runId}/screenshots/${encodeURIComponent(f)}` : null,
+        })),
+        texts: (runId ? runStore().texts(runId) ?? [] : []).map((f) => {
+          const path = runId ? runStore().screenshotPath(runId, f) : null;
+          let bytes = 0;
+          try { if (path) bytes = fs.statSync(path).size; } catch { /* missing file: listed with 0 bytes */ }
+          return { ...asset(f), bytes, url: runId ? `/api/runs/${runId}/texts/${encodeURIComponent(f)}` : null };
+        }),
+      };
+    });
     return { ...thread, messages, context };
   });
 
@@ -172,8 +190,8 @@ export async function askRoutes(app: FastifyInstance) {
     const db = getDb();
     const t = db.prepare('SELECT * FROM ask_threads WHERE id = ?').get(Number(req.params.id)) as ThreadRow | undefined;
     if (!t) return reply.code(404).send({ error: 'not_found' });
-    db.prepare('UPDATE ask_threads SET title = ?, model = ? WHERE id = ?')
-      .run(b.title ?? t.title, b.model ?? t.model, t.id);
+    db.prepare('UPDATE ask_threads SET title = ?, model = ?, excluded_json = ? WHERE id = ?')
+      .run(b.title ?? t.title, b.model ?? t.model, b.excluded ? JSON.stringify(b.excluded) : t.excluded_json, t.id);
     return threadOut(db.prepare('SELECT * FROM ask_threads WHERE id = ?').get(t.id) as ThreadRow);
   });
 
@@ -206,7 +224,7 @@ export async function askRoutes(app: FastifyInstance) {
     for (const m of [...history, { role: 'user' as const, text, with_context: firstTurn ? 1 : 0, error: null }]) {
       if (m.error) continue; // a failed assistant turn is not part of the conversation
       if (m.role === 'user' && m.with_context && !packsAttached) {
-        const packs = await buildPacks(thread.scenarioIds, thread.runIds);
+        const packs = await buildPacks(thread.scenarioIds, thread.runIds, { excluded: new Set(thread.excluded) });
         messages.push({ role: 'user', content: packToContent(packs, m.text) });
         packsAttached = true;
       } else {

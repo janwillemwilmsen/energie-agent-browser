@@ -22,6 +22,8 @@ export interface RunRow {
   status: RunStatus;
   log_text: string;
   screenshot_paths_json: string;
+  /** Text files saved by save_text steps (filenames under the run's artifact dir). */
+  text_paths_json: string;
 }
 
 /** A Run joined with the Scenario it belongs to (null when the Scenario is gone). */
@@ -51,7 +53,7 @@ export interface RunStore {
   create(scenarioId: number): { runId: number; screenshotDir: string };
   /** Persist the whole log so far (the log is small and rewritten per line). */
   appendLog(runId: number, logText: string): void;
-  finish(runId: number, status: 'success' | 'failed', logText: string, screenshots: string[]): void;
+  finish(runId: number, status: 'success' | 'failed', logText: string, screenshots: string[], texts?: string[]): void;
 
   get(id: number): RunRow | undefined;
   getWithScenario(id: number): RunListRow | undefined;
@@ -64,6 +66,8 @@ export interface RunStore {
   latestFinishedForScenario(scenarioId: number): LatestRun | undefined;
   /** Parsed screenshot filenames; [] when malformed; null when the Run does not exist. */
   screenshots(runId: number): string[] | null;
+  /** The run's saved text files in capture order; null when the run doesn't exist. */
+  texts(runId: number): string[] | null;
   existingIds(): Set<number>;
   inFlightIds(): Set<number>;
 
@@ -98,7 +102,7 @@ export function createRunStore(deps: { db: Database; dataDir: string }): RunStor
     log: db.prepare('UPDATE runs SET log_text = ? WHERE id = ?'),
     finish: db.prepare(
       `UPDATE runs
-       SET status = ?, finished_at = CURRENT_TIMESTAMP, log_text = ?, screenshot_paths_json = ?
+       SET status = ?, finished_at = CURRENT_TIMESTAMP, log_text = ?, screenshot_paths_json = ?, text_paths_json = ?
        WHERE id = ?`,
     ),
     get: db.prepare('SELECT * FROM runs WHERE id = ?'),
@@ -172,8 +176,8 @@ export function createRunStore(deps: { db: Database; dataDir: string }): RunStor
     appendLog(runId, logText) {
       q.log.run(logText, runId);
     },
-    finish(runId, status, logText, screenshots) {
-      q.finish.run(status, logText, JSON.stringify(screenshots), runId);
+    finish(runId, status, logText, screenshots, texts = []) {
+      q.finish.run(status, logText, JSON.stringify(screenshots), JSON.stringify(texts), runId);
     },
 
     get: (id) => q.get.get(id) as RunRow | undefined,
@@ -197,6 +201,10 @@ export function createRunStore(deps: { db: Database; dataDir: string }): RunStor
     screenshots(runId) {
       const row = q.get.get(runId) as RunRow | undefined;
       return row ? parseScreenshots(row.screenshot_paths_json) : null;
+    },
+    texts(runId) {
+      const row = q.get.get(runId) as RunRow | undefined;
+      return row ? parseScreenshots(row.text_paths_json) : null;
     },
     existingIds: () => new Set((q.ids.all() as { id: number }[]).map((r) => r.id)),
     inFlightIds,

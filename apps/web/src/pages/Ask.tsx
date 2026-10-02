@@ -12,7 +12,7 @@ import {
 } from '@assistant-ui/react';
 import { MarkdownTextPrimitive } from '@assistant-ui/react-markdown';
 import remarkGfm from 'remark-gfm';
-import { ArrowUp, Plus, SlidersHorizontal, Square, Trash2, X } from 'lucide-react';
+import { ArrowUp, FileText, Plus, SlidersHorizontal, Square, Trash2, X } from 'lucide-react';
 import {
   api,
   errorMessage,
@@ -298,6 +298,15 @@ function ThreadView({ threadId, onChanged }: { threadId: number; onChanged: () =
 
   const onCancel = useCallback(async () => { abortRef.current?.abort(); }, []);
 
+  async function toggleAsset(key: string, exclude: boolean) {
+    if (!thread) return;
+    const excluded = exclude ? [...thread.excluded, key] : thread.excluded.filter((k) => k !== key);
+    try {
+      const t = await api.updateAskThread(threadId, { excluded });
+      setThread((cur) => (cur ? { ...cur, excluded: t.excluded } : cur));
+    } catch (e) { setError(errorMessage(e)); }
+  }
+
   async function changeModel(model: string) {
     try {
       const t = await api.updateAskThread(threadId, { model });
@@ -323,7 +332,7 @@ function ThreadView({ threadId, onChanged }: { threadId: number; onChanged: () =
           <h1>{thread.title}</h1>
           <ModelSelect value={thread.model} onChange={(m) => void changeModel(m)} models={models} def={def} disabled={running} />
         </header>
-        <ContextStrip context={thread.context} />
+        <ContextStrip context={thread.context} excluded={thread.excluded} onToggle={(k, ex) => void toggleAsset(k, ex)} busy={running} />
         {error && <p className="error">{error}</p>}
         <ThreadPrimitive.Root className="aui-thread">
           <ThreadPrimitive.Viewport className="aui-viewport">
@@ -361,37 +370,75 @@ function convertMessage(m: LiveMessage): ThreadMessageLike {
   };
 }
 
-function ContextStrip({ context }: { context: AskContext[] }) {
+function fmtBytes(n: number): string {
+  return n < 1024 ? `${n} B` : `${(n / 1024).toFixed(1)} KB`;
+}
+
+// The assets the model sees for each scenario: screenshots as a thumbnail
+// strip, saved page texts as a list. Each asset has a × to drop it from the
+// context (the pack is rebuilt per message, so it applies from the next turn)
+// and comes back with ↺; removed assets stay visible, dimmed.
+function ContextStrip({
+  context, excluded, onToggle, busy,
+}: { context: AskContext[]; excluded: string[]; onToggle: (key: string, exclude: boolean) => void; busy: boolean }) {
   const [open, setOpen] = useState<number | null>(null);
+  const isOut = (key: string) => excluded.includes(key);
+  const toggleBtn = (key: string, what: string) =>
+    isOut(key) ? (
+      <button className="ask-asset-btn" disabled={busy} onClick={() => onToggle(key, false)} title={`Add this ${what} back to the context`} aria-label="Restore">↺</button>
+    ) : (
+      <button className="ask-asset-btn" disabled={busy} onClick={() => onToggle(key, true)} title={`Remove this ${what} from the context`} aria-label="Remove"><X size={12} aria-hidden /></button>
+    );
   return (
     <div className="ask-context">
-      {context.map((c) => (
-        <div key={c.scenarioId} className="ask-ctx">
-          <div className="ask-ctx-head">
-            <strong>{c.name}</strong>
-            <span className="muted">
-              {c.runId ? `run #${c.runId} · ${c.runStatus} · ${c.screenshots.length} screenshots · ${c.steps.length} steps` : 'no finished run'}
-            </span>
-            <button className="linkish" onClick={() => setOpen(open === c.scenarioId ? null : c.scenarioId)}>
-              {open === c.scenarioId ? 'hide steps' : 'steps'}
-            </button>
-          </div>
-          {c.screenshots.length > 0 && (
-            <div className="ask-ctx-shots">
-              {c.screenshots.map((s) => (
-                <a key={s.file} href={s.thumb?.replace(/\?w=\d+$/, '') ?? '#'} target="_blank" rel="noreferrer" title={s.file}>
-                  {s.thumb && <img src={s.thumb} alt={s.file} loading="lazy" />}
-                </a>
-              ))}
+      {context.map((c) => {
+        const shotsIn = c.screenshots.filter((s) => !isOut(s.key)).length;
+        const textsIn = c.texts.filter((t) => !isOut(t.key)).length;
+        return (
+          <div key={c.scenarioId} className="ask-ctx">
+            <div className="ask-ctx-head">
+              <strong>{c.name}</strong>
+              <span className="muted">
+                {c.runId
+                  ? `run #${c.runId} · ${c.runStatus} · ${shotsIn}/${c.screenshots.length} screenshots · ${textsIn}/${c.texts.length} texts · ${c.steps.length} steps`
+                  : 'no finished run'}
+              </span>
+              <button className="linkish" onClick={() => setOpen(open === c.scenarioId ? null : c.scenarioId)}>
+                {open === c.scenarioId ? 'hide steps' : 'steps'}
+              </button>
             </div>
-          )}
-          {open === c.scenarioId && (
-            <ol className="ask-ctx-steps">
-              {c.steps.map((s) => <li key={s}>{s.replace(/^\d+\.\s*/, '')}</li>)}
-            </ol>
-          )}
-        </div>
-      ))}
+            {c.screenshots.length > 0 && (
+              <div className="ask-ctx-shots">
+                {c.screenshots.map((s) => (
+                  <div key={s.key} className={`ask-asset ask-shot${isOut(s.key) ? ' out' : ''}`} title={s.file}>
+                    <a href={s.url ?? '#'} target="_blank" rel="noreferrer" title={`${s.file} — open in a new window`}>
+                      {s.thumb && <img src={s.thumb} alt={s.file} loading="lazy" />}
+                    </a>
+                    {toggleBtn(s.key, 'screenshot')}
+                  </div>
+                ))}
+              </div>
+            )}
+            {c.texts.length > 0 && (
+              <ul className="ask-ctx-texts">
+                {c.texts.map((t) => (
+                  <li key={t.key} className={`ask-asset${isOut(t.key) ? ' out' : ''}`}>
+                    <FileText size={14} aria-hidden />
+                    <a href={t.url ?? '#'} target="_blank" rel="noreferrer" title={`${t.file} — open in a new window`}>{t.file}</a>
+                    <span className="muted">{fmtBytes(t.bytes)}</span>
+                    {toggleBtn(t.key, 'text')}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {open === c.scenarioId && (
+              <ol className="ask-ctx-steps">
+                {c.steps.map((s) => <li key={s}>{s.replace(/^\d+\.\s*/, '')}</li>)}
+              </ol>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }

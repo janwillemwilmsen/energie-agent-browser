@@ -48,6 +48,7 @@ import { AdminSessionStates } from './pages/AdminSessionStates.js';
 import { AdminAi } from './pages/AdminAi.js';
 import { AdminBrowser } from './pages/AdminBrowser.js';
 import { Ask } from './pages/Ask.js';
+import { ScenarioTexts } from './pages/ScenarioTexts.js';
 import { AdminStorage } from './pages/AdminStorage.js';
 import { AdminEnv } from './pages/AdminEnv.js';
 
@@ -232,6 +233,7 @@ export function App() {
           <Route path="/admin/session-states" element={<AdminSessionStates />} />
           <Route path="/admin/ai" element={<AdminAi />} />
           <Route path="/admin/browser" element={<AdminBrowser />} />
+          <Route path="/scenarios/:id/texts" element={<ScenarioTexts />} />
           <Route path="/ask" element={<Ask />} />
           <Route path="/ask/:id" element={<Ask />} />
           <Route path="/admin/storage" element={<AdminStorage />} />

@@ -52,7 +52,13 @@ export interface ScenarioPack {
   /** Screenshot filenames of the run, in capture order. */
   screenshots: string[];
   images: PackImage[];
+  /** Page texts saved by save_text steps (file + content, capped). */
+  texts: { file: string; label: string; text: string; truncated: boolean }[];
 }
+
+// Page text is cheap in tokens compared to images and far better for copy
+// critique; still capped so a long product page can't eat the context.
+const MAX_TEXT_CHARS = 12_000;
 
 interface ScenarioRow {
   id: number; name: string; url: string; brand: string | null; type: string | null; viewport_preset: string;
@@ -64,7 +70,8 @@ export function pickRun(scenarioId: number, pinnedRunId?: number | null): number
     const r = runStore().get(pinnedRunId);
     if (r && r.scenario_id === scenarioId) return r.id;
   }
-  const rows = runStore().listForScenario(scenarioId);
+  // listForScenario is oldest-first; we want the newest finished run.
+  const rows = [...runStore().listForScenario(scenarioId)].reverse();
   const finished = rows.filter((r) => r.status === 'success' || r.status === 'failed');
   const success = finished.find((r) => r.status === 'success');
   return (success ?? finished[0])?.id ?? null;
@@ -113,9 +120,14 @@ async function tilesFor(runId: number, file: string, budget: number): Promise<Pa
 }
 
 /** Build the pack for one scenario. `withImages: false` skips the (slow) tiling — for previews. */
+/** The key an exclusion list uses for one asset of a run. */
+export function assetKey(runId: number, file: string): string {
+  return `${runId}/${file}`;
+}
+
 export async function buildScenarioPack(
   scenarioId: number,
-  opts: { runId?: number | null; withImages?: boolean; imageBudget?: number } = {},
+  opts: { runId?: number | null; withImages?: boolean; imageBudget?: number; excluded?: ReadonlySet<string> } = {},
 ): Promise<ScenarioPack | null> {
   const s = getDb()
     .prepare('SELECT id, name, url, brand, type, viewport_preset FROM scenarios WHERE id = ?')
@@ -123,12 +135,26 @@ export async function buildScenarioPack(
   if (!s) return null;
   const runId = pickRun(scenarioId, opts.runId);
   const run = runId ? runStore().get(runId) : undefined;
-  const screenshots = runId ? (runStore().screenshots(runId) ?? []) : [];
+  const excluded = opts.excluded ?? new Set<string>();
+  const keep = (file: string) => runId !== null && !excluded.has(assetKey(runId, file));
+  const screenshots = runId ? (runStore().screenshots(runId) ?? []).filter(keep) : [];
   const pack: ScenarioPack = {
     scenarioId: s.id, name: s.name, url: s.url, brand: s.brand, type: s.type, viewport: s.viewport_preset,
     runId, runStartedAt: run?.started_at ?? null, runStatus: run?.status ?? null,
-    steps: stepNarrative(s.id), screenshots, images: [],
+    steps: stepNarrative(s.id), screenshots, images: [], texts: [],
   };
+  if (runId) {
+    for (const file of (runStore().texts(runId) ?? []).filter(keep)) {
+      const p = runStore().screenshotPath(runId, file);
+      if (!p || !fs.existsSync(p)) continue;
+      const raw = fs.readFileSync(p, 'utf-8');
+      pack.texts.push({
+        file, label: shotLabel(file),
+        text: raw.length > MAX_TEXT_CHARS ? raw.slice(0, MAX_TEXT_CHARS) : raw,
+        truncated: raw.length > MAX_TEXT_CHARS,
+      });
+    }
+  }
   if (opts.withImages !== false && runId) {
     let budget = opts.imageBudget ?? MAX_IMAGES_PER_PACK;
     for (const file of screenshots) {
@@ -145,12 +171,12 @@ export async function buildScenarioPack(
 export async function buildPacks(
   scenarioIds: number[],
   runIds: (number | null)[] = [],
-  opts: { withImages?: boolean } = {},
+  opts: { withImages?: boolean; excluded?: ReadonlySet<string> } = {},
 ): Promise<ScenarioPack[]> {
   const per = Math.max(4, Math.floor(MAX_IMAGES_PER_PACK / Math.max(1, scenarioIds.length)));
   const packs: ScenarioPack[] = [];
   for (let i = 0; i < scenarioIds.length; i++) {
-    const p = await buildScenarioPack(scenarioIds[i]!, { runId: runIds[i] ?? null, withImages: opts.withImages, imageBudget: per });
+    const p = await buildScenarioPack(scenarioIds[i]!, { runId: runIds[i] ?? null, withImages: opts.withImages, imageBudget: per, excluded: opts.excluded });
     if (p) packs.push(p);
   }
   return packs;
@@ -173,6 +199,12 @@ export function packToContent(packs: ScenarioPack[], userText: string): ContentP
       p.images.length ? `Screenshots from this run follow (${p.images.length} images), in capture order:` : null,
     ].filter((l): l is string => l !== null).join('\n');
     parts.push({ type: 'text', text: head });
+    for (const t of p.texts) {
+      parts.push({
+        type: 'text',
+        text: `[${p.name}] Page text — ${t.label}${t.truncated ? ' (truncated)' : ''}:\n\n${t.text}`,
+      });
+    }
     for (const img of p.images) {
       parts.push({ type: 'text', text: `[${p.name}] ${img.label}` });
       parts.push({ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${img.base64}` } });

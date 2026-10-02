@@ -256,6 +256,15 @@ export function AddStepControls(props: AddStepControlsProps) {
           </button>
         </>
       )}
+      {allowed.has('save_text') && (
+        <button
+          onClick={() => add('save_text', { label: screenshotLabel() })}
+          disabled={disabled}
+          title={title("Save the page's readable text (agent-browser read) as a Markdown file beside the run's screenshots")}
+        >
+          + save text
+        </button>
+      )}
       {allowed.has('scroll') && (
         <>
           <button

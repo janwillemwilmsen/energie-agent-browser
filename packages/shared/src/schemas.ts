@@ -72,6 +72,9 @@ export const StepKind = z.enum([
   // Enter, Tab, Escape, Space, ArrowDown, Control+a, … No selector — focus
   // comes from the previous step (a click or fill).
   'press',
+  // Save the rendered page's readable text (agent-browser read) as a Markdown
+  // file beside the run's screenshots — the textual counterpart of a screenshot.
+  'save_text',
 ]);
 export type StepKind = z.infer<typeof StepKind>;
 
@@ -153,6 +156,8 @@ const StepClose = z.object({ kind: z.literal('close') });
 // "Space", "ArrowDown", "F5", a single character, or a chord joined with "+"
 // ("Control+a", "Shift+Tab").
 const StepPress = z.object({ kind: z.literal('press'), key: z.string().trim().min(1) });
+// Falls back to `step-<position>` when absent, like screenshot.
+const StepSaveText = z.object({ kind: z.literal('save_text'), label: z.string().optional() });
 // Single-form login via agent-browser's encrypted Auth Vault. The username +
 // password live in ~/.agent-browser/auth/<name>.json (AES-GCM encrypted), so
 // credentials never appear in a step payload. Only Preflights may contain this
@@ -178,6 +183,7 @@ export const ScenarioStepPayload = z.discriminatedUnion('kind', [
   StepRecordStop,
   StepClose,
   StepPress,
+  StepSaveText,
 ]);
 export type ScenarioStepPayload = z.infer<typeof ScenarioStepPayload>;
 

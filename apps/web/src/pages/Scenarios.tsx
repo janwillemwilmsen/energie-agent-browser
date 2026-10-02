@@ -328,6 +328,9 @@ export function Scenarios() {
                   >
                     {runningId === s.id ? 'Running…' : '▶ Run'}
                   </button>
+                  <Link to={`/scenarios/${s.id}/texts`} className="btn-link" title="Page texts saved by save text steps">
+                    Texts
+                  </Link>
                   <Link to={`/screenshots/timeline/${s.id}`} className="btn-link">
                     Screenshots
                   </Link>

@@ -367,6 +367,13 @@ export function ScenarioEditor() {
             >
               edit raw
             </Link>{' '}
+            <Link
+              to={`/scenarios/${scenarioId}/texts`}
+              className="steps-raw-link"
+              title="Page texts saved by this scenario's save text steps"
+            >
+              saved texts
+            </Link>{' '}
             <button
               type="button"
               className={`steps-raw-link${compactSteps ? ' active' : ''}`}

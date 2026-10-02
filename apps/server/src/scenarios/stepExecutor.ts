@@ -65,6 +65,8 @@ export interface Artifacts {
   viewport: 'desktop' | 'mobile';
   /** Filenames captured so far; the executor appends to it. */
   screenshots: string[];
+  /** Text files saved so far (save_text steps); the executor appends to it. */
+  texts: string[];
 }
 
 /** Video recording hooks for record_start / record_stop. */
@@ -135,6 +137,7 @@ export function describeStep(step: StepPayload): string {
     case 'record_stop': return 'record stop';
     case 'close': return 'close browser session';
     case 'press': return `press ${step.key}`;
+    case 'save_text': return `save text${step.label ? ` ${step.label}` : ''}`;
   }
 }
 
@@ -216,6 +219,9 @@ export async function executeStep(ctx: StepContext, step: StepPayload, position 
   switch (step.kind) {
     case 'record_start':
       await requireRecorder(ctx, step.kind).start();
+      return;
+    case 'save_text':
+      await saveText(ctx, step, position);
       return;
     case 'record_stop':
       await requireRecorder(ctx, step.kind).stop();
@@ -619,6 +625,36 @@ export async function applyViewport(
 function isPageNotReadyError(stderr: string, stdout: string): boolean {
   const s = `${stderr}\n${stdout}`;
   return /Cannot take screenshot with 0 (width|height)/i.test(s) || /Unable to capture screenshot/i.test(s);
+}
+
+// The textual counterpart of a screenshot: agent-browser `read` (no URL)
+// extracts the readable text of the active tab's rendered DOM — auth state
+// and client-side updates included — as Markdown-ish text. Saved under the
+// run's artifact dir with the same slot filename protocol as screenshots, so
+// a text pairs with the screenshot of the same label across runs.
+async function saveText(
+  ctx: StepContext,
+  step: Extract<StepPayload, { kind: 'save_text' }>,
+  position: number,
+): Promise<void> {
+  const { browser, log } = ctx;
+  const artifacts = requireArtifacts(ctx, step.kind);
+  const label = step.label ?? `step-${position}`;
+  const filename = encodeSlot({ position, stamp: artifacts.fileStamp, label, viewport: artifacts.viewport, ext: 'md' });
+  const filepath = path.join(artifacts.screenshotDir, filename);
+  const r = await browser.run(['read'], { timeoutMs: 60_000 });
+  if (r.exitCode !== 0) throw new Error(`save text failed: ${failureText(r)}`);
+  const text = r.stdout.replace(/\r\n/g, '\n').trim();
+  if (!text) throw new Error('save text failed: the page yielded no readable text');
+  let url = '';
+  try {
+    const u = await browser.run(['get', 'url'], { timeoutMs: 10_000 });
+    if (u.exitCode === 0) url = u.stdout.trim();
+  } catch { /* header is best-effort */ }
+  const header = `<!-- ${label} · ${artifacts.viewport} · ${url || 'unknown url'} · ${new Date().toISOString()} -->\n\n`;
+  fs.writeFileSync(filepath, `${header}${text}\n`, 'utf-8');
+  log(`save text → ${filename} (${text.length.toLocaleString()} chars)`);
+  artifacts.texts.push(filename);
 }
 
 async function screenshot(

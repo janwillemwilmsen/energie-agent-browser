@@ -54,6 +54,8 @@ export function summarizeStep(kind: string, p: Record<string, unknown>): string 
       return '✕ close browser session';
     case 'press':
       return `⌨ ${p.key ?? ''}`;
+    case 'save_text':
+      return `📄 save text${p.label ? ` "${p.label}"` : ''}`;
     default:
       return JSON.stringify(p);
   }

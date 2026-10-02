@@ -230,10 +230,20 @@ export interface AskThreadSummary {
   /** '' = follows the admin default. */
   model: string;
   effectiveModel: string;
+  /** Asset keys removed from the context. */
+  excluded: string[];
   createdAt: string;
   updatedAt: string;
   messageCount: number;
   lastReply: string;
+}
+
+export interface AskAsset {
+  file: string;
+  /** "<runId>/<file>" — what the thread's `excluded` list holds. */
+  key: string;
+  excluded: boolean;
+  url: string | null;
 }
 
 export interface AskContext {
@@ -245,7 +255,8 @@ export interface AskContext {
   runStatus: string | null;
   runStartedAt: string | null;
   steps: string[];
-  screenshots: { file: string; thumb: string | null }[];
+  screenshots: (AskAsset & { thumb: string | null })[];
+  texts: (AskAsset & { bytes: number })[];
 }
 
 export interface AskThread extends Omit<AskThreadSummary, 'messageCount' | 'lastReply'> {
@@ -257,6 +268,17 @@ export type AskStreamEvent =
   | { userMessageId: number }
   | { delta: string }
   | { done: true; messageId: number; usage: AskUsage | null; error: string | null };
+
+// A page text saved by a save_text step (GET /api/scenarios/:id/texts).
+export interface ScenarioText {
+  runId: number;
+  startedAt: string;
+  status: string;
+  file: string;
+  label: string;
+  viewport: string;
+  bytes: number;
+}
 
 export interface InstallJob {
   args: string[];
@@ -660,12 +682,22 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify({ model }),
     }),
+  scenarioTexts: (scenarioId: number) => req<ScenarioText[]>(`/api/scenarios/${scenarioId}/texts`),
+  runText: async (runId: number, file: string): Promise<string> => {
+    const res = await requestRaw(`/api/runs/${runId}/texts/${encodeURIComponent(file)}`);
+    return res.text();
+  },
+  saveRunText: (runId: number, file: string, content: string) =>
+    req<{ file: string; bytes: number }>(`/api/runs/${runId}/texts/${encodeURIComponent(file)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ content }),
+    }),
   askScenarios: () => req<AskScenario[]>('/api/ask/scenarios'),
   askThreads: () => req<AskThreadSummary[]>('/api/ask/threads'),
   askThread: (id: number) => req<AskThread>(`/api/ask/threads/${id}`),
   createAskThread: (body: { title?: string; scenarioIds: number[]; runIds?: (number | null)[]; model?: string }) =>
     req<AskThreadSummary>('/api/ask/threads', { method: 'POST', body: JSON.stringify(body) }),
-  updateAskThread: (id: number, body: { title?: string; model?: string }) =>
+  updateAskThread: (id: number, body: { title?: string; model?: string; excluded?: string[] }) =>
     req<AskThreadSummary>(`/api/ask/threads/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
   askModels: () =>
     req<{ models: AskModel[]; default: string; defaultSource: 'setting' | 'agent' }>('/api/ask/models'),

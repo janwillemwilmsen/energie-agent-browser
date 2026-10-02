@@ -240,6 +240,7 @@ export function startRun(scenarioId: number, opts: StartRunOptions = {}): Starte
 
   const log: string[] = [];
   const screenshots: string[] = [];
+  const texts: string[] = [];
   let status: 'success' | 'failed' = 'success';
   // All work uses the shared session — the user bootstraps it once from any
   // Terminal/Editor tab and every run + the live preview share it.
@@ -422,15 +423,16 @@ export function startRun(scenarioId: number, opts: StartRunOptions = {}): Starte
           }
         }
 
-        // Each attempt starts from a clean screenshot set (filenames are reused).
+        // Each attempt starts from a clean artifact set (filenames are reused).
         screenshots.length = 0;
+        texts.length = 0;
         status = 'success';
 
         for (const viewport of viewports) {
           const stepCtx: StepContext = {
             browser,
             log: (line) => appendLog(ctx, line),
-            artifacts: { screenshotDir, fileStamp: runFileStamp, viewport, screenshots },
+            artifacts: { screenshotDir, fileStamp: runFileStamp, viewport, screenshots, texts },
             recorder: {
               start: () => startRecordingStep(ctx),
               stop: () => stopRecordingStep(ctx),
@@ -456,7 +458,7 @@ export function startRun(scenarioId: number, opts: StartRunOptions = {}): Starte
       // is still saved.
       await stopRecordingStep(ctx);
 
-      runStore().finish(runId, status, log.join('\n'), screenshots);
+      runStore().finish(runId, status, log.join('\n'), screenshots, texts);
 
       await notifyRunFinished({ scenario: { id: scenario.id, name: scenario.name }, runId, status });
       return status;
