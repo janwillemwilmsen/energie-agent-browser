@@ -12,6 +12,9 @@ import { useResource } from '../lib/resource.js';
 // switches the daemon onto that name and loads its saved state. Matches
 // PREFLIGHT_RECORDER_SESSION on the server.
 const RECORDER_SESSION = 'default';
+// Whether the retry / restart rows under "Steps" are shown; same key shape as
+// the scenario editor's toggles, remembered per browser.
+const RETRY_OPEN_KEY = 'eab.preflightEditor.retryOpen';
 
 // The Step kinds a Preflight may contain, straight from the shared schema.
 const PREFLIGHT_KINDS = PreflightStepSchema.options.map((o) => o.shape.kind.value);
@@ -64,6 +67,12 @@ export function PreflightPage() {
   const [busy, setBusy] = useState<string | null>(null); // shorthand for an in-flight action
   const [replaying, setReplaying] = useState(false);
   const [showAuthForm, setShowAuthForm] = useState(false);
+  const [retryOpen, setRetryOpen] = useState<boolean>(() => {
+    try { return localStorage.getItem(RETRY_OPEN_KEY) === '1'; } catch { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem(RETRY_OPEN_KEY, retryOpen ? '1' : '0'); } catch { /* ignore */ }
+  }, [retryOpen]);
   const { data: preflights, refresh: reload } = useResource(() => api.listPreflights(), {
     initial: [] as PreflightListRow[],
     onError: setError,
@@ -115,6 +124,16 @@ export function PreflightPage() {
       orig.retry_wait_after_ms !== draft.retryWaitAfterMs ||
       orig.restart_on_failure !== draft.restartOnFailure
     );
+  }, [draft, preflights]);
+
+  // Which kinds of change are pending — the hint under the steps names them.
+  const unsaved = useMemo(() => {
+    const orig = draft.id == null ? null : preflights.find((p) => p.id === draft.id) ?? null;
+    let origSteps: PreflightStep[] = [];
+    try { origSteps = orig ? JSON.parse(orig.steps_json) : []; } catch { /* ignore */ }
+    const stepsChanged = JSON.stringify(origSteps) !== JSON.stringify(draft.steps);
+    const nameChanged = orig ? orig.name !== draft.name : draft.name.trim().length > 0;
+    return { stepsChanged, nameChanged, newSteps: Math.max(0, draft.steps.length - origSteps.length) };
   }, [draft, preflights]);
 
   const nameIsTakenLocally = useMemo(() => {
@@ -250,20 +269,6 @@ export function PreflightPage() {
     }
   }
 
-  async function deletePreflight() {
-    if (draft.id == null) return;
-    if (!confirm(`Soft-delete preflight "${draft.name}"? You can still find its auth.json under ~/.agent-browser/sessions/.`)) return;
-    setError(null);
-    try {
-      await api.deletePreflight(draft.id);
-      setDraft(emptyDraft());
-      await reload();
-      navigate('/preflight');
-    } catch (e: any) {
-      setError(e?.message ?? String(e));
-    }
-  }
-
   async function addStep(step: PreflightStep) {
     // Auto-bind before executing — this is what replaces the old Start
     // recording button.
@@ -328,7 +333,16 @@ export function PreflightPage() {
         {draft.id != null && (() => {
           const row = preflights.find((x) => x.id === draft.id);
           return row && row.scenario_count > 0
-            ? <> Used by <strong>{row.scenario_count}</strong> scenario{row.scenario_count === 1 ? '' : 's'}: {row.scenario_names}.</>
+            ? (
+              <>
+                {' '}Used by <strong>{row.scenario_count}</strong> scenario{row.scenario_count === 1 ? '' : 's'}:{' '}
+                {row.scenarios.map((sc) => (
+                  <Link key={sc.id} to={`/scenarios/${sc.id}`} className="chip-link" title="Open this scenario">
+                    {sc.name}
+                  </Link>
+                ))}
+              </>
+            )
             : <> Not attached to any scenario yet.</>;
         })()}
       </p>
@@ -363,42 +377,6 @@ export function PreflightPage() {
           </p>
         )}
         <div className="scenario-meta-actions">
-          <button
-            type="button"
-            onClick={save}
-            disabled={saving || !draft.name.trim() || !draftDirty || (nameIsTakenLocally && draft.id == null)}
-            title={
-              !draft.name.trim() ? 'Set a name first' :
-              !draftDirty ? 'No unsaved changes' :
-              draft.id == null ? 'Save this new preflight' : 'Save changes (also captures current browser state)'
-            }
-          >
-            {saving ? 'Saving…' : draft.id == null ? '💾 Save preflight' : '💾 Save changes'}
-          </button>
-          {showSaved && (
-            <span style={{ color: '#4ade80', fontWeight: 600 }}>✓ Saved</span>
-          )}
-          {draft.id != null && (
-            <button
-              type="button"
-              onClick={replay}
-              disabled={replaying || draft.steps.length === 0}
-              title="Wipes the saved auth.json under ~/.agent-browser/sessions/<name>, restarts the browser fresh, and re-runs every step from scratch. The fresh login overwrites the wiped state."
-            >
-              {replaying ? 'Replaying…' : '↻▶ Replay (clean)'}
-            </button>
-          )}
-          {draft.id != null && (
-            <button
-              type="button"
-              className="btn-danger"
-              onClick={deletePreflight}
-              disabled={saving}
-              title="Soft-delete: removes the preflight from the list and from scenario dropdowns. The on-disk auth.json is left in place."
-            >
-              Delete
-            </button>
-          )}
           <span className="muted" style={{ marginLeft: 'auto', fontSize: 12 }}>
             Browser:{' '}
             {boundTo
@@ -429,7 +407,21 @@ export function PreflightPage() {
       <StepEditorDnd store={stepStore}>
       <div className="editor-grid preflight-editor">
         <div className="pf-steps">
-          <h2>Steps</h2>
+          <h2>
+            Steps{' '}
+            <button
+              type="button"
+              className={`steps-raw-link${retryOpen ? ' active' : ''}`}
+              aria-pressed={retryOpen}
+              aria-expanded={retryOpen}
+              title={retryOpen ? 'Hide the retry / restart settings' : 'Show the per-step retry and whole-preflight restart settings'}
+              onClick={() => setRetryOpen((v) => !v)}
+            >
+              {retryOpen ? 'retries ✓' : 'retries'}
+            </button>
+          </h2>
+          {retryOpen && (
+          <>
           <div className="retry-policy">
             <span className="muted">On step failure, retry</span>
             <label>
@@ -484,6 +476,8 @@ export function PreflightPage() {
             Applied when this preflight runs as a whole — on <strong>Replay (clean)</strong> and as the
             preflight prefix of any scenario that uses it. Remember to <strong>Save</strong> after changing.
           </p>
+          </>
+          )}
           <StepList
             store={stepStore}
             empty={
@@ -507,17 +501,42 @@ export function PreflightPage() {
             }}
             onError={setError}
           />
+          <div className="pf-save-bar">
+            <button
+              type="button"
+              onClick={save}
+              disabled={saving || !draft.name.trim() || !draftDirty || (nameIsTakenLocally && draft.id == null)}
+              title={
+                !draft.name.trim() ? 'Set a name first' :
+                !draftDirty ? 'No unsaved changes' :
+                draft.id == null ? 'Save this new preflight' : 'Save changes (also captures current browser state)'
+              }
+            >
+              {saving ? 'Saving…' : draft.id == null ? '💾 Save preflight' : '💾 Save changes'}
+            </button>
+            {showSaved && <span style={{ color: '#4ade80', fontWeight: 600 }}>✓ Saved</span>}
+            {!showSaved && (unsaved.stepsChanged || unsaved.nameChanged) && (
+              <span className="pf-unsaved">
+                Unsaved:{' '}
+                {[
+                  unsaved.stepsChanged
+                    ? unsaved.newSteps > 0
+                      ? `${unsaved.newSteps} new step${unsaved.newSteps === 1 ? '' : 's'}`
+                      : 'steps changed'
+                    : null,
+                  unsaved.nameChanged ? 'name changed' : null,
+                ].filter(Boolean).join(' · ')}
+                {' '}— save to keep {draft.id == null ? 'this preflight' : 'them'} (saving also captures the browser state).
+              </span>
+            )}
+          </div>
         </div>
 
         <div className="pf-snapshot">
-          <h3 style={{ marginTop: 24 }}>Snapshot &amp; pick</h3>
-          <p className="muted">
-            Snapshot the current page state, then click <em>click</em> or <em>type</em> on
-            a node to add that step. Picking sends the action live against the browser;
-            cookies land in <code>{draft.name || '<name>'}</code> automatically.
-          </p>
+          {/* The pane renders the heading with the snapshot buttons beside it. */}
           <SnapshotPane
             key={draft.id ?? 'new'}
+            title="Snapshot"
             store={stepStore}
             kinds={PREFLIGHT_KINDS}
             selectorWait={false}
@@ -529,10 +548,20 @@ export function PreflightPage() {
         <div className="pf-preview">
           <h2>
             Preview{' '}
-          </h2>
             <button onClick={() => setPreviewActive((v) => !v)}>
               {previewActive ? 'stop' : 'start'}
-            </button>
+            </button>{' '}
+            {draft.id != null && (
+              <button
+                type="button"
+                onClick={replay}
+                disabled={replaying || draft.steps.length === 0}
+                title="Wipes the saved auth.json under ~/.agent-browser/sessions/<name>, restarts the browser fresh, and re-runs every step from scratch. The fresh login overwrites the wiped state."
+              >
+                {replaying ? 'Replaying…' : '↻▶ Replay (clean)'}
+              </button>
+            )}
+          </h2>
           <PreviewStream session={RECORDER_SESSION} active={previewActive} />
         </div>
       </div>

@@ -7,13 +7,18 @@ import { useResource } from '../lib/resource.js';
 // preflight and the table of existing ones with how many scenarios use each.
 // Editing (steps, replay, auth profiles) lives on /preflight/:id.
 
-function stepCount(p: PreflightListRow): number {
+function parseSteps(p: PreflightListRow): Array<{ kind?: string; name?: string }> {
   try {
     const steps = JSON.parse(p.steps_json);
-    return Array.isArray(steps) ? steps.length : 0;
+    return Array.isArray(steps) ? steps : [];
   } catch {
-    return 0;
+    return [];
   }
+}
+
+/** The auth profiles the preflight logs in with (its `auth-login` steps), deduplicated. */
+function authProfiles(p: PreflightListRow): string[] {
+  return [...new Set(parseSteps(p).filter((s) => s.kind === 'auth-login' && s.name).map((s) => s.name as string))];
 }
 
 export function Preflights() {
@@ -66,8 +71,9 @@ export function Preflights() {
         from that state on each run. Create one here, then record its steps in the editor.
       </p>
 
-      <form className="card" onSubmit={create} style={{ maxWidth: 720 }}>
-        <h3 style={{ margin: 0 }}>New preflight</h3>
+      <details className="card" style={{ maxWidth: 720 }}>
+        <summary><h3>New preflight</h3></summary>
+        <form onSubmit={create}>
         <div className="scenario-meta-row">
           <label className="scenario-meta-name">
             <span>Name</span>
@@ -95,7 +101,8 @@ export function Preflights() {
             {busy ? 'Creating…' : '+ Create & open editor'}
           </button>
         </div>
-      </form>
+        </form>
+      </details>
 
       {err && <p className="error">{err}</p>}
 
@@ -105,6 +112,7 @@ export function Preflights() {
             <th>Name</th>
             <th>Description</th>
             <th>Steps</th>
+            <th>Auth profile</th>
             <th>Used by</th>
             <th>Updated</th>
             <th></th>
@@ -115,12 +123,23 @@ export function Preflights() {
             <tr key={p.id}>
               <td data-label="Name"><Link to={`/preflight/${p.id}`}><strong>{p.name}</strong></Link></td>
               <td data-label="Description" className="muted">{p.description || '—'}</td>
-              <td data-label="Steps">{stepCount(p)}</td>
+              <td data-label="Steps">{parseSteps(p).length}</td>
+              <td data-label="Auth profile" title="The auth profile used by this preflight's auth-login step">
+                {authProfiles(p).length > 0
+                  ? authProfiles(p).map((n) => <code key={n} style={{ marginRight: 6 }}>🔐 {n}</code>)
+                  : <span className="muted">—</span>}
+              </td>
               <td data-label="Used by" title={p.scenario_names ?? 'No scenario uses this preflight yet'}>
                 {p.scenario_count > 0 ? (
                   <>
                     {p.scenario_count} scenario{p.scenario_count === 1 ? '' : 's'}
-                    <span className="muted" style={{ display: 'block', fontSize: 12 }}>{p.scenario_names}</span>
+                    <span className="chip-links">
+                      {p.scenarios.map((sc) => (
+                        <Link key={sc.id} to={`/scenarios/${sc.id}`} className="chip-link" title="Open this scenario">
+                          {sc.name}
+                        </Link>
+                      ))}
+                    </span>
                   </>
                 ) : (
                   <span className="muted">not used</span>
@@ -129,7 +148,6 @@ export function Preflights() {
               <td data-label="Updated" className="muted">{new Date(p.updated_at + 'Z').toLocaleString()}</td>
               <td>
                 <div className="scenario-actions-row">
-                  <Link to={`/preflight/${p.id}`} className="btn-link">Open</Link>
                   <button onClick={() => void remove(p)} disabled={busy}>Delete</button>
                 </div>
               </td>
@@ -137,7 +155,7 @@ export function Preflights() {
           ))}
           {preflights.length === 0 && (
             <tr>
-              <td colSpan={6} className="muted" style={{ textAlign: 'center', padding: 16 }}>
+              <td colSpan={7} className="muted" style={{ textAlign: 'center', padding: 16 }}>
                 No preflights yet — create one above.
               </td>
             </tr>

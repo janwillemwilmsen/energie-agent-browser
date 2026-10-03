@@ -1888,3 +1888,17 @@ button.ask-danger:hover { color: var(--error); border-color: var(--error); filte
 .ask-context-bar .muted:nth-child(2) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .ask-context-body { display: flex; flex-direction: column; gap: 6px; max-height: 38vh; overflow-y: auto; padding-right: 4px; }
 .ask-context.collapsed { flex: none; }
+
+/* Scenario references on the preflight pages: small pill links. */
+.chip-links { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.chip-link {
+  display: inline-block; padding: 1px 8px; margin: 0 4px 4px 0; border-radius: 999px;
+  background: var(--panel); border: 1px solid var(--border); color: var(--text);
+  font-size: 12px; font-weight: 500; text-decoration: none; white-space: nowrap;
+}
+.chip-link:hover { border-color: var(--accent); color: var(--accent); }
+.chip-links .chip-link { margin: 0; }
+
+/* Preflight editor: save bar under the steps */
+.pf-save-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 8px 0 4px; }
+.pf-unsaved { font-size: 13px; color: #fbbf24; }

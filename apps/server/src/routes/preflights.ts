@@ -26,18 +26,29 @@ export async function preflightsRoutes(app: FastifyInstance) {
   // The list carries each preflight's usage: how many scenarios have it
   // attached, and their names (for the overview's tooltip).
   app.get('/api/preflights', async () => {
-    return getDb()
+    const db = getDb();
+    const rows = db
       .prepare(
-        `SELECT p.id, p.name, p.description, p.steps_json,
-                p.retries, p.retry_wait_before_ms, p.retry_wait_after_ms, p.restart_on_failure,
-                p.created_at, p.updated_at, p.deleted_at,
-                (SELECT count(*) FROM scenarios s WHERE s.preflight_id = p.id) AS scenario_count,
-                (SELECT group_concat(s.name, ' · ') FROM (SELECT name FROM scenarios WHERE preflight_id = p.id ORDER BY name COLLATE NOCASE) s) AS scenario_names
-         FROM preflights p
-         WHERE p.deleted_at IS NULL
-         ORDER BY p.updated_at DESC`,
+        `SELECT id, name, description, steps_json,
+                retries, retry_wait_before_ms, retry_wait_after_ms, restart_on_failure,
+                created_at, updated_at, deleted_at
+         FROM preflights
+         WHERE deleted_at IS NULL
+         ORDER BY updated_at DESC`,
       )
-      .all();
+      .all() as Array<Record<string, unknown> & { id: number }>;
+    const using = db
+      .prepare('SELECT id, name, preflight_id FROM scenarios WHERE preflight_id IS NOT NULL ORDER BY name COLLATE NOCASE')
+      .all() as { id: number; name: string; preflight_id: number }[];
+    return rows.map((p) => {
+      const scenarios = using.filter((s) => s.preflight_id === p.id).map(({ id, name }) => ({ id, name }));
+      return {
+        ...p,
+        scenarios,
+        scenario_count: scenarios.length,
+        scenario_names: scenarios.length ? scenarios.map((s) => s.name).join(' · ') : null,
+      };
+    });
   });
 
   app.get<{ Params: { id: string } }>('/api/preflights/:id', async (req, reply) => {

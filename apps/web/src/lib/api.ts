@@ -271,6 +271,8 @@ export type AskStreamEvent =
 
 /** A preflight as listed, with its scenario usage. */
 export interface PreflightListRow extends Preflight {
+  /** The scenarios that have this preflight attached. */
+  scenarios: { id: number; name: string }[];
   scenario_count: number;
   /** Names of the scenarios using it, " · "-joined; null when none. */
   scenario_names: string | null;

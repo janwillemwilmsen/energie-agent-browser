@@ -104,7 +104,7 @@ export function SnapshotPane(props: SnapshotPaneProps) {
   return (
     <>
       {props.title ? (
-        <h2 style={{ marginTop: 24 }}>
+        <h2>
           {props.title} {buttons}
         </h2>
       ) : (
