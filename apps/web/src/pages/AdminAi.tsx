@@ -195,9 +195,9 @@ export function AdminAi() {
         </div>
       </div>
 
-      <h2 style={{ marginTop: 28 }}>Ask (scenario review)</h2>
+      <h2 style={{ marginTop: 28 }}>AI Ask, scenario reviewer</h2>
       <p className="muted">
-        The model behind the <strong>Ask</strong> page. It must accept images (the run screenshots go
+        The model behind the <strong>Review & Ask</strong> page. It must accept images (the run screenshots go
         in as pictures); a long context helps. Without an override it follows the AI task model above.
       </p>
       {current && (

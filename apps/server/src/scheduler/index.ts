@@ -41,7 +41,7 @@ function enqueueChain(scenarioIds: number[], scheduleId: number): void {
       // Scenarios can be deleted after the schedule was created; skip quietly.
       if (!db.prepare('SELECT 1 FROM scenarios WHERE id = ?').get(scenarioId)) continue;
       try {
-        const status = await startRun(scenarioId).finished;
+        const status = await startRun(scenarioId, { unattended: true }).finished;
         if (status === 'failed') failed += 1;
       } catch (e: any) {
         failed += 1;

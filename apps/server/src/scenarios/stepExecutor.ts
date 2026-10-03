@@ -75,6 +75,27 @@ export interface Recorder {
   stop(): Promise<void>;
 }
 
+/**
+ * Where a `pause` step parks the run. Only scenario runs have this; without
+ * it (Preflight replay, the recorder) a pause is logged and skipped.
+ */
+export interface PauseController {
+  /** Resolves when the user resumes; throws RunAbortedError on abort/timeout. */
+  wait(position: number, step: Extract<StepPayload, { kind: 'pause' }>): Promise<void>;
+}
+
+/**
+ * The run must stop here and NOT retry or restart: the user aborted it at a
+ * pause, or a pause timed out. executeSteps rethrows it past the retry loop;
+ * the runner skips its whole-run restarts for it.
+ */
+export class RunAbortedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RunAbortedError';
+  }
+}
+
 export interface StepContext {
   browser: Browser;
   log: (line: string) => void;
@@ -82,6 +103,7 @@ export interface StepContext {
   timing?: Partial<Timing>;
   artifacts?: Artifacts;
   recorder?: Recorder;
+  pause?: PauseController;
   /** Per-profile selector overrides for auth-login. Absent means no overrides. */
   authSelectors?: (profileName: string) => AuthSelectors;
 }
@@ -138,6 +160,7 @@ export function describeStep(step: StepPayload): string {
     case 'close': return 'close browser session';
     case 'press': return `press ${step.key}`;
     case 'save_text': return `save text${step.label ? ` ${step.label}` : ''}`;
+    case 'pause': return `pause${step.label ? ` ${step.label}` : ''}`;
   }
 }
 
@@ -198,7 +221,8 @@ async function executeStepWithRetries(
       }
       return;
     } catch (e: any) {
-      if (attempt >= retries) throw e;
+      // An abort is a decision, not a flaky step: no retries.
+      if (e instanceof RunAbortedError || attempt >= retries) throw e;
       ctx.log(
         `step #${position} (${step.kind}) failed: ${e?.message ?? e} — retry ${attempt + 1}/${retries}`,
       );
@@ -222,6 +246,13 @@ export async function executeStep(ctx: StepContext, step: StepPayload, position 
       return;
     case 'save_text':
       await saveText(ctx, step, position);
+      return;
+    case 'pause':
+      if (!ctx.pause) {
+        ctx.log(`pause${step.label ? ` ${step.label}` : ''}: no run controller here — skipped`);
+        return;
+      }
+      await ctx.pause.wait(position, step);
       return;
     case 'record_stop':
       await requireRecorder(ctx, step.kind).stop();

@@ -1877,3 +1877,7 @@ button.ask-danger:hover { color: var(--error); border-color: var(--error); filte
 .ask-ctx-texts .ask-asset-btn { position: static; transform: none; }
 .texts-edit { width: 100%; box-sizing: border-box; min-height: calc(100vh - 320px); resize: vertical; font: 12.5px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 10px; }
 .texts-edit:focus { outline: none; border-color: var(--accent); }
+
+/* Paused run: Resume / Abort */
+.pause-controls { display: inline-flex; align-items: center; gap: 8px; margin-left: 12px; padding: 4px 10px; border: 1px solid #f59e0b; border-radius: 6px; font-size: 13px; font-weight: 500; color: #fbbf24; }
+.pause-controls button { font-size: 12px; padding: 3px 10px; }

@@ -281,8 +281,7 @@ export function AddStepControls(props: AddStepControlsProps) {
           {fixed('shot-viewport', 'screenshot', 'screenshot (viewport)', () => ({ label: artifactLabel(), fullPage: false }), '+ screenshot (viewport)')}
           {fixed('shot-mobile', 'screenshot', 'screenshot (mobile)', () => ({ label: artifactLabel(), fullPage: true, viewport: 'mobile' }), '+ screenshot (mobile)',
             'Switch to the mobile device, capture a full-page screenshot, then restore the viewport')}
-          {fixed('shot-annotated', 'screenshot', 'screenshot (annotated)', () => ({ label: artifactLabel(), fullPage: true, annotate: true }), '+ screenshot (annotated)',
-            'Full-page screenshot with numbered labels overlaid on interactive elements (legend in the run log)')}
+          {/* An annotated screenshot is still available: edit a screenshot step and tick `annotate`. */}
         </>
       )}
       {allowed.has('save_text') && fixed('save-text', 'save_text', 'save text', () => ({ label: artifactLabel() }), '+ save text',
@@ -300,6 +299,8 @@ export function AddStepControls(props: AddStepControlsProps) {
           + wait (ms)
         </AddButton>
       )}
+      {allowed.has('pause') && fixed('pause', 'pause', 'pause', () => ({}), '+ ⏸ pause',
+        'Stop the run here with the browser as it is, until you click Resume on the run (or 10 min pass). Scheduled runs skip it.')}
       {allowed.has('record_start') && fixed('record-start', 'record_start', 'start recording', () => ({}), '+ ⏺ start recording',
         'Start a video recording from this point in the scenario (saved to the Recordings page)')}
       {allowed.has('record_stop') && fixed('record-stop', 'record_stop', 'stop recording', () => ({}), '+ ⏹ stop recording',

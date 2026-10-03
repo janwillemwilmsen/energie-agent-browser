@@ -154,6 +154,8 @@ export function ScenarioEditor() {
   }, [metaOpen]);
   const [playStatus, setPlayStatus] = useState<string | null>(null);
   const [lastRunId, setLastRunId] = useState<number | null>(null);
+  // Set while the run we started is parked at a `pause` step.
+  const [paused, setPaused] = useState<{ position: number; label: string | null } | null>(null);
   const [draft, setDraft] = useState<MetaDraft>(emptyDraft());
   const [savingMeta, setSavingMeta] = useState(false);
   const [metaSavedAt, setMetaSavedAt] = useState<number | null>(null);
@@ -215,13 +217,15 @@ export function ScenarioEditor() {
       const run = await api.startRun(scenarioId, { reset: opts.reset });
       setLastRunId(run.id);
       setPlayStatus(`Run #${run.id} ${run.status}`);
-      // Poll the run row until it reaches a terminal state.
-      const deadline = Date.now() + 120_000;
+      // Poll the run row until it reaches a terminal state. A run parked at a
+      // pause step may sit for a long time, so keep polling while paused.
+      const deadline = Date.now() + 30 * 60_000;
       while (Date.now() < deadline) {
         await new Promise((r) => setTimeout(r, 1500));
         try {
           const r2 = await api.getRun(run.id);
-          setPlayStatus(`Run #${r2.id} ${r2.status}`);
+          setPaused(r2.pause ? { position: r2.pause.position, label: r2.pause.label } : null);
+          setPlayStatus(r2.pause ? `Run #${r2.id} paused at step #${r2.pause.position}` : `Run #${r2.id} ${r2.status}`);
           if (r2.status === 'success' || r2.status === 'failed') break;
         } catch {
           /* keep polling */
@@ -230,6 +234,19 @@ export function ScenarioEditor() {
     } catch (e: any) {
       setErr(e.message ?? String(e));
       setPlayStatus(null);
+    } finally {
+      setPaused(null);
+    }
+  }
+
+  async function pauseAction(action: 'resume' | 'abort') {
+    if (lastRunId == null) return;
+    try {
+      if (action === 'resume') await api.resumeRun(lastRunId);
+      else await api.abortRun(lastRunId);
+      setPaused(null);
+    } catch (e: any) {
+      setErr(e.message ?? String(e));
     }
   }
 
@@ -395,7 +412,6 @@ export function ScenarioEditor() {
             </button>
           )}
           {!dirty && savedRecently && <span className="muted">Saved.</span>}
-          <span className="muted">uses session <code>{SESSION}</code></span>
         </div>
       </form>
       </details>
@@ -572,6 +588,13 @@ export function ScenarioEditor() {
               ) : (
                 <span className="muted" style={{ marginLeft: 8 }}>{playStatus}</span>
               ))}
+            {paused && (
+              <span className="pause-controls">
+                <span>⏸ paused{paused.label ? ` — ${paused.label}` : ''}</span>
+                <button onClick={() => void pauseAction('resume')} title="Continue with the next step">▶ Resume</button>
+                <button className="ask-danger" onClick={() => void pauseAction('abort')} title="Stop the run here (marked failed, no restart)">Abort</button>
+              </span>
+            )}
           </h2>
           <PreviewStream session={SESSION} active={previewActive} />
 

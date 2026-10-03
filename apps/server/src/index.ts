@@ -1,5 +1,6 @@
 import { config, loadConfig, loadDotenv, setConfig } from './config.js';
 import { migrate } from './db/migrate.js';
+import { runStore } from './runs/index.js';
 import { createApp } from './app.js';
 import { ensurePushConfigured, pushRunFinished } from './push.js';
 import { emailRunFinished, startEmailDigestSchedule } from './email.js';
@@ -37,6 +38,23 @@ async function main() {
   setConfig(loaded.config);
 
   migrate();
+
+  // Runs are carried out in this process; one still 'running' at boot was cut
+  // off by the previous process (restart, crash, a paused run that could not
+  // outlive the server). Close those rows out so they don't show as running
+  // forever and don't count as in flight.
+  for (const id of runStore().inFlightIds()) {
+    const row = runStore().get(id);
+    if (!row) continue;
+    runStore().finish(
+      id,
+      'failed',
+      `${row.log_text}
+[${new Date().toISOString()}] ABORTED: the server restarted while this run was in progress`,
+      [],
+      [],
+    );
+  }
 
   const app = await createApp();
 

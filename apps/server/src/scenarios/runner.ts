@@ -8,10 +8,13 @@ import { getAuthSelectors } from '../authSelectors.js';
 import {
   applyViewport,
   executeSteps,
+  RunAbortedError,
   type IndexedStep,
+  type PauseController,
   type RetryPolicy,
   type StepContext,
 } from './stepExecutor.js';
+import { pauseRun } from './pauseRegistry.js';
 import { StreamRecorder } from './streamRecorder.js';
 import { runStore, type RunStatus } from '../runs/index.js';
 import { notifyRunFinished } from '../notifications.js';
@@ -34,6 +37,9 @@ interface RecordingHolder {
   /** The run's file stamp; clip filenames share it with the screenshots. */
   fileStamp: string;
 }
+
+const DEFAULT_PAUSE_TIMEOUT_MS = 10 * 60_000;
+const fmtDuration = (ms: number) => (ms < 60_000 ? `${Math.round(ms / 1000)} s` : `${Math.round(ms / 60_000)} min`);
 
 interface StepRow {
   id: number;
@@ -157,6 +163,11 @@ export interface StartRunOptions {
    * to cookies-mode preflights.
    */
   freshSession?: boolean;
+  /**
+   * Nobody is watching (cron schedules): `pause` steps are skipped with a log
+   * line instead of parking the run until someone clicks Resume.
+   */
+  unattended?: boolean;
 }
 
 export interface StartedRun {
@@ -428,6 +439,28 @@ export function startRun(scenarioId: number, opts: StartRunOptions = {}): Starte
         texts.length = 0;
         status = 'success';
 
+        // `pause` steps park the run here. The keep-alive is a cheap daemon
+        // command: agent-browser exits after AGENT_BROWSER_IDLE_TIMEOUT_MS
+        // without one, which would turn a long pause into a blank browser.
+        const pause: PauseController = {
+          wait: async (position, step) => {
+            const label = step.label ?? null;
+            const timeoutMs = step.timeoutMs ?? DEFAULT_PAUSE_TIMEOUT_MS;
+            if (opts.unattended) {
+              appendLog(ctx, `pause${label ? ` ${label}` : ''}: unattended run — skipped`);
+              return;
+            }
+            appendLog(ctx, `⏸ paused at step #${position}${label ? ` (${label})` : ''} — waiting for Resume (aborts after ${fmtDuration(timeoutMs)})`);
+            const outcome = await pauseRun(
+              { runId, scenarioId: scenario.id, position, label, timeoutMs },
+              { keepAlive: async () => { await browser.run(['get', 'url'], { timeoutMs: 15_000 }); } },
+            );
+            if (outcome === 'resumed') { appendLog(ctx, '▶ resumed'); return; }
+            throw new RunAbortedError(outcome === 'aborted' ? 'aborted by the user at the pause' : `pause timed out after ${fmtDuration(timeoutMs)}`);
+          },
+        };
+
+        let aborted = false;
         for (const viewport of viewports) {
           const stepCtx: StepContext = {
             browser,
@@ -438,6 +471,7 @@ export function startRun(scenarioId: number, opts: StartRunOptions = {}): Starte
               stop: () => stopRecordingStep(ctx),
             },
             authSelectors: getAuthSelectors,
+            pause,
           };
           appendLog(ctx, `=== viewport: ${viewport} ===`);
           try {
@@ -445,12 +479,14 @@ export function startRun(scenarioId: number, opts: StartRunOptions = {}): Starte
             await executeSteps(stepCtx, steps, scenarioPolicy);
           } catch (e: any) {
             status = 'failed';
-            appendLog(ctx, `ERROR: ${e.message}`);
+            aborted = e instanceof RunAbortedError;
+            appendLog(ctx, `${aborted ? 'ABORTED' : 'ERROR'}: ${e.message}`);
             break;
           }
         }
 
-        if (status === 'success') break;
+        // An abort is final: no whole-run restart (it would just pause again).
+        if (status === 'success' || aborted) break;
       }
 
       // A recording left open (a `record_start` without a matching `record_stop`,

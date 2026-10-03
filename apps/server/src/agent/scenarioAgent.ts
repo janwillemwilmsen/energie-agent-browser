@@ -305,7 +305,7 @@ function summarizeAction(a: AgentAction): string {
 // only make sense inside a scenario run (screenshot, recording) are skipped
 // live: perception comes from snapshots, and the step is captured on every
 // future run, which is its purpose.
-const LIVE_SKIPPED_KINDS = new Set(['screenshot', 'record_start', 'record_stop']);
+const LIVE_SKIPPED_KINDS = new Set(['screenshot', 'record_start', 'record_stop', 'save_text', 'pause']);
 
 async function executeAction(action: AgentAction, log: (line: string) => void): Promise<void> {
   const saved = actionToStep(action);

@@ -269,6 +269,17 @@ export type AskStreamEvent =
   | { delta: string }
   | { done: true; messageId: number; usage: AskUsage | null; error: string | null };
 
+// A run parked at a `pause` step (GET /api/runs/paused, GET /api/runs/:id).
+export interface PausedRun {
+  runId: number;
+  scenarioId: number;
+  position: number;
+  label: string | null;
+  since: string;
+  timeoutMs: number;
+  deadline: string;
+}
+
 // A page text saved by a save_text step (GET /api/scenarios/:id/texts).
 export interface ScenarioText {
   runId: number;
@@ -403,7 +414,10 @@ export const api = {
       body: JSON.stringify({ reset: opts.reset ?? false }),
     }),
   listRuns: () => req<Run[]>('/api/runs'),
-  getRun: (id: number) => req<Run>(`/api/runs/${id}`),
+  getRun: (id: number) => req<Run & { pause: PausedRun | null }>(`/api/runs/${id}`),
+  pausedRuns: () => req<PausedRun[]>('/api/runs/paused'),
+  resumeRun: (id: number) => req<{ ok: true }>(`/api/runs/${id}/resume`, { method: 'POST' }),
+  abortRun: (id: number) => req<{ ok: true }>(`/api/runs/${id}/abort`, { method: 'POST' }),
   deleteRun: (id: number) => req<void>(`/api/runs/${id}`, { method: 'DELETE' }),
   deleteAllRuns: () => req<void>('/api/runs', { method: 'DELETE' }),
   deleteRuns: (ids: number[]) =>

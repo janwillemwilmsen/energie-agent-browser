@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { getDb } from '../db/index.js';
 import { runStore } from '../runs/index.js';
 import { startRun } from '../scenarios/runner.js';
+import { abortPausedRun, listPaused, pausedRun, resumeRun } from '../scenarios/pauseRegistry.js';
 import { ensureThumb } from '../thumbs.js';
 
 const RunBody = z.object({ reset: z.boolean().default(false) });
@@ -26,10 +27,23 @@ export async function runsRoutes(app: FastifyInstance) {
 
   app.get('/api/runs', async () => runStore().list({ limit: 100 }));
 
+  // Runs parked at a `pause` step right now, for the Resume/Abort buttons.
+  app.get('/api/runs/paused', async () => listPaused());
+
   app.get<{ Params: { id: string } }>('/api/runs/:id', async (req, reply) => {
     const row = runStore().get(Number(req.params.id));
     if (!row) return reply.code(404).send({ error: 'not_found' });
-    return row;
+    return { ...row, pause: pausedRun(row.id) };
+  });
+
+  app.post<{ Params: { id: string } }>('/api/runs/:id/resume', async (req, reply) => {
+    if (!resumeRun(Number(req.params.id))) return reply.code(409).send({ error: 'not_paused' });
+    return { ok: true };
+  });
+
+  app.post<{ Params: { id: string } }>('/api/runs/:id/abort', async (req, reply) => {
+    if (!abortPausedRun(Number(req.params.id))) return reply.code(409).send({ error: 'not_paused' });
+    return { ok: true };
   });
 
   // ?w=480 (and optionally &h=300) serves a cached WebP thumbnail instead of

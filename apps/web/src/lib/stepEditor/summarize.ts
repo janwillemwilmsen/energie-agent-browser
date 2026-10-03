@@ -56,6 +56,8 @@ export function summarizeStep(kind: string, p: Record<string, unknown>): string 
       return `⌨ ${p.key ?? ''}`;
     case 'save_text':
       return `📄 save text${p.label ? ` "${p.label}"` : ''}`;
+    case 'pause':
+      return `⏸ pause${p.label ? ` "${p.label}"` : ''} — wait for Resume${p.timeoutMs ? ` (max ${Math.round(Number(p.timeoutMs) / 60000)} min)` : ''}`;
     default:
       return JSON.stringify(p);
   }

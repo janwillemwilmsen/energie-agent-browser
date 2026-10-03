@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { api, type Run } from '../lib/api.js';
+import { api, type PausedRun, type Run } from '../lib/api.js';
 import { GroupBySwitch, GroupLabel, groupKey, sortByGroup, type GroupBy } from '../lib/tagGrouping.js';
 import { useResource, usePolling } from '../lib/resource.js';
 
@@ -38,6 +38,19 @@ export function Runs() {
   );
   const watching = !!liveSelected &&
     (liveSelected.status === 'running' || liveSelected.status === 'queued');
+  // Runs parked at a `pause` step: polled with the list so the Resume/Abort
+  // controls appear on the right row.
+  const { data: paused, refresh: refreshPaused } = useResource(() => api.pausedRuns(), { initial: [] as PausedRun[] });
+  usePolling(refreshPaused, watching ? 1500 : 4000);
+  async function pauseAction(runId: number, action: 'resume' | 'abort') {
+    try {
+      if (action === 'resume') await api.resumeRun(runId);
+      else await api.abortRun(runId);
+      await refreshPaused();
+    } catch (e: any) {
+      setErr(e.message ?? String(e));
+    }
+  }
 
   // Poll faster while you're staring at a not-yet-finished run, slower
   // otherwise — keeps idle pages cheap but the log feels live when it matters.
@@ -418,6 +431,8 @@ export function Runs() {
                     <RunDetail
                       run={liveSelected}
                       live={watching}
+                      paused={paused.find((p) => p.runId === liveSelected.id) ?? null}
+                      onPauseAction={(a) => void pauseAction(liveSelected.id, a)}
                       onDelete={removeOne}
                       onClose={() => setSelected(null)}
                     />
@@ -443,11 +458,15 @@ export function Runs() {
 function RunDetail({
   run,
   live,
+  paused,
+  onPauseAction,
   onDelete,
   onClose,
 }: {
   run: Run;
   live: boolean;
+  paused: PausedRun | null;
+  onPauseAction: (action: 'resume' | 'abort') => void;
   onDelete: (id: number) => void;
   onClose: () => void;
 }) {
@@ -476,6 +495,16 @@ function RunDetail({
         </button>
       </h2>
       <p className="muted">{run.started_at} → {run.finished_at ?? 'in progress'}</p>
+      {paused && (
+        <p className="pause-controls" style={{ margin: '0 0 10px' }}>
+          <span>
+            ⏸ Paused at step #{paused.position}{paused.label ? ` (${paused.label})` : ''} since{' '}
+            {new Date(paused.since).toLocaleTimeString()} · aborts at {new Date(paused.deadline).toLocaleTimeString()}
+          </span>
+          <button onClick={() => onPauseAction('resume')} title="Continue with the next step">▶ Resume</button>
+          <button className="ask-danger" onClick={() => onPauseAction('abort')} title="Stop the run here (marked failed, no restart)">Abort</button>
+        </p>
+      )}
       <div className="run-detail-cols">
         <div>
           <h3>

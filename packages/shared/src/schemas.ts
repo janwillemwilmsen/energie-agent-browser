@@ -75,6 +75,9 @@ export const StepKind = z.enum([
   // Save the rendered page's readable text (agent-browser read) as a Markdown
   // file beside the run's screenshots — the textual counterpart of a screenshot.
   'save_text',
+  // Stop the run here and keep the browser as it is until the user clicks
+  // Resume (or Abort, or the timeout passes). Unattended (scheduled) runs skip it.
+  'pause',
 ]);
 export type StepKind = z.infer<typeof StepKind>;
 
@@ -158,6 +161,12 @@ const StepClose = z.object({ kind: z.literal('close') });
 const StepPress = z.object({ kind: z.literal('press'), key: z.string().trim().min(1) });
 // Falls back to `step-<position>` when absent, like screenshot.
 const StepSaveText = z.object({ kind: z.literal('save_text'), label: z.string().optional() });
+const StepPause = z.object({
+  kind: z.literal('pause'),
+  label: z.string().optional(),
+  // How long to wait for Resume before the run is aborted. Default 10 minutes.
+  timeoutMs: z.number().int().min(10_000).max(24 * 3_600_000).optional(),
+});
 // Single-form login via agent-browser's encrypted Auth Vault. The username +
 // password live in ~/.agent-browser/auth/<name>.json (AES-GCM encrypted), so
 // credentials never appear in a step payload. Only Preflights may contain this
@@ -184,6 +193,7 @@ export const ScenarioStepPayload = z.discriminatedUnion('kind', [
   StepClose,
   StepPress,
   StepSaveText,
+  StepPause,
 ]);
 export type ScenarioStepPayload = z.infer<typeof ScenarioStepPayload>;
 

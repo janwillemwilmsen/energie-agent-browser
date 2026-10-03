@@ -289,9 +289,7 @@ export function PreflightPage() {
     <section>
       <h1>Preflights</h1>
       <p className="muted">
-        Record a one-time login or cookie-consent flow once. Opening a preflight (or
-        taking the first action on a new one) binds the <code>default</code> browser
-        to that preflight's <code>--session-name</code> and loads its saved auth state.
+        Record a one-time login or cookie-consent flow once. 
         Any scenario that selects this preflight will use that same state on every run.
       </p>
 

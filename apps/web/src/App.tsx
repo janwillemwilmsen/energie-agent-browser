@@ -71,7 +71,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/screenshots', label: 'Screenshots', icon: Images },
   { to: '/recordings', label: 'Recordings', icon: Video },
   { to: '/diffs', label: 'Diffs', icon: GitCompare },
-  { to: '/ask', label: 'Ask', icon: MessageSquareText },
+  { to: '/ask', label: 'Review & Ask', icon: MessageSquareText },
 ];
 
 const COLLAPSE_KEY = 'eab.nav.collapsed';
