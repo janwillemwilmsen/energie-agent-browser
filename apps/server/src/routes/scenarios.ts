@@ -79,6 +79,50 @@ export async function scenariosRoutes(app: FastifyInstance) {
     );
   });
 
+  // Duplicate a scenario: every setting (tags, retry policy, preflight,
+  // recording) plus its steps, under a new name — optionally with another
+  // viewport, which is the usual reason to copy (a mobile twin). Runs and
+  // schedules are not copied.
+  const CopyBody = z.object({
+    name: z.string().trim().min(1).max(200).optional(),
+    viewport_preset: ViewportPreset.optional(),
+  });
+  app.post<{ Params: { id: string } }>('/api/scenarios/:id/copy', async (req, reply) => {
+    const body = CopyBody.parse(req.body ?? {});
+    const db = getDb();
+    const src = db.prepare('SELECT * FROM scenarios WHERE id = ?').get(Number(req.params.id)) as Record<string, unknown> | undefined;
+    if (!src) return reply.code(404).send({ error: 'not_found' });
+    const copy = db.transaction(() => {
+      const info = db
+        .prepare(
+          `INSERT INTO scenarios (name, url, viewport_preset, brand, type,
+             retries, retry_wait_before_ms, retry_wait_after_ms, restart_on_failure,
+             preflight_id, preflight_mode, record_enabled)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          body.name ?? `${src.name} (copy)`,
+          src.url,
+          body.viewport_preset ?? src.viewport_preset,
+          src.brand,
+          src.type,
+          src.retries,
+          src.retry_wait_before_ms,
+          src.retry_wait_after_ms,
+          src.restart_on_failure,
+          src.preflight_id,
+          src.preflight_mode,
+          src.record_enabled,
+        );
+      db.prepare(
+        `INSERT INTO scenario_steps (scenario_id, position, kind, payload_json)
+         SELECT ?, position, kind, payload_json FROM scenario_steps WHERE scenario_id = ? ORDER BY position`,
+      ).run(info.lastInsertRowid, src.id);
+      return db.prepare('SELECT * FROM scenarios WHERE id = ?').get(info.lastInsertRowid);
+    })();
+    return reply.code(201).send(copy);
+  });
+
   app.put<{ Params: { id: string } }>('/api/scenarios/:id', async (req, reply) => {
     const body = ScenarioUpdate.parse(req.body);
     const db = getDb();

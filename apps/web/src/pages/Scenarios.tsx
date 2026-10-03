@@ -1,10 +1,11 @@
 import { Fragment, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { api, type Scenario } from '../lib/api.js';
 import { GroupBySwitch, GroupLabel, groupKey, sortByGroup, type GroupBy } from '../lib/tagGrouping.js';
 import { useResource } from '../lib/resource.js';
 
 export function Scenarios() {
+  const navigate = useNavigate();
   const [name, setName] = useState('');
   const [url, setUrl] = useState('https://');
   const [preset, setPreset] = useState<'desktop' | 'mobile' | 'both'>('desktop');
@@ -56,6 +57,28 @@ export function Scenarios() {
     if (!confirm('Delete this scenario?')) return;
     await api.deleteScenario(id);
     await load();
+  }
+
+  // Duplicate with all settings + steps. Two prompts: the new name, and the
+  // viewport (a mobile twin of a desktop scenario is the common case).
+  async function copy(s: Scenario) {
+    const name = prompt('Name for the copy:', `${s.name} (copy)`);
+    if (name == null || !name.trim()) return;
+    const vp = prompt('Viewport for the copy? desktop / mobile / both', s.viewport_preset);
+    if (vp == null) return;
+    const viewport = vp.trim().toLowerCase();
+    if (!['desktop', 'mobile', 'both'].includes(viewport)) {
+      setErr('Viewport must be desktop, mobile or both');
+      return;
+    }
+    setErr(null);
+    try {
+      const created = await api.copyScenario(s.id, { name: name.trim(), viewport_preset: viewport as Scenario['viewport_preset'] });
+      await load();
+      navigate(`/scenarios/${created.id}`);
+    } catch (e: any) {
+      setErr(e.message ?? String(e));
+    }
   }
 
   // Kick off a run with a fresh browser session. The server does the reset
@@ -334,6 +357,13 @@ export function Scenarios() {
                   <Link to={`/screenshots/timeline/${s.id}`} className="btn-link">
                     Screenshots
                   </Link>
+                  <button
+                    onClick={() => void copy(s)}
+                    disabled={runningId != null}
+                    title="Duplicate this scenario with all its settings and steps — e.g. as a mobile variant"
+                  >
+                    Copy
+                  </button>
                   <button onClick={() => remove(s.id)} disabled={runningId != null}>
                     Delete
                   </button>

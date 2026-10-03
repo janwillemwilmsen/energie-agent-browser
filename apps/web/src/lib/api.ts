@@ -424,6 +424,8 @@ export const api = {
     req<Schedule>(`/api/schedules/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
   deleteSchedule: (id: number) =>
     req<void>(`/api/schedules/${id}`, { method: 'DELETE' }),
+  copyScenario: (id: number, body: { name?: string; viewport_preset?: Scenario['viewport_preset'] }) =>
+    req<Scenario>(`/api/scenarios/${id}/copy`, { method: 'POST', body: JSON.stringify(body) }),
   createScenario: (
     body: Pick<Scenario, 'name' | 'url' | 'viewport_preset'> &
       Partial<Pick<Scenario, 'brand' | 'type' | 'preflight_id'>>,
