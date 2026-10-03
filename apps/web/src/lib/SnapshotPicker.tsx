@@ -175,7 +175,12 @@ function PickButton({
   buildPayload: SnapshotPickerProps['buildPayload'];
   onPick: SnapshotPickerProps['onPick'];
 }) {
-  const data: PickDragData = { type: 'pick', kind: pick.kind, label, build: () => buildPayload(pick) };
+  const data: PickDragData = {
+    type: 'pick',
+    kind: pick.kind,
+    label,
+    build: () => { const payload = buildPayload(pick); return payload ? { kind: pick.kind, payload } : null; },
+  };
   const { listeners, setNodeRef, isDragging } = useDraggable({ id, data });
   return (
     <button

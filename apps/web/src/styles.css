@@ -614,6 +614,10 @@ code { background: rgba(255,255,255,0.06); padding: 2px 4px; border-radius: 3px;
 }
 .a11y-tree .picker button { cursor: grab; touch-action: none; }
 .a11y-tree .picker button.dragging { opacity: 0.4; }
+/* The add-step buttons drag into the list the same way. */
+.actions.step-editor-add > button { cursor: grab; touch-action: none; }
+.actions.step-editor-add > button:disabled { cursor: not-allowed; }
+.actions.step-editor-add > button.dragging { opacity: 0.4; }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
 .actions button { padding: 4px 10px; font-size: 12px; }
 

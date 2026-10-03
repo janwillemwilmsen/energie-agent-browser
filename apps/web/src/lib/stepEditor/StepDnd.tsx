@@ -16,25 +16,33 @@ import {
 import { arrayMove, sortableKeyboardCoordinates } from '@dnd-kit/sortable';
 import type { StepStore, StepId } from './store.js';
 
-// One drag-and-drop context for the whole Step editor, so two kinds of drag
+// One drag-and-drop context for the whole Step editor, so three kinds of drag
 // can share it:
-//   - reordering rows inside the StepList (sortable, as before), and
-//   - dragging a pick button off a snapshot row INTO the list, which inserts
-//     a new Step at the drop position instead of appending it.
-// The pages wrap the list and the snapshot pane in <StepEditorDnd>; StepList
-// and SnapshotPicker only use hooks from here.
+//   - reordering rows inside the StepList (sortable, as before),
+//   - dragging a pick button off a snapshot row INTO the list, and
+//   - dragging one of the "+ …" add-step buttons INTO the list;
+// the latter two insert a new Step at the drop position instead of appending.
+// The pages wrap the list, the snapshot pane and the add controls in
+// <StepEditorDnd>; the components only use hooks from here.
 
-/** What a snapshot pick button carries while it is being dragged. */
+/** A Step ready to insert: produced at drop (or click) time, after any prompt. */
+export interface BuiltStep {
+  kind: string;
+  payload: Record<string, unknown>;
+}
+
+/** What a draggable "add a step" button carries while it is being dragged. */
 export interface PickDragData {
   type: 'pick';
+  /** The kind shown in the drag overlay (the dialog may still pick another, e.g. "by selector…"). */
   kind: string;
-  /** Row label for the drag overlay, e.g. `button "Bereken nu"`. */
+  /** Label for the drag overlay, e.g. `button "Bereken nu"` or `screenshot (full page)`. */
   label: string;
   /**
-   * Produces the step payload at drop time (may prompt, e.g. `fill` asks for
-   * the value); null cancels the insert.
+   * Produces the step at drop time (may prompt, e.g. `fill` asks for the
+   * value); null cancels the insert.
    */
-  build: () => Record<string, unknown> | null;
+  build: () => BuiltStep | null;
 }
 
 /** The droppable id of the "append at the end" zone at the bottom of the list. */
@@ -84,8 +92,8 @@ export function StepEditorDnd({ store, children }: { store: StepStore; children:
       const ids = store.steps.map((s) => s.id);
       const index = over.id === STEP_LIST_END ? ids.length : ids.indexOf(over.id as StepId);
       if (index === -1) return;
-      const payload = data.build();
-      if (payload) void store.insertAt(index, data.kind, payload);
+      const built = data.build();
+      if (built) void store.insertAt(index, built.kind, built.payload);
       return;
     }
     // Reorder within the list.

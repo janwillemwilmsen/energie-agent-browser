@@ -1,10 +1,14 @@
 import type { ReactNode } from 'react';
+import { useDraggable } from '@dnd-kit/core';
 import type { FindBy, FindLocator, SelectorStrategy } from '../api.js';
 import type { StepStore } from './store.js';
+import type { BuiltStep, PickDragData } from './StepDnd.js';
 
 // The "+ …" buttons that create Steps. Which buttons appear follows from the
 // kinds the caller allows and the capabilities it provides; the input dialogs
-// are the browser's prompt() for now, funnelled through askText.
+// are the browser's prompt() for now, funnelled through askText. A click
+// appends the Step; dragging a button into the StepList inserts it at the
+// drop position (the shared StepEditorDnd context handles the drop).
 
 export interface AuthProfilesCapability {
   names: string[];
@@ -41,64 +45,101 @@ const SELECTOR_KINDS = ['click', 'fill', 'type', 'select', 'check', 'uncheck', '
 const FIND_KINDS = ['click', 'fill', 'check', 'wait'] as const;
 const FIND_BY: readonly FindBy[] = ['role', 'text', 'label', 'placeholder', 'alt', 'title', 'testid'];
 
+// One "+ …" button. Click adds the step at the end; dragging it into the step
+// list inserts it at the drop position (same mechanics as the snapshot pick
+// buttons — see StepDnd). `build` runs the kind's dialog, if any, at click or
+// drop time and returns null when the user cancels.
+function AddButton({
+  id, kind, label, build, onAdd, disabled, title, children,
+}: {
+  id: string;
+  kind: string;
+  label: string;
+  build: () => BuiltStep | null;
+  onAdd: (step: BuiltStep) => void;
+  disabled: boolean;
+  title?: string;
+  children: ReactNode;
+}) {
+  const data: PickDragData = { type: 'pick', kind, label, build };
+  const { listeners, setNodeRef, isDragging } = useDraggable({ id: `add:${id}`, data, disabled });
+  return (
+    <button
+      ref={setNodeRef}
+      // Pointer only: Enter/Space must stay a plain click, not a keyboard drag.
+      onPointerDown={listeners?.onPointerDown as React.PointerEventHandler<HTMLButtonElement> | undefined}
+      className={isDragging ? 'dragging' : undefined}
+      disabled={disabled}
+      title={`${title ? `${title} — ` : ''}click to add at the end, or drag into the step list`}
+      onClick={() => { const step = build(); if (step) onAdd(step); }}
+    >
+      {children}
+    </button>
+  );
+}
+
 export function AddStepControls(props: AddStepControlsProps) {
   const { store, kinds, defaultUrl, authProfiles, disabledReason, onError, children } = props;
   const selectorWait = props.selectorWait ?? true;
   const allowed = new Set(kinds);
   const disabled = store.busy || !!disabledReason;
   const title = (t?: string) => disabledReason ?? t;
-  const add = (kind: string, payload: Record<string, unknown>) => void store.add(kind, payload);
+  // A click appends; a drop inserts (StepDnd calls build() itself).
+  const onAdd = (step: BuiltStep) => void store.add(step.kind, step.payload);
+  const step = (kind: string, payload: Record<string, unknown>): BuiltStep => ({ kind, payload });
 
   const selectorKinds = SELECTOR_KINDS.filter((k) => allowed.has(k) && (k !== 'wait' || selectorWait));
   const findKinds = FIND_KINDS.filter((k) => allowed.has(k) && (k !== 'wait' || selectorWait));
 
-  function addBySelector() {
+  // Each build* runs its dialog and returns the step, or null when cancelled.
+  function buildBySelector(): BuiltStep | null {
     // Precise targeting when several elements share a role+name: any
     // agent-browser locator, handed to the CLI verbatim.
     const locator = askText(
       'Locator (agent-browser syntax):\n' +
         '  #id   .class   div > button   [data-testid="x"]   text=Submit   xpath=//button[@type="submit"]',
     );
-    if (locator == null || !locator.trim()) return;
+    if (locator == null || !locator.trim()) return null;
     if (locator.trim().startsWith('@')) {
       alert(
         '"@eN" is a snapshot ref, not a selector: agent-browser renumbers elements on every snapshot/navigation, so it cannot be replayed later.\n' +
           'Use the click/type buttons on the snapshot row instead (they re-find the element by role + name each run), or enter a stable locator (#id, [data-testid=…], CSS, text=, xpath=).',
       );
-      return;
+      return null;
     }
     const action = (askText(`Action? ${selectorKinds.join(' / ')}`, selectorKinds[0]) ?? '')
       .trim()
       .toLowerCase();
     if (!selectorKinds.includes(action as (typeof SELECTOR_KINDS)[number])) {
       alert('Unknown action');
-      return;
+      return null;
     }
     const selector: SelectorStrategy = { role: '', name: '', locator: locator.trim() };
     if (action === 'fill') {
       const value = askText('Fill with?');
-      if (value != null) add('fill', { selector, value });
-    } else if (action === 'type') {
-      const text = askText('Type what?');
-      if (text != null) add('type', { selector, text });
-    } else if (action === 'select') {
-      const value = askText('Select which option? (option label)');
-      if (value != null && value.trim()) add('select', { selector, value: value.trim() });
-    } else {
-      add(action, { selector });
+      return value != null ? step('fill', { selector, value }) : null;
     }
+    if (action === 'type') {
+      const text = askText('Type what?');
+      return text != null ? step('type', { selector, text }) : null;
+    }
+    if (action === 'select') {
+      const value = askText('Select which option? (option label)');
+      return value != null && value.trim() ? step('select', { selector, value: value.trim() }) : null;
+    }
+    return step(action, { selector });
   }
 
-  function addByFind() {
+  function buildByFind(): BuiltStep | null {
     // agent-browser's semantic locators (getByRole / getByLabel / …): the
     // browser tool resolves them in the live page, so they see through shadow
     // DOM and match names loosely — handy when the a11y-tree name carries
     // invisible glyphs, or a label isn't associated with its input.
     const byRaw = (askText(`Find by? ${FIND_BY.join(' / ')}`, 'role') ?? '').trim().toLowerCase();
-    if (!byRaw) return;
+    if (!byRaw) return null;
     if (!FIND_BY.includes(byRaw as FindBy)) {
       alert(`Unknown find strategy "${byRaw}". Use one of: ${FIND_BY.join(', ')}`);
-      return;
+      return null;
     }
     const by = byRaw as FindBy;
     const value = askText(
@@ -106,11 +147,11 @@ export function AddStepControls(props: AddStepControlsProps) {
       : by === 'testid' ? 'data-testid value?'
       : `${by[0]!.toUpperCase()}${by.slice(1)} text?`,
     );
-    if (value == null || !value.trim()) return;
+    if (value == null || !value.trim()) return null;
     const find: FindLocator = { by, value: value.trim() };
     if (by === 'role') {
       const name = askText('Accessible name? (case-insensitive substring; leave blank for any)');
-      if (name == null) return;
+      if (name == null) return null;
       if (name.trim()) find.name = name.trim();
     }
     if ((askText('Exact, case-sensitive match? (y/N)', 'n') ?? 'n').trim().toLowerCase().startsWith('y')) {
@@ -119,18 +160,17 @@ export function AddStepControls(props: AddStepControlsProps) {
     const action = (askText(`Action? ${findKinds.join(' / ')}`, findKinds[0]) ?? '').trim().toLowerCase();
     if (!findKinds.includes(action as (typeof FIND_KINDS)[number])) {
       alert(`Unknown action. agent-browser find supports: ${findKinds.join(', ')}`);
-      return;
+      return null;
     }
     const selector: SelectorStrategy = { role: '', name: '', find };
     if (action === 'fill') {
       const v = askText('Fill with?');
-      if (v != null) add('fill', { selector, value: v });
-    } else {
-      add(action, { selector });
+      return v != null ? step('fill', { selector, value: v }) : null;
     }
+    return step(action, { selector });
   }
 
-  function addPress() {
+  function buildPress(): BuiltStep | null {
     // Sent to whatever has focus after the previous step. Key names are
     // agent-browser's (Playwright's): a name, a single character, or a chord.
     const key = askText(
@@ -147,178 +187,131 @@ export function AddStepControls(props: AddStepControlsProps) {
         '  A single character types it:  a   1   /',
       'Enter',
     );
-    if (key == null || !key.trim()) return;
-    add('press', { key: key.trim() });
+    if (key == null || !key.trim()) return null;
+    return step('press', { key: key.trim() });
   }
 
-  function addNavigate() {
-    if (defaultUrl) {
-      add('navigate', { url: defaultUrl });
-      return;
-    }
+  function buildNavigate(): BuiltStep | null {
+    if (defaultUrl) return step('navigate', { url: defaultUrl });
     const url = askText('Navigate to URL?');
-    if (url) add('navigate', { url });
+    return url ? step('navigate', { url }) : null;
   }
 
-  function addWait() {
+  function buildWait(): BuiltStep | null {
     const raw = askText('Wait how many milliseconds?', '1000');
-    if (raw == null) return;
+    if (raw == null) return null;
     const ms = Number(raw);
     if (!Number.isFinite(ms) || ms <= 0) {
       alert('Must be a positive integer');
-      return;
+      return null;
     }
-    add('wait', { ms: Math.floor(ms) });
+    return step('wait', { ms: Math.floor(ms) });
   }
 
-  function addAuthLogin() {
-    if (!authProfiles) return;
+  function buildAuthLogin(): BuiltStep | null {
+    if (!authProfiles) return null;
     if (authProfiles.names.length === 0) {
       authProfiles.onManage();
-      return;
+      return null;
     }
     const choice = askText(
       'Which auth profile? Available: ' +
         authProfiles.names.join(', ') +
         '\n\n(type one of the names above, or leave blank to manage profiles)',
     );
-    if (choice == null) return;
+    if (choice == null) return null;
     const trimmed = choice.trim();
     if (!trimmed) {
       authProfiles.onManage();
-      return;
+      return null;
     }
     if (!authProfiles.names.includes(trimmed)) {
       onError?.(`No auth profile named "${trimmed}". Manage profiles below.`);
       authProfiles.onManage();
-      return;
+      return null;
     }
-    add('auth-login', { name: trimmed });
+    return step('auth-login', { name: trimmed });
   }
 
-  const screenshotLabel = () => `step-${store.steps.length}`;
+  // Default artifact label; evaluated at click/drop time so it reflects the
+  // list length at that moment.
+  const artifactLabel = () => `step-${store.steps.length}`;
+
+  // Shorthand for a button whose step needs no dialog.
+  const fixed = (id: string, kind: string, label: string, payload: () => Record<string, unknown>, text: ReactNode, hint?: string) => (
+    <AddButton id={id} kind={kind} label={label} build={() => step(kind, payload())} onAdd={onAdd} disabled={disabled} title={title(hint)}>
+      {text}
+    </AddButton>
+  );
 
   return (
-    <div className="actions">
+    <div className="actions step-editor-add">
       {allowed.has('navigate') && (
-        <button onClick={addNavigate} disabled={disabled} title={title()}>
+        <AddButton id="navigate" kind="navigate" label={defaultUrl ?? 'navigate'} build={buildNavigate} onAdd={onAdd} disabled={disabled} title={title()}>
           + navigate{defaultUrl ? ` (${defaultUrl})` : ''}
-        </button>
+        </AddButton>
       )}
       {selectorKinds.length > 0 && (
-        <button
-          onClick={addBySelector}
-          disabled={disabled}
+        <AddButton
+          id="by-selector" kind="click" label="by selector…" build={buildBySelector} onAdd={onAdd} disabled={disabled}
           title={title('Add a step that targets an element by a precise locator (#id, CSS, [data-testid], text=, xpath=) instead of role+name')}
         >
           + by selector…
-        </button>
+        </AddButton>
       )}
       {findKinds.length > 0 && (
-        <button
-          onClick={addByFind}
-          disabled={disabled}
+        <AddButton
+          id="find" kind="click" label="find…" build={buildByFind} onAdd={onAdd} disabled={disabled}
           title={title('Add a step that targets an element with agent-browser find (by role, text, label, placeholder, alt, title or data-testid) — resolved in the live page, loose name matching')}
         >
           + find…
-        </button>
+        </AddButton>
       )}
       {allowed.has('press') && (
-        <button
-          onClick={addPress}
-          disabled={disabled}
+        <AddButton
+          id="press" kind="press" label="press key…" build={buildPress} onAdd={onAdd} disabled={disabled}
           title={title('Press a key or chord on the focused element (Enter, Tab, Space, Escape, Control+a, …) — agent-browser press')}
         >
           + press key…
-        </button>
+        </AddButton>
       )}
       {allowed.has('screenshot') && (
         <>
-          <button onClick={() => add('screenshot', { label: screenshotLabel(), fullPage: true })} disabled={disabled} title={title()}>
-            + screenshot (full page)
-          </button>
-          <button onClick={() => add('screenshot', { label: screenshotLabel(), fullPage: false })} disabled={disabled} title={title()}>
-            + screenshot (viewport)
-          </button>
-          <button
-            onClick={() => add('screenshot', { label: screenshotLabel(), fullPage: true, viewport: 'mobile' })}
-            disabled={disabled}
-            title={title('Switch to the mobile device, capture a full-page screenshot, then restore the viewport')}
-          >
-            + screenshot (mobile)
-          </button>
-          <button
-            onClick={() => add('screenshot', { label: screenshotLabel(), fullPage: true, annotate: true })}
-            disabled={disabled}
-            title={title('Full-page screenshot with numbered labels overlaid on interactive elements (legend in the run log)')}
-          >
-            + screenshot (annotated)
-          </button>
+          {fixed('shot-full', 'screenshot', 'screenshot (full page)', () => ({ label: artifactLabel(), fullPage: true }), '+ screenshot (full page)')}
+          {fixed('shot-viewport', 'screenshot', 'screenshot (viewport)', () => ({ label: artifactLabel(), fullPage: false }), '+ screenshot (viewport)')}
+          {fixed('shot-mobile', 'screenshot', 'screenshot (mobile)', () => ({ label: artifactLabel(), fullPage: true, viewport: 'mobile' }), '+ screenshot (mobile)',
+            'Switch to the mobile device, capture a full-page screenshot, then restore the viewport')}
+          {fixed('shot-annotated', 'screenshot', 'screenshot (annotated)', () => ({ label: artifactLabel(), fullPage: true, annotate: true }), '+ screenshot (annotated)',
+            'Full-page screenshot with numbered labels overlaid on interactive elements (legend in the run log)')}
         </>
       )}
-      {allowed.has('save_text') && (
-        <button
-          onClick={() => add('save_text', { label: screenshotLabel() })}
-          disabled={disabled}
-          title={title("Save the page's readable text (agent-browser read) as a Markdown file beside the run's screenshots")}
-        >
-          + save text
-        </button>
-      )}
+      {allowed.has('save_text') && fixed('save-text', 'save_text', 'save text', () => ({ label: artifactLabel() }), '+ save text',
+        "Save the page's readable text (agent-browser read) as a Markdown file beside the run's screenshots")}
       {allowed.has('scroll') && (
         <>
-          <button
-            onClick={() => add('scroll', { toBottom: true })}
-            disabled={disabled}
-            title={title('Scroll the page to the bottom in strides so lazy-loaded images fire')}
-          >
-            + scroll to bottom
-          </button>
-          <button
-            onClick={() => add('scroll', { toTop: true })}
-            disabled={disabled}
-            title={title('Jump back to the top of the page (useful before targeting a header element)')}
-          >
-            + scroll to top
-          </button>
+          {fixed('scroll-bottom', 'scroll', 'scroll to bottom', () => ({ toBottom: true }), '+ scroll to bottom',
+            'Scroll the page to the bottom in strides so lazy-loaded images fire')}
+          {fixed('scroll-top', 'scroll', 'scroll to top', () => ({ toTop: true }), '+ scroll to top',
+            'Jump back to the top of the page (useful before targeting a header element)')}
         </>
       )}
       {allowed.has('wait') && (
-        <button onClick={addWait} disabled={disabled} title={title()}>
+        <AddButton id="wait" kind="wait" label="wait (ms)" build={buildWait} onAdd={onAdd} disabled={disabled} title={title()}>
           + wait (ms)
-        </button>
+        </AddButton>
       )}
-      {allowed.has('record_start') && (
-        <button
-          onClick={() => add('record_start', {})}
-          disabled={disabled}
-          title={title('Start a video recording from this point in the scenario (drag to position; saved to the Recordings page)')}
-        >
-          + ⏺ start recording
-        </button>
-      )}
-      {allowed.has('record_stop') && (
-        <button onClick={() => add('record_stop', {})} disabled={disabled} title={title('Stop the video recording and save it')}>
-          + ⏹ stop recording
-        </button>
-      )}
-      {allowed.has('close') && (
-        <button
-          onClick={() => add('close', {})}
-          disabled={disabled}
-          title={title('Close the browser session (agent-browser close) — useful as a final step to end the scenario cleanly')}
-        >
-          + ✕ close session
-        </button>
-      )}
+      {allowed.has('record_start') && fixed('record-start', 'record_start', 'start recording', () => ({}), '+ ⏺ start recording',
+        'Start a video recording from this point in the scenario (saved to the Recordings page)')}
+      {allowed.has('record_stop') && fixed('record-stop', 'record_stop', 'stop recording', () => ({}), '+ ⏹ stop recording',
+        'Stop the video recording and save it')}
+      {allowed.has('close') && fixed('close', 'close', 'close session', () => ({}), '+ ✕ close session',
+        'Close the browser session (agent-browser close) — useful as a final step to end the scenario cleanly')}
       {allowed.has('auth-login') && authProfiles && (
-        <button
-          onClick={addAuthLogin}
-          disabled={disabled}
+        <AddButton id="auth-login" kind="auth-login" label="auth login" build={buildAuthLogin} onAdd={onAdd} disabled={disabled}
           title={title('Single-step encrypted login using a saved auth profile')}
         >
           + auth login
-        </button>
+        </AddButton>
       )}
       {children}
     </div>
