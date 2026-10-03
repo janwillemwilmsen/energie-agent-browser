@@ -11,6 +11,7 @@ const SESSION = 'default';
 // inside it, so a long scenario doesn't push the add-step controls and the
 // Run button off screen. Remembered across scenarios like the sidebar state.
 const COMPACT_STEPS_KEY = 'eab.scenarioEditor.compactSteps';
+const RETRY_OPEN_KEY = 'eab.scenarioEditor.retryOpen';
 // The scenario settings form folds away behind a <details>; the <summary>
 // still shows the scenario name, so a folded editor stays identifiable.
 const META_OPEN_KEY = 'eab.scenarioEditor.metaOpen';
@@ -86,6 +87,22 @@ export function ScenarioEditor() {
       /* ignore — storage may be unavailable (private mode, etc.) */
     }
   }, [compactSteps]);
+  // The retry / restart policy rows: a per-browser preference, hidden by
+  // default so the step list sits right under the heading.
+  const [retryOpen, setRetryOpen] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(RETRY_OPEN_KEY) === '1';
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem(RETRY_OPEN_KEY, retryOpen ? '1' : '0');
+    } catch {
+      /* ignore */
+    }
+  }, [retryOpen]);
   const [metaOpen, setMetaOpen] = useState<boolean>(() => {
     try {
       return localStorage.getItem(META_OPEN_KEY) !== '0';
@@ -367,13 +384,16 @@ export function ScenarioEditor() {
             >
               edit raw
             </Link>{' '}
-            <Link
-              to={`/scenarios/${scenarioId}/texts`}
-              className="steps-raw-link"
-              title="Page texts saved by this scenario's save text steps"
+            <button
+              type="button"
+              className={`steps-raw-link${retryOpen ? ' active' : ''}`}
+              aria-pressed={retryOpen}
+              aria-expanded={retryOpen}
+              title={retryOpen ? 'Hide the retry / restart settings' : 'Show the per-step retry and whole-run restart settings'}
+              onClick={() => setRetryOpen((v) => !v)}
             >
-              saved texts
-            </Link>{' '}
+              {retryOpen ? 'retries ✓' : 'retries'}
+            </button>{' '}
             <button
               type="button"
               className={`steps-raw-link${compactSteps ? ' active' : ''}`}
@@ -388,6 +408,8 @@ export function ScenarioEditor() {
               {compactSteps ? 'compact ✓' : 'compact'}
             </button>
           </h2>
+          {retryOpen && (
+          <>
           <div className="retry-policy">
             <span className="muted">On step failure, retry</span>
             <label>
@@ -432,6 +454,8 @@ export function ScenarioEditor() {
               <span>times</span>
             </label>
           </div>
+          </>
+          )}
           <div className={compactSteps ? 'step-list-compact' : undefined}>
             <StepList
               store={stepStore}
