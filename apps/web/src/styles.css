@@ -210,7 +210,12 @@ button.steps-raw-link.active { color: var(--accent); border-color: var(--accent)
 /* "compact" on: the step list gets a fixed height and scrolls inside, so a
    long scenario keeps the add-step controls and Run button in view. */
 .step-list-compact {
-  max-height: 420px;
+  /* Resizable by the grip in the bottom-right corner; the editor remembers
+     the chosen height (inline style) per browser. */
+  height: 420px;
+  min-height: 120px;
+  max-height: 90vh;
+  resize: vertical;
   overflow-y: auto;
   border: 1px solid var(--border);
   border-radius: 8px;

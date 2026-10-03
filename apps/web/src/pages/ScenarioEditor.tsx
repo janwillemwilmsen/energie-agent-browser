@@ -12,6 +12,7 @@ const SESSION = 'default';
 // Run button off screen. Remembered across scenarios like the sidebar state.
 const COMPACT_STEPS_KEY = 'eab.scenarioEditor.compactSteps';
 const RETRY_OPEN_KEY = 'eab.scenarioEditor.retryOpen';
+const COMPACT_HEIGHT_KEY = 'eab.scenarioEditor.compactHeight';
 // The scenario settings form folds away behind a <details>; the <summary>
 // still shows the scenario name, so a folded editor stays identifiable.
 const META_OPEN_KEY = 'eab.scenarioEditor.metaOpen';
@@ -87,6 +88,31 @@ export function ScenarioEditor() {
       /* ignore — storage may be unavailable (private mode, etc.) */
     }
   }, [compactSteps]);
+  // The compact list's height (CSS resize grip) — remembered per browser.
+  const [compactHeight, setCompactHeight] = useState<number | null>(() => {
+    try {
+      const v = Number(localStorage.getItem(COMPACT_HEIGHT_KEY));
+      return Number.isFinite(v) && v >= 120 ? v : null;
+    } catch {
+      return null;
+    }
+  });
+  const compactRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = compactRef.current;
+    if (!el || !compactSteps) return;
+    // ResizeObserver fires on the user's drag (and on our own initial size);
+    // only persist sizes that differ from what we applied.
+    const ro = new ResizeObserver(() => {
+      const h = Math.round(el.getBoundingClientRect().height);
+      if (h >= 120 && h !== compactHeight) {
+        setCompactHeight(h);
+        try { localStorage.setItem(COMPACT_HEIGHT_KEY, String(h)); } catch { /* ignore */ }
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [compactSteps, compactHeight]);
   // The retry / restart policy rows: a per-browser preference, hidden by
   // default so the step list sits right under the heading.
   const [retryOpen, setRetryOpen] = useState<boolean>(() => {
@@ -245,11 +271,7 @@ export function ScenarioEditor() {
       >
         <summary className="scenario-meta-summary">
           <span className="scenario-meta-summary-name">{data.name}</span>
-          {(data.brand || data.type) && (
-            <span className="muted">
-              {[data.brand, data.type].filter(Boolean).join(' · ')}
-            </span>
-          )}
+        
           {dirty && <span className="tag scenario-meta-dirty">unsaved changes</span>}
           <span className="muted scenario-meta-summary-hint">
             {metaOpen ? 'hide settings' : 'show settings'}
@@ -456,7 +478,11 @@ export function ScenarioEditor() {
           </div>
           </>
           )}
-          <div className={compactSteps ? 'step-list-compact' : undefined}>
+          <div
+            ref={compactRef}
+            className={compactSteps ? 'step-list-compact' : undefined}
+            style={compactSteps && compactHeight ? { height: compactHeight } : undefined}
+          >
             <StepList
               store={stepStore}
               empty="No steps yet. Take a snapshot, then click any node to add a step."
