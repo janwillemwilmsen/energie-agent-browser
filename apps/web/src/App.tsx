@@ -48,6 +48,7 @@ import { AdminSessionStates } from './pages/AdminSessionStates.js';
 import { AdminAi } from './pages/AdminAi.js';
 import { AdminBrowser } from './pages/AdminBrowser.js';
 import { Ask } from './pages/Ask.js';
+import { Preflights } from './pages/Preflights.js';
 import { ScenarioTexts } from './pages/ScenarioTexts.js';
 import { AdminStorage } from './pages/AdminStorage.js';
 import { AdminEnv } from './pages/AdminEnv.js';
@@ -238,7 +239,9 @@ export function App() {
           <Route path="/ask/:id" element={<Ask />} />
           <Route path="/admin/storage" element={<AdminStorage />} />
           <Route path="/admin/env" element={<AdminEnv />} />
-          <Route path="/preflight" element={<PreflightPage />} />
+          <Route path="/preflight" element={<Preflights />} />
+          <Route path="/preflight/new" element={<PreflightPage />} />
+          <Route path="/preflight/:id" element={<PreflightPage />} />
           <Route path="/schedules" element={<Schedules />} />
           <Route path="/runs" element={<Runs />} />
           <Route path="/notifications" element={<Notifications />} />

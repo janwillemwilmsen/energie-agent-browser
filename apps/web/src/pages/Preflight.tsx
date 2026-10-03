@@ -1,11 +1,12 @@
-import { Fragment, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { PreflightStep as PreflightStepSchema } from '@eab/shared';
-import { api, type AuthProfile, type Preflight, type PreflightStep } from '../lib/api.js';
+import { api, type AuthProfile, type Preflight, type PreflightListRow, type PreflightStep } from '../lib/api.js';
 import { AddStepControls, SnapshotPane, StepEditorDnd, StepList, useDraftStepStore } from '../lib/stepEditor/index.js';
 import { PreviewStream } from '../lib/screencast.js';
 import { useResource } from '../lib/resource.js';
 
-// The /preflight page works against the same `default` daemon scenarios use,
+// The /preflight/:id editor (and /preflight/new) works against the same `default` daemon scenarios use,
 // bound to whichever preflight's --session-name the user is editing. Binding
 // is implicit: opening a preflight or taking the first action on a new one
 // switches the daemon onto that name and loads its saved state. Matches
@@ -48,6 +49,8 @@ function coerceInt(v: string): number {
 }
 
 export function PreflightPage() {
+  const { id: routeId } = useParams();
+  const navigate = useNavigate();
   const [draft, setDraft] = useState<Draft>(emptyDraft());
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -62,13 +65,31 @@ export function PreflightPage() {
   const [replaying, setReplaying] = useState(false);
   const [showAuthForm, setShowAuthForm] = useState(false);
   const { data: preflights, refresh: reload } = useResource(() => api.listPreflights(), {
-    initial: [] as Preflight[],
+    initial: [] as PreflightListRow[],
     onError: setError,
   });
   const { data: authProfiles, refresh: reloadAuthProfiles } = useResource(() => api.listAuthProfiles(), {
     initial: [] as AuthProfile[],
     onError: setError,
   });
+
+  // The route decides what is open: /preflight/new → an empty draft;
+  // /preflight/:id → that preflight, bound in the browser. Re-run only when
+  // the route changes, not on every list refresh (saving refreshes the list).
+  const openedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (routeId == null || openedRef.current === routeId) return;
+    if (routeId === 'new') {
+      openedRef.current = routeId;
+      void startNew();
+      return;
+    }
+    const p = preflights.find((x) => x.id === Number(routeId));
+    if (!p) return; // list not loaded yet (or unknown id — the list stays empty for it)
+    openedRef.current = routeId;
+    void loadPreflight(p);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routeId, preflights]);
 
   const draftDirty = useMemo(() => {
     if (draft.id == null) {
@@ -216,6 +237,12 @@ export function PreflightPage() {
       setShowSaved(true);
       window.setTimeout(() => setShowSaved(false), 3000);
       await reload();
+      // A brand-new preflight now has an id: move the URL onto it without
+      // re-opening (openedRef keeps the effect quiet).
+      if (draft.id == null) {
+        openedRef.current = String(saved.id);
+        navigate(`/preflight/${saved.id}`, { replace: true });
+      }
     } catch (e: any) {
       setError(e?.message ?? String(e));
     } finally {
@@ -231,6 +258,7 @@ export function PreflightPage() {
       await api.deletePreflight(draft.id);
       setDraft(emptyDraft());
       await reload();
+      navigate('/preflight');
     } catch (e: any) {
       setError(e?.message ?? String(e));
     }
@@ -285,31 +313,26 @@ export function PreflightPage() {
     onError: setError,
   });
 
+  const notFound = routeId != null && routeId !== 'new' && preflights.length > 0 && !preflights.some((x) => x.id === Number(routeId));
+
   return (
     <section>
-      <h1>Preflights</h1>
-      <p className="muted">
-        Record a one-time login or cookie-consent flow once. 
-        Any scenario that selects this preflight will use that same state on every run.
+      <p className="breadcrumb">
+        <Link to="/preflight">← Preflights</Link>
+        {draft.id != null && <> · {draft.name}</>}
       </p>
-
-      <div className="session-bar">
-        <button onClick={startNew}>+ New preflight</button>
-        {preflights.map((p) => (
-          <button
-            key={p.id}
-            type="button"
-            className={`chip ${p.id === draft.id ? 'chip-on' : ''}`}
-            onClick={() => loadPreflight(p)}
-            title={p.description || undefined}
-          >
-            {p.name}
-          </button>
-        ))}
-        {preflights.length === 0 && (
-          <span className="muted">No saved preflights yet.</span>
-        )}
-      </div>
+      <h1>{draft.id == null ? 'New preflight' : `Preflight: ${draft.name}`}</h1>
+      <p className="muted">
+        Record a one-time login or cookie-consent flow once. Any scenario that selects this preflight
+        starts from that same state on every run.
+        {draft.id != null && (() => {
+          const row = preflights.find((x) => x.id === draft.id);
+          return row && row.scenario_count > 0
+            ? <> Used by <strong>{row.scenario_count}</strong> scenario{row.scenario_count === 1 ? '' : 's'}: {row.scenario_names}.</>
+            : <> Not attached to any scenario yet.</>;
+        })()}
+      </p>
+      {notFound && <p className="error">No preflight with id {routeId}. <Link to="/preflight">Back to the list</Link>.</p>}
 
       <div className="scenario-meta-form" style={{ maxWidth: 'none' }}>
         <div className="scenario-meta-row">

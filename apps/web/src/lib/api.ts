@@ -269,6 +269,13 @@ export type AskStreamEvent =
   | { delta: string }
   | { done: true; messageId: number; usage: AskUsage | null; error: string | null };
 
+/** A preflight as listed, with its scenario usage. */
+export interface PreflightListRow extends Preflight {
+  scenario_count: number;
+  /** Names of the scenarios using it, " · "-joined; null when none. */
+  scenario_names: string | null;
+}
+
 // A run parked at a `pause` step (GET /api/runs/paused, GET /api/runs/:id).
 export interface PausedRun {
   runId: number;
@@ -464,7 +471,7 @@ export const api = {
       >
     >,
   ) => req<Scenario>(`/api/scenarios/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
-  listPreflights: () => req<Preflight[]>('/api/preflights'),
+  listPreflights: () => req<PreflightListRow[]>('/api/preflights'),
   getPreflight: (id: number) => req<Preflight>(`/api/preflights/${id}`),
   createPreflight: (
     body: { name: string; description?: string; steps?: PreflightStep[] } & PreflightRetryPolicy,

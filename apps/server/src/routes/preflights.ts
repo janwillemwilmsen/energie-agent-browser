@@ -23,15 +23,19 @@ function activeByName(name: string) {
 
 export async function preflightsRoutes(app: FastifyInstance) {
   // --- CRUD ----------------------------------------------------------------
+  // The list carries each preflight's usage: how many scenarios have it
+  // attached, and their names (for the overview's tooltip).
   app.get('/api/preflights', async () => {
     return getDb()
       .prepare(
-        `SELECT id, name, description, steps_json,
-                retries, retry_wait_before_ms, retry_wait_after_ms, restart_on_failure,
-                created_at, updated_at, deleted_at
-         FROM preflights
-         WHERE deleted_at IS NULL
-         ORDER BY updated_at DESC`,
+        `SELECT p.id, p.name, p.description, p.steps_json,
+                p.retries, p.retry_wait_before_ms, p.retry_wait_after_ms, p.restart_on_failure,
+                p.created_at, p.updated_at, p.deleted_at,
+                (SELECT count(*) FROM scenarios s WHERE s.preflight_id = p.id) AS scenario_count,
+                (SELECT group_concat(s.name, ' · ') FROM (SELECT name FROM scenarios WHERE preflight_id = p.id ORDER BY name COLLATE NOCASE) s) AS scenario_names
+         FROM preflights p
+         WHERE p.deleted_at IS NULL
+         ORDER BY p.updated_at DESC`,
       )
       .all();
   });
