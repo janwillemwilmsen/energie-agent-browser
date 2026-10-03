@@ -12,9 +12,16 @@ import type { EditableStep, StepStore } from './store.js';
 // Drag-and-drop (reordering, and dropping a snapshot pick into the list) is
 // provided by the surrounding <StepEditorDnd>; this component only marks the
 // rows sortable and offers the drop targets.
-export function StepList({ store, empty }: { store: StepStore; empty: ReactNode }) {
+//
+// `filter` hides rows from view only: positions, move up/down and the drop
+// index still refer to the full list, so a pick dropped on a visible row goes
+// right before that row in the real order.
+export function StepList({
+  store, empty, filter,
+}: { store: StepStore; empty: ReactNode; filter?: (step: EditableStep) => boolean }) {
   const [editing, setEditing] = useState<EditableStep | null>(null);
   const { activePick } = useStepDnd();
+  const hidden = filter ? store.steps.filter((s) => !filter(s)).length : 0;
 
   return (
     <>
@@ -23,7 +30,7 @@ export function StepList({ store, empty }: { store: StepStore; empty: ReactNode 
       ) : (
         <SortableContext items={store.steps.map((s) => s.id)} strategy={verticalListSortingStrategy}>
           <ol className="step-list">
-            {store.steps.map((s, idx) => (
+            {store.steps.map((s, idx) => filter && !filter(s) ? null : (
               <StepRow
                 key={s.id}
                 step={s}
@@ -39,6 +46,11 @@ export function StepList({ store, empty }: { store: StepStore; empty: ReactNode 
             ))}
           </ol>
         </SortableContext>
+      )}
+      {hidden > 0 && (
+        <p className="muted" style={{ margin: '4px 0 0', fontSize: 12 }}>
+          {hidden} step{hidden === 1 ? '' : 's'} hidden by the filter
+        </p>
       )}
       <EndDropZone visible={activePick != null} />
 

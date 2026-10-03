@@ -13,6 +13,14 @@ const SESSION = 'default';
 const COMPACT_STEPS_KEY = 'eab.scenarioEditor.compactSteps';
 const RETRY_OPEN_KEY = 'eab.scenarioEditor.retryOpen';
 const COMPACT_HEIGHT_KEY = 'eab.scenarioEditor.compactHeight';
+
+// View filters for the step list (display only; the scenario is unchanged).
+type StepFilter = 'all' | 'no-wait' | 'screenshots' | 'texts';
+const STEP_FILTERS: Record<Exclude<StepFilter, 'all'>, { label: string; on: string; off: string; test: (kind: string) => boolean }> = {
+  'no-wait': { label: 'hide waits', on: 'Show the wait steps again', off: 'Hide the wait steps from the list', test: (k) => k !== 'wait' },
+  screenshots: { label: 'screenshots', on: 'Show all steps', off: 'Show only the screenshot steps', test: (k) => k === 'screenshot' },
+  texts: { label: 'save text', on: 'Show all steps', off: 'Show only the save text steps', test: (k) => k === 'save_text' },
+};
 // The scenario settings form folds away behind a <details>; the <summary>
 // still shows the scenario name, so a folded editor stays identifiable.
 const META_OPEN_KEY = 'eab.scenarioEditor.metaOpen';
@@ -113,6 +121,7 @@ export function ScenarioEditor() {
     ro.observe(el);
     return () => ro.disconnect();
   }, [compactSteps, compactHeight]);
+  const [stepFilter, setStepFilter] = useState<StepFilter>('all');
   // The retry / restart policy rows: a per-browser preference, hidden by
   // default so the step list sits right under the heading.
   const [retryOpen, setRetryOpen] = useState<boolean>(() => {
@@ -429,6 +438,24 @@ export function ScenarioEditor() {
             >
               {compactSteps ? 'compact ✓' : 'compact'}
             </button>
+            {(Object.keys(STEP_FILTERS) as Exclude<StepFilter, 'all'>[]).map((f) => {
+              const def = STEP_FILTERS[f];
+              const active = stepFilter === f;
+              return (
+                <span key={f}>
+                  {' '}
+                  <button
+                    type="button"
+                    className={`steps-raw-link${active ? ' active' : ''}`}
+                    aria-pressed={active}
+                    title={active ? def.on : def.off}
+                    onClick={() => setStepFilter(active ? 'all' : f)}
+                  >
+                    {def.label}{active ? ' ✓' : ''}
+                  </button>
+                </span>
+              );
+            })}
           </h2>
           {retryOpen && (
           <>
@@ -485,6 +512,7 @@ export function ScenarioEditor() {
           >
             <StepList
               store={stepStore}
+              filter={stepFilter === 'all' ? undefined : (step) => STEP_FILTERS[stepFilter].test(step.kind)}
               empty="No steps yet. Take a snapshot, then click any node to add a step."
             />
           </div>
