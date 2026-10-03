@@ -332,7 +332,13 @@ function ThreadView({ threadId, onChanged }: { threadId: number; onChanged: () =
           <h1>{thread.title}</h1>
           <ModelSelect value={thread.model} onChange={(m) => void changeModel(m)} models={models} def={def} disabled={running} />
         </header>
-        <ContextStrip context={thread.context} excluded={thread.excluded} onToggle={(k, ex) => void toggleAsset(k, ex)} busy={running} />
+        <ContextStrip
+          context={thread.context}
+          excluded={thread.excluded}
+          onToggle={(k, ex) => void toggleAsset(k, ex)}
+          busy={running}
+          defaultCollapsed={thread.context.length > 1 || thread.messages.length > 0}
+        />
         {error && <p className="error">{error}</p>}
         <ThreadPrimitive.Root className="aui-thread">
           <ThreadPrimitive.Viewport className="aui-viewport">
@@ -379,10 +385,27 @@ function fmtBytes(n: number): string {
 // context (the pack is rebuilt per message, so it applies from the next turn)
 // and comes back with ↺; removed assets stay visible, dimmed.
 function ContextStrip({
-  context, excluded, onToggle, busy,
-}: { context: AskContext[]; excluded: string[]; onToggle: (key: string, exclude: boolean) => void; busy: boolean }) {
+  context, excluded, onToggle, busy, defaultCollapsed,
+}: { context: AskContext[]; excluded: string[]; onToggle: (key: string, exclude: boolean) => void; busy: boolean; defaultCollapsed: boolean }) {
   const [open, setOpen] = useState<number | null>(null);
+  // With several scenarios the full strip is taller than the chat; start
+  // folded to a one-line summary and let the user expand it when needed.
+  const [collapsed, setCollapsed] = useState(defaultCollapsed);
   const isOut = (key: string) => excluded.includes(key);
+  const totals = context.reduce(
+    (t, c) => {
+      t.shots += c.screenshots.filter((x) => !isOut(x.key)).length;
+      t.shotsAll += c.screenshots.length;
+      t.texts += c.texts.filter((x) => !isOut(x.key)).length;
+      t.textsAll += c.texts.length;
+      return t;
+    },
+    { shots: 0, shotsAll: 0, texts: 0, textsAll: 0 },
+  );
+  const summary =
+    `${context.length} scenario${context.length === 1 ? '' : 's'} · ` +
+    `${totals.shots}${totals.shots !== totals.shotsAll ? `/${totals.shotsAll}` : ''} screenshots · ` +
+    `${totals.texts}${totals.texts !== totals.textsAll ? `/${totals.textsAll}` : ''} texts`;
   const toggleBtn = (key: string, what: string) =>
     isOut(key) ? (
       <button className="ask-asset-btn" disabled={busy} onClick={() => onToggle(key, false)} title={`Add this ${what} back to the context`} aria-label="Restore">↺</button>
@@ -390,7 +413,17 @@ function ContextStrip({
       <button className="ask-asset-btn" disabled={busy} onClick={() => onToggle(key, true)} title={`Remove this ${what} from the context`} aria-label="Remove"><X size={12} aria-hidden /></button>
     );
   return (
-    <div className="ask-context">
+    <div className={`ask-context${collapsed ? ' collapsed' : ''}`}>
+      <div className="ask-context-bar">
+        <span className="muted">Context: {summary}</span>
+        <span className="muted" style={{ fontSize: 12 }}>
+          {collapsed ? context.map((c) => c.name).join(' · ') : ''}
+        </span>
+        <button className="linkish" style={{ marginLeft: 'auto' }} onClick={() => setCollapsed((v) => !v)}>
+          {collapsed ? 'show context' : 'hide context'}
+        </button>
+      </div>
+      {!collapsed && <div className="ask-context-body">
       {context.map((c) => {
         const shotsIn = c.screenshots.filter((s) => !isOut(s.key)).length;
         const textsIn = c.texts.filter((t) => !isOut(t.key)).length;
@@ -439,6 +472,7 @@ function ContextStrip({
           </div>
         );
       })}
+      </div>}
     </div>
   );
 }

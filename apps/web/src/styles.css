@@ -1881,3 +1881,10 @@ button.ask-danger:hover { color: var(--error); border-color: var(--error); filte
 /* Paused run: Resume / Abort */
 .pause-controls { display: inline-flex; align-items: center; gap: 8px; margin-left: 12px; padding: 4px 10px; border: 1px solid #f59e0b; border-radius: 6px; font-size: 13px; font-weight: 500; color: #fbbf24; }
 .pause-controls button { font-size: 12px; padding: 3px 10px; }
+
+/* Ask context: a one-line summary bar; the full strip folds under it and
+   scrolls inside a capped height so it can never crowd out the chat. */
+.ask-context-bar { display: flex; align-items: center; gap: 10px; min-height: 26px; font-size: 13px; }
+.ask-context-bar .muted:nth-child(2) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.ask-context-body { display: flex; flex-direction: column; gap: 6px; max-height: 38vh; overflow-y: auto; padding-right: 4px; }
+.ask-context.collapsed { flex: none; }
