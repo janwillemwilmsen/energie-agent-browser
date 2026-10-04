@@ -154,6 +154,8 @@ export function ScenarioEditor() {
   }, [metaOpen]);
   const [playStatus, setPlayStatus] = useState<string | null>(null);
   const [lastRunId, setLastRunId] = useState<number | null>(null);
+  /** Play without writing screenshots/texts/recordings. Per page visit, not persisted. */
+  const [skipResources, setSkipResources] = useState(false);
   // Set while the run we started is parked at a `pause` step.
   const [paused, setPaused] = useState<{ position: number; label: string | null } | null>(null);
   const [draft, setDraft] = useState<MetaDraft>(emptyDraft());
@@ -214,7 +216,7 @@ export function ScenarioEditor() {
     // preview stream and other run triggers.
     try {
       setPlayStatus(opts.reset ? 'Starting run (fresh browser)…' : 'Starting run…');
-      const run = await api.startRun(scenarioId, { reset: opts.reset });
+      const run = await api.startRun(scenarioId, { reset: opts.reset, skipResources });
       setLastRunId(run.id);
       setPlayStatus(`Run #${run.id} ${run.status}`);
       // Poll the run row until it reaches a terminal state. A run parked at a
@@ -580,6 +582,18 @@ export function ScenarioEditor() {
             >
               Reset &amp; play
             </button>{' '}
+            <label
+              className="muted"
+              style={{ fontWeight: 'normal', fontSize: '0.8em' }}
+              title="Run the steps but write nothing to disk: screenshot, save_text and record steps are skipped"
+            >
+              <input
+                type="checkbox"
+                checked={skipResources}
+                onChange={(e) => setSkipResources(e.target.checked)}
+              />{' '}
+              no resources
+            </label>{' '}
             {playStatus &&
               (lastRunId != null ? (
                 <Link to={`/runs?run=${lastRunId}`} className="muted" style={{ marginLeft: 8 }}>

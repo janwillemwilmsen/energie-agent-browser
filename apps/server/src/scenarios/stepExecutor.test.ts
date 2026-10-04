@@ -243,6 +243,29 @@ describe('Step executor', () => {
     expect(b.calls).toHaveLength(0);
   });
 
+  it('skips every resource-writing kind when skipResources is set, even with artifacts present', async () => {
+    const b = fakeBrowser([]);
+    const artifacts = { screenshotDir: '/nowhere', fileStamp: 'x', viewport: 'desktop' as const, screenshots: [], texts: [] };
+    const recorder = { start: async () => { throw new Error('must not record'); }, stop: async () => { throw new Error('must not record'); } };
+    const ctx = context(b, { artifacts, recorder, skipResources: true });
+    await executeStep(ctx, parseStep('screenshot', { label: 'home' }), 1);
+    await executeStep(ctx, parseStep('save_text', {}), 2);
+    await executeStep(ctx, parseStep('record_start', {}), 3);
+    await executeStep(ctx, parseStep('record_stop', {}), 4);
+    expect(b.calls).toHaveLength(0);
+    expect(artifacts.screenshots).toEqual([]);
+    expect(artifacts.texts).toEqual([]);
+    expect(ctx.lines).toEqual([
+      'screenshot home: resources disabled for this run — skipped',
+      'save_text: resources disabled for this run — skipped',
+      'record_start: resources disabled for this run — skipped',
+      'record_stop: resources disabled for this run — skipped',
+    ]);
+    // Non-resource steps are unaffected.
+    await executeStep(ctx, parseStep('click', { selector: { role: '', name: '', locator: '#go' } }));
+    expect(ran(b, 'click')).toEqual([['click', '#go']]);
+  });
+
   it('passes auth selector overrides through to auth login', async () => {
     const b = fakeBrowser([]);
     const ctx = context(b, { authSelectors: () => ({ usernameSelector: '#user', submitSelector: 'button[type=submit]' }) });

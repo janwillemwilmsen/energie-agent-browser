@@ -8,19 +8,22 @@ import { startRun } from '../scenarios/runner.js';
 import { abortPausedRun, listPaused, pausedRun, resumeRun } from '../scenarios/pauseRegistry.js';
 import { ensureThumb } from '../thumbs.js';
 
-const RunBody = z.object({ reset: z.boolean().default(false) });
+const RunBody = z.object({
+  reset: z.boolean().default(false),
+  skipResources: z.boolean().default(false),
+});
 
 export async function runsRoutes(app: FastifyInstance) {
   app.post<{ Params: { id: string } }>('/api/scenarios/:id/run', async (req, reply) => {
     const scenarioId = Number(req.params.id);
-    const { reset } = RunBody.parse(req.body ?? {});
+    const { reset, skipResources } = RunBody.parse(req.body ?? {});
     const scenario = getDb().prepare('SELECT id FROM scenarios WHERE id = ?').get(scenarioId);
     if (!scenario) return reply.code(404).send({ error: 'not_found' });
 
     // No session gate here: the runner (via ensureSession) starts the browser
     // session itself when it isn't running. The Run row exists once startRun
     // returns; the run itself continues in the background.
-    const { runId, finished } = startRun(scenarioId, { freshSession: reset });
+    const { runId, finished } = startRun(scenarioId, { freshSession: reset, skipResources });
     void finished;
     return reply.code(202).send(runStore().get(runId));
   });

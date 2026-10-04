@@ -168,6 +168,11 @@ export interface StartRunOptions {
    * line instead of parking the run until someone clicks Resume.
    */
   unattended?: boolean;
+  /**
+   * Don't write screenshots, texts or recordings: those steps are logged and
+   * skipped, so the run only exercises the navigation/interaction steps.
+   */
+  skipResources?: boolean;
 }
 
 export interface StartedRun {
@@ -472,6 +477,7 @@ export function startRun(scenarioId: number, opts: StartRunOptions = {}): Starte
             },
             authSelectors: getAuthSelectors,
             pause,
+            skipResources: opts.skipResources,
           };
           appendLog(ctx, `=== viewport: ${viewport} ===`);
           try {

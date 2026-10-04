@@ -106,7 +106,20 @@ export interface StepContext {
   pause?: PauseController;
   /** Per-profile selector overrides for auth-login. Absent means no overrides. */
   authSelectors?: (profileName: string) => AuthSelectors;
+  /**
+   * Write nothing to disk: screenshot, save_text and record_* steps are logged
+   * and skipped. The navigation/interaction steps still run as usual.
+   */
+  skipResources?: boolean;
 }
+
+/** Step kinds that leave a file behind (screenshots, texts, video). */
+export const RESOURCE_STEP_KINDS: ReadonlySet<StepPayload['kind']> = new Set([
+  'screenshot',
+  'save_text',
+  'record_start',
+  'record_stop',
+]);
 
 export interface RetryPolicy {
   retries: number;
@@ -239,6 +252,12 @@ async function executeStepWithRetries(
 export async function executeStep(ctx: StepContext, step: StepPayload, position = 0): Promise<void> {
   const { browser, log } = ctx;
   const timing = { ...DEFAULT_TIMING, ...ctx.timing };
+
+  if (ctx.skipResources && RESOURCE_STEP_KINDS.has(step.kind)) {
+    const label = 'label' in step && step.label ? ` ${step.label}` : '';
+    log(`${step.kind}${label}: resources disabled for this run — skipped`);
+    return;
+  }
 
   switch (step.kind) {
     case 'record_start':
