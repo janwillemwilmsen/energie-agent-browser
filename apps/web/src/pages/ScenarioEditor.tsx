@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { StepKind } from '@eab/shared';
-import { api, type Preflight, type ScenarioDetail } from '../lib/api.js';
+import { api, type Preflight, type Run, type ScenarioDetail } from '../lib/api.js';
 import { AddStepControls, SnapshotPane, StepEditorDnd, StepList, useServerStepStore } from '../lib/stepEditor/index.js';
 import { PreviewStream } from '../lib/screencast.js';
 
@@ -154,8 +154,10 @@ export function ScenarioEditor() {
   }, [metaOpen]);
   const [playStatus, setPlayStatus] = useState<string | null>(null);
   const [lastRunId, setLastRunId] = useState<number | null>(null);
-  /** Play without writing screenshots/texts/recordings. Per page visit, not persisted. */
-  const [skipResources, setSkipResources] = useState(false);
+  /** Play as a test run: nothing saved, log shown here. Per page visit, not persisted. */
+  const [testOnly, setTestOnly] = useState(false);
+  /** The finished test run (negative id), for its inline log. */
+  const [testRun, setTestRun] = useState<Run | null>(null);
   // Set while the run we started is parked at a `pause` step.
   const [paused, setPaused] = useState<{ position: number; label: string | null } | null>(null);
   const [draft, setDraft] = useState<MetaDraft>(emptyDraft());
@@ -209,16 +211,22 @@ export function ScenarioEditor() {
     setErr(null);
     setPlayStatus(null);
     setLastRunId(null);
+    setTestRun(null);
     if (!previewActive) setPreviewActive(true);
     // The server owns session lifecycle now: the runner starts the session if
     // it's down, and `reset: true` restarts it before the run (fresh cookie
     // jar). No client-side close/bootstrap orchestration — that raced with the
     // preview stream and other run triggers.
     try {
-      setPlayStatus(opts.reset ? 'Starting run (fresh browser)…' : 'Starting run…');
-      const run = await api.startRun(scenarioId, { reset: opts.reset, skipResources });
-      setLastRunId(run.id);
-      setPlayStatus(`Run #${run.id} ${run.status}`);
+      const what = testOnly ? 'test run' : 'run';
+      setPlayStatus(opts.reset ? `Starting ${what} (fresh browser)…` : `Starting ${what}…`);
+      const run = await api.startRun(scenarioId, { reset: opts.reset, testOnly });
+      // A test run has a negative id and no page of its own: its log is shown
+      // below the preview instead of linked on the Runs page.
+      const label = testOnly ? 'Test run' : `Run #${run.id}`;
+      if (testOnly) setTestRun(run);
+      else setLastRunId(run.id);
+      setPlayStatus(`${label} ${run.status}`);
       // Poll the run row until it reaches a terminal state. A run parked at a
       // pause step may sit for a long time, so keep polling while paused.
       const deadline = Date.now() + 30 * 60_000;
@@ -226,8 +234,9 @@ export function ScenarioEditor() {
         await new Promise((r) => setTimeout(r, 1500));
         try {
           const r2 = await api.getRun(run.id);
+          if (testOnly) setTestRun(r2);
           setPaused(r2.pause ? { position: r2.pause.position, label: r2.pause.label } : null);
-          setPlayStatus(r2.pause ? `Run #${r2.id} paused at step #${r2.pause.position}` : `Run #${r2.id} ${r2.status}`);
+          setPlayStatus(r2.pause ? `${label} paused at step #${r2.pause.position}` : `${label} ${r2.status}`);
           if (r2.status === 'success' || r2.status === 'failed') break;
         } catch {
           /* keep polling */
@@ -242,10 +251,11 @@ export function ScenarioEditor() {
   }
 
   async function pauseAction(action: 'resume' | 'abort') {
-    if (lastRunId == null) return;
+    const runId = lastRunId ?? testRun?.id;
+    if (runId == null) return;
     try {
-      if (action === 'resume') await api.resumeRun(lastRunId);
-      else await api.abortRun(lastRunId);
+      if (action === 'resume') await api.resumeRun(runId);
+      else await api.abortRun(runId);
       setPaused(null);
     } catch (e: any) {
       setErr(e.message ?? String(e));
@@ -398,6 +408,24 @@ export function ScenarioEditor() {
               </select>
             </label>
           )}
+        </div>
+        {/* A play option, not a scenario field: it isn't part of the draft and
+            needs no Save. Applies to both Play buttons for this page visit. */}
+        <div className="scenario-meta-row">
+          <label
+            className="scenario-meta-check"
+            title="Play the steps for the log only. Nothing is saved: no run on the Runs page, no screenshots, texts or recordings. The log appears under the preview."
+          >
+            <span>Play</span>
+            <span className="scenario-meta-check-row">
+              <input
+                type="checkbox"
+                checked={testOnly}
+                onChange={(e) => setTestOnly(e.target.checked)}
+              />
+              Test only (nothing saved — no run, screenshots, texts or recordings)
+            </span>
+          </label>
         </div>
         <div className="scenario-meta-actions">
           <button type="submit" disabled={!dirty || savingMeta}>
@@ -582,18 +610,6 @@ export function ScenarioEditor() {
             >
               Reset &amp; play
             </button>{' '}
-            <label
-              className="muted"
-              style={{ fontWeight: 'normal', fontSize: '0.8em' }}
-              title="Run the steps but write nothing to disk: screenshot, save_text and record steps are skipped"
-            >
-              <input
-                type="checkbox"
-                checked={skipResources}
-                onChange={(e) => setSkipResources(e.target.checked)}
-              />{' '}
-              no resources
-            </label>{' '}
             {playStatus &&
               (lastRunId != null ? (
                 <Link to={`/runs?run=${lastRunId}`} className="muted" style={{ marginLeft: 8 }}>
@@ -611,6 +627,25 @@ export function ScenarioEditor() {
             )}
           </h2>
           <PreviewStream session={SESSION} active={previewActive} />
+
+          {/* A test run is kept nowhere, so its log is only ever visible here.
+              Newest line first, like the Runs page. */}
+          {testRun && (
+            <div className="test-run-log">
+              <h3>
+                Test run log{' '}
+                <span className="muted" style={{ fontSize: 12, fontWeight: 400 }}>
+                  (newest first · {testRun.status}{testRun.finished_at ? '' : ' · live'})
+                </span>{' '}
+                <button onClick={() => setTestRun(null)} className="diff-tray-clear" style={{ fontSize: 13 }}>
+                  Close
+                </button>
+              </h3>
+              <pre className="run-log">
+                {(testRun.log_text || '').split(/\r?\n/).filter(Boolean).reverse().join('\n') || '(no log yet)'}
+              </pre>
+            </div>
+          )}
 
           {/* The snapshot buttons sit in the heading, like Preview's. The
               terminal (bootstrap/reset, ad-hoc commands) lives on /terminal. */}

@@ -269,8 +269,8 @@ function ThreadView({ threadId, onChanged }: { threadId: number; onChanged: () =
     const tmpAsst = tmpUser - 1;
     setMessages((cur) => [
       ...cur,
-      { id: tmpUser, role: 'user', text, withContext: !cur.some((m) => m.withContext), usage: null, error: null, createdAt: new Date().toISOString() },
-      { id: tmpAsst, role: 'assistant', text: '', withContext: false, usage: null, error: null, createdAt: new Date().toISOString(), streaming: true },
+      { id: tmpUser, role: 'user', text, withContext: !cur.some((m) => m.withContext), usage: null, model: null, error: null, createdAt: new Date().toISOString() },
+      { id: tmpAsst, role: 'assistant', text: '', withContext: false, usage: null, model: null, error: null, createdAt: new Date().toISOString(), streaming: true },
     ]);
     const abort = new AbortController();
     abortRef.current = abort;
@@ -281,7 +281,7 @@ function ThreadView({ threadId, onChanged }: { threadId: number; onChanged: () =
         } else if ('delta' in ev) {
           setMessages((cur) => cur.map((m) => (m.id === tmpAsst ? { ...m, text: m.text + ev.delta } : m)));
         } else if ('done' in ev) {
-          setMessages((cur) => cur.map((m) => (m.id === tmpAsst ? { ...m, id: ev.messageId, usage: ev.usage, error: ev.error, streaming: false } : m)));
+          setMessages((cur) => cur.map((m) => (m.id === tmpAsst ? { ...m, id: ev.messageId, usage: ev.usage, model: ev.model, error: ev.error, streaming: false } : m)));
           if (ev.error) setError(ev.error);
         }
       }, abort.signal);
@@ -315,6 +315,14 @@ function ThreadView({ threadId, onChanged }: { threadId: number; onChanged: () =
     } catch (e) { setError(errorMessage(e)); }
   }
 
+  async function rename(title: string) {
+    try {
+      const t = await api.updateAskThread(threadId, { title });
+      setThread((cur) => (cur ? { ...cur, title: t.title } : cur));
+      void onChanged(); // the rail shows the title too
+    } catch (e) { setError(errorMessage(e)); }
+  }
+
   const runtime = useExternalStoreRuntime<LiveMessage>({
     messages,
     isRunning: running,
@@ -329,7 +337,7 @@ function ThreadView({ threadId, onChanged }: { threadId: number; onChanged: () =
     <AssistantRuntimeProvider runtime={runtime}>
       <div className="ask-thread-view">
         <header className="ask-head">
-          <h1>{thread.title}</h1>
+          <EditableTitle title={thread.title} onSave={(t) => void rename(t)} />
           <ModelSelect value={thread.model} onChange={(m) => void changeModel(m)} models={models} def={def} disabled={running} />
         </header>
         <ContextStrip
@@ -372,8 +380,51 @@ function convertMessage(m: LiveMessage): ThreadMessageLike {
             ? { type: 'incomplete', reason: m.error === 'cancelled' ? 'cancelled' : 'error', error: m.error }
             : { type: 'complete', reason: 'stop' }
         : undefined,
-    metadata: { custom: { usage: m.usage, error: m.error, withContext: m.withContext } },
+    metadata: { custom: { usage: m.usage, model: m.model, error: m.error, withContext: m.withContext } },
   };
+}
+
+// The thread title, editable in place: click (or the ✎) to get an input,
+// Enter/blur saves, Escape reverts. An empty title is not saved.
+function EditableTitle({ title, onSave }: { title: string; onSave: (title: string) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(title);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => { if (editing) inputRef.current?.select(); }, [editing]);
+
+  function start() { setDraft(title); setEditing(true); }
+  function commit() {
+    setEditing(false);
+    const next = draft.trim();
+    if (next && next !== title) onSave(next);
+  }
+
+  if (editing) {
+    return (
+      <input
+        ref={inputRef}
+        className="ask-title-input"
+        value={draft}
+        maxLength={200}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') commit();
+          else if (e.key === 'Escape') setEditing(false);
+        }}
+        autoFocus
+      />
+    );
+  }
+  return (
+    <h1 className="ask-title" onClick={start} title="Click to rename">
+      {title}
+      <button type="button" className="ask-title-edit" aria-label="Rename thread" onClick={(e) => { e.stopPropagation(); start(); }}>
+        ✎
+      </button>
+    </h1>
+  );
 }
 
 function fmtBytes(n: number): string {
@@ -593,7 +644,7 @@ function UserMessage() {
 }
 
 function AssistantMessage() {
-  const custom = useAuiState((s) => s.message.metadata.custom as { usage?: { total_tokens?: number; cost?: number } | null; error?: string | null } | undefined);
+  const custom = useAuiState((s) => s.message.metadata.custom as { usage?: { total_tokens?: number; cost?: number } | null; model?: string | null; error?: string | null } | undefined);
   const status = useAuiState((s) => s.message.status);
   return (
     <MessagePrimitive.Root className="aui-msg aui-assistant">
@@ -601,10 +652,19 @@ function AssistantMessage() {
         <MessagePrimitive.Parts components={{ Text: MarkdownText }} />
         {status?.type === 'running' && <span className="aui-cursor" aria-hidden />}
         {custom?.error && <p className="error" style={{ margin: '6px 0 0' }}>{custom.error}</p>}
-        {custom?.usage && (
+        {(custom?.usage || custom?.model) && (
           <span className="aui-usage muted">
-            {custom.usage.total_tokens?.toLocaleString()} tokens
-            {typeof custom.usage.cost === 'number' ? ` · $${custom.usage.cost.toFixed(4)}` : ''}
+            {custom.usage && (
+              <>
+                {custom.usage.total_tokens?.toLocaleString()} tokens
+                {typeof custom.usage.cost === 'number' ? ` · $${custom.usage.cost.toFixed(4)}` : ''}
+              </>
+            )}
+            {custom.model && (
+              <span className="aui-usage-model" title={`Generated by ${custom.model}`}>
+                {custom.usage ? ' · ' : ''}{custom.model}
+              </span>
+            )}
           </span>
         )}
       </div>

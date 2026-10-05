@@ -668,7 +668,19 @@ code { background: rgba(255,255,255,0.06); padding: 2px 4px; border-radius: 3px;
    their content, so a long log line scrolls inside its box instead of blowing
    the layout out to content width. */
 .run-detail-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; align-items: start; }
-.run-log { background: rgba(0,0,0,0.3); border-radius: 6px; padding: 8px; font-size: 12px; font-family: Consolas, monospace; max-height: 300px; overflow: auto; }
+.run-log {
+  background: rgba(0,0,0,0.3);
+  border-radius: 6px;
+  padding: 8px;
+  font-size: 12px;
+  font-family: Consolas, monospace;
+  max-height: 300px;
+  overflow: auto;
+  /* Long lines (selectors, URLs, error output) wrap instead of forcing a
+     horizontal scrollbar; `anywhere` also breaks unbroken strings. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .screenshots { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
 .shot img { width: 100%; height: auto; border: 1px solid var(--border); border-radius: 4px; }
 .run-tags { display: inline-flex; gap: 4px; flex-wrap: wrap; }
@@ -1184,6 +1196,23 @@ code { background: rgba(255,255,255,0.06); padding: 2px 4px; border-radius: 3px;
 .scenario-meta-row > label { min-width: 180px; }
 .scenario-meta-name { flex: 2; }
 .scenario-meta-url { width: 100%; }
+/* A checkbox field: the inner row reads as normal text, not as a field heading. */
+.scenario-meta-check { cursor: pointer; }
+.scenario-meta-form label > .scenario-meta-check-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 14px;
+  color: var(--text);
+  padding: 6px 0;
+}
+.scenario-meta-check-row input[type='checkbox'] { width: auto; padding: 0; margin: 0; }
+
+/* Test-run log under the scenario editor's preview. */
+.test-run-log { margin: 12px 0; }
+.test-run-log h3 { margin: 0 0 6px; font-size: 14px; }
 .scenario-meta-actions {
   display: flex;
   flex-wrap: wrap;
@@ -1769,6 +1798,31 @@ code { background: rgba(255,255,255,0.06); padding: 2px 4px; border-radius: 3px;
 .ask-thread-view { display: flex; flex-direction: column; min-height: 0; flex: 1; gap: 10px; }
 .ask-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
 .ask-head h1 { margin: 0; font-size: 20px; }
+/* Rename in place: the heading is clickable, the ✎ only shows on hover. */
+.ask-title { cursor: text; }
+.ask-title-edit {
+  background: transparent;
+  color: var(--muted);
+  border: 0;
+  padding: 0 4px;
+  margin-left: 6px;
+  font-size: 14px;
+  opacity: 0;
+  cursor: pointer;
+}
+.ask-title:hover .ask-title-edit, .ask-title-edit:focus-visible { opacity: 1; }
+.ask-title-input {
+  font-size: 20px;
+  font-weight: 700;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  padding: 2px 6px;
+  min-width: 280px;
+  flex: 1;
+}
+.aui-usage-model { font-family: Consolas, monospace; }
 .ask-context { display: flex; flex-direction: column; gap: 6px; }
 .ask-ctx { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; }
 .ask-ctx-head { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; font-size: 13px; }

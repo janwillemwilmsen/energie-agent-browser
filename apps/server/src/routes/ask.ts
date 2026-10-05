@@ -31,6 +31,8 @@ interface ThreadRow {
 interface MessageRow {
   id: number; thread_id: number; role: 'user' | 'assistant'; text: string; with_context: number;
   usage_json: string | null; error: string | null; created_at: string;
+  /** The model that generated an assistant turn; '' on user turns and pre-026 rows. */
+  model: string;
 }
 
 const CreateBody = z.object({
@@ -79,6 +81,7 @@ function messageOut(m: MessageRow) {
     text: m.text,
     withContext: !!m.with_context,
     usage: m.usage_json ? (JSON.parse(m.usage_json) as Usage) : null,
+    model: m.model || null,
     error: m.error,
     createdAt: m.created_at,
   };
@@ -190,7 +193,7 @@ export async function askRoutes(app: FastifyInstance) {
     const db = getDb();
     const t = db.prepare('SELECT * FROM ask_threads WHERE id = ?').get(Number(req.params.id)) as ThreadRow | undefined;
     if (!t) return reply.code(404).send({ error: 'not_found' });
-    db.prepare('UPDATE ask_threads SET title = ?, model = ?, excluded_json = ? WHERE id = ?')
+    db.prepare('UPDATE ask_threads SET title = ?, model = ?, excluded_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
       .run(b.title ?? t.title, b.model ?? t.model, b.excluded ? JSON.stringify(b.excluded) : t.excluded_json, t.id);
     return threadOut(db.prepare('SELECT * FROM ask_threads WHERE id = ?').get(t.id) as ThreadRow);
   });
@@ -262,10 +265,10 @@ export async function askRoutes(app: FastifyInstance) {
       error = abort.signal.aborted ? 'cancelled' : (e?.message ?? String(e));
     }
     const asstInfo = db
-      .prepare('INSERT INTO ask_messages (thread_id, role, text, usage_json, error) VALUES (?, ?, ?, ?, ?)')
-      .run(t.id, 'assistant', full, usage ? JSON.stringify(usage) : null, error);
+      .prepare('INSERT INTO ask_messages (thread_id, role, text, usage_json, error, model) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(t.id, 'assistant', full, usage ? JSON.stringify(usage) : null, error, model);
     db.prepare('UPDATE ask_threads SET updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(t.id);
-    send({ done: true, messageId: Number(asstInfo.lastInsertRowid), usage: usage ?? null, error });
+    send({ done: true, messageId: Number(asstInfo.lastInsertRowid), usage: usage ?? null, model, error });
     res.end();
   });
 }

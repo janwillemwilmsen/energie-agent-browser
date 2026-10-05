@@ -16,7 +16,7 @@ import {
 } from './stepExecutor.js';
 import { pauseRun } from './pauseRegistry.js';
 import { StreamRecorder } from './streamRecorder.js';
-import { runStore, type RunStatus } from '../runs/index.js';
+import { runStore, testRuns, type RunStatus } from '../runs/index.js';
 import { notifyRunFinished } from '../notifications.js';
 import { parseStepPayload, type ViewportPreset } from '@eab/shared';
 
@@ -62,8 +62,19 @@ interface ScenarioRow {
   preflight_mode: string;
 }
 
+/**
+ * Where a run's progress and outcome go: the `runs` table for a real run, the
+ * in-memory test registry for a test run. The runner writes nothing else about
+ * the run anywhere, so this is the whole difference between the two.
+ */
+interface RunJournal {
+  appendLog(runId: number, logText: string): void;
+  finish(runId: number, status: 'success' | 'failed', logText: string, screenshots: string[], texts: string[]): void;
+}
+
 interface RunContext {
   runId: number;
+  journal: RunJournal;
   session: string;
   scenario: ScenarioRow;
   log: string[];
@@ -86,13 +97,13 @@ function fileStamp(d: Date): string {
   );
 }
 
-function appendLog(ctx: { runId: number; log: string[] }, line: string): void {
+function appendLog(ctx: { runId: number; journal: RunJournal; log: string[] }, line: string): void {
   const stamped = `[${nowIso()}] ${line}`;
   ctx.log.push(stamped);
   // eslint-disable-next-line no-console
   console.log(`run#${ctx.runId} ${stamped}`);
   try {
-    runStore().appendLog(ctx.runId, ctx.log.join('\n'));
+    ctx.journal.appendLog(ctx.runId, ctx.log.join('\n'));
   } catch {
     /* ignore */
   }
@@ -169,10 +180,12 @@ export interface StartRunOptions {
    */
   unattended?: boolean;
   /**
-   * Don't write screenshots, texts or recordings: those steps are logged and
-   * skipped, so the run only exercises the navigation/interaction steps.
+   * A test run: play the steps for the log only. No Run row, no screenshot
+   * directory, no screenshots/texts/recordings (those steps are logged and
+   * skipped) and no notification. The run gets a negative, in-memory id
+   * (see runs/testRuns.ts) so it can still be polled, paused and aborted.
    */
-  skipResources?: boolean;
+  testOnly?: boolean;
 }
 
 export interface StartedRun {
@@ -245,7 +258,14 @@ export function startRun(scenarioId: number, opts: StartRunOptions = {}): Starte
     .prepare('SELECT * FROM scenario_steps WHERE scenario_id = ? ORDER BY position')
     .all(scenarioId) as StepRow[];
 
-  const { runId, screenshotDir } = runStore().create(scenarioId);
+  // A test run never touches the Run store: nothing about it is persisted.
+  const testOnly = opts.testOnly === true;
+  const { runId, screenshotDir } = testOnly
+    ? { ...testRuns.create(scenarioId), screenshotDir: null }
+    : runStore().create(scenarioId);
+  const journal: RunJournal = testOnly
+    ? { appendLog: testRuns.appendLog, finish: (id, status, logText) => testRuns.finish(id, status, logText) }
+    : runStore();
   // One stamp for the whole run; reused across viewports and restart attempts.
   const runFileStamp = fileStamp(new Date());
 
@@ -269,7 +289,8 @@ export function startRun(scenarioId: number, opts: StartRunOptions = {}): Starte
   const recording: RecordingHolder = {
     recorder: null, absPath: null, relPath: null, index: 0, fileStamp: runFileStamp,
   };
-  const ctx: RunContext = { runId, session, scenario, log, recording };
+  const ctx: RunContext = { runId, journal, session, scenario, log, recording };
+  if (testOnly) appendLog(ctx, 'test run — nothing is saved (no run, screenshots, texts or recordings)');
   const scenarioPolicy: RetryPolicy = {
     retries: Math.max(0, scenario.retries ?? 0),
     retryWaitBeforeMs: Math.max(0, scenario.retry_wait_before_ms ?? 0),
@@ -278,11 +299,18 @@ export function startRun(scenarioId: number, opts: StartRunOptions = {}): Starte
 
   // Finish the run as failed before any Step ran (bad step data, preflight
   // failure). The normal path at the bottom handles everything else.
+  const finishRun = async (status: 'success' | 'failed'): Promise<RunStatus> => {
+    journal.finish(runId, status, log.join('\n'), screenshots, texts);
+    if (!testOnly) {
+      await notifyRunFinished({ scenario: { id: scenario.id, name: scenario.name }, runId, status });
+    }
+    return status;
+  };
   const finishFailedEarly = async (reason: string): Promise<RunStatus> => {
     appendLog(ctx, reason);
-    runStore().finish(runId, 'failed', log.join('\n'), []);
-    await notifyRunFinished({ scenario: { id: scenario.id, name: scenario.name }, runId, status: 'failed' });
-    return 'failed';
+    screenshots.length = 0;
+    texts.length = 0;
+    return finishRun('failed');
   };
 
   const finished = (async (): Promise<RunStatus> => {
@@ -470,14 +498,19 @@ export function startRun(scenarioId: number, opts: StartRunOptions = {}): Starte
           const stepCtx: StepContext = {
             browser,
             log: (line) => appendLog(ctx, line),
-            artifacts: { screenshotDir, fileStamp: runFileStamp, viewport, screenshots, texts },
-            recorder: {
-              start: () => startRecordingStep(ctx),
-              stop: () => stopRecordingStep(ctx),
-            },
             authSelectors: getAuthSelectors,
             pause,
-            skipResources: opts.skipResources,
+            // A test run has nowhere to put artifacts; the executor logs and
+            // skips the resource steps instead of failing on the missing dir.
+            ...(screenshotDir === null
+              ? { skipResources: true }
+              : {
+                  artifacts: { screenshotDir, fileStamp: runFileStamp, viewport, screenshots, texts },
+                  recorder: {
+                    start: () => startRecordingStep(ctx),
+                    stop: () => stopRecordingStep(ctx),
+                  },
+                }),
           };
           appendLog(ctx, `=== viewport: ${viewport} ===`);
           try {
@@ -500,10 +533,7 @@ export function startRun(scenarioId: number, opts: StartRunOptions = {}): Starte
       // is still saved.
       await stopRecordingStep(ctx);
 
-      runStore().finish(runId, status, log.join('\n'), screenshots, texts);
-
-      await notifyRunFinished({ scenario: { id: scenario.id, name: scenario.name }, runId, status });
-      return status;
+      return finishRun(status);
     } catch (e: any) {
       // Anything the run body did not handle itself (a driver crash, a bug):
       // never leave the row stuck at 'running'.

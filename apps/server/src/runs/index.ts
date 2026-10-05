@@ -3,6 +3,7 @@ import { getDb } from '../db/index.js';
 import { createRunStore, type RunStore } from './store.js';
 
 export * from './store.js';
+export * from './testRuns.js';
 
 let instance: RunStore | null = null;
 

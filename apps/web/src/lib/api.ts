@@ -204,6 +204,8 @@ export interface AskMessage {
   text: string;
   withContext: boolean;
   usage: AskUsage | null;
+  /** The model that generated an assistant turn; null on user turns and older rows. */
+  model: string | null;
   error: string | null;
   createdAt: string;
 }
@@ -267,7 +269,7 @@ export interface AskThread extends Omit<AskThreadSummary, 'messageCount' | 'last
 export type AskStreamEvent =
   | { userMessageId: number }
   | { delta: string }
-  | { done: true; messageId: number; usage: AskUsage | null; error: string | null };
+  | { done: true; messageId: number; usage: AskUsage | null; model: string; error: string | null };
 
 /** A preflight as listed, with its scenario usage. */
 export interface PreflightListRow extends Preflight {
@@ -417,10 +419,11 @@ export const api = {
   getScenario: (id: number) => req<ScenarioDetail>(`/api/scenarios/${id}`),
   snapshot: (body: { url?: string; session?: string; compact?: boolean; interactiveOnly?: boolean }) =>
     req<SnapshotResponse>('/api/snapshot', { method: 'POST', body: JSON.stringify(body) }),
-  startRun: (scenarioId: number, opts: { reset?: boolean; skipResources?: boolean } = {}) =>
+  /** `testOnly`: play for the log only — nothing saved, run id is negative and not on the Runs page. */
+  startRun: (scenarioId: number, opts: { reset?: boolean; testOnly?: boolean } = {}) =>
     req<Run>(`/api/scenarios/${scenarioId}/run`, {
       method: 'POST',
-      body: JSON.stringify({ reset: opts.reset ?? false, skipResources: opts.skipResources ?? false }),
+      body: JSON.stringify({ reset: opts.reset ?? false, testOnly: opts.testOnly ?? false }),
     }),
   listRuns: () => req<Run[]>('/api/runs'),
   getRun: (id: number) => req<Run & { pause: PausedRun | null }>(`/api/runs/${id}`),

@@ -3,29 +3,34 @@ import fs from 'node:fs';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { getDb } from '../db/index.js';
-import { runStore } from '../runs/index.js';
+import { isTestRunId, runStore, testRuns, type RunRow } from '../runs/index.js';
 import { startRun } from '../scenarios/runner.js';
 import { abortPausedRun, listPaused, pausedRun, resumeRun } from '../scenarios/pauseRegistry.js';
 import { ensureThumb } from '../thumbs.js';
 
+/** A Run row by id, whichever registry holds it. */
+const getRun = (id: number): RunRow | undefined =>
+  isTestRunId(id) ? testRuns.get(id) : runStore().get(id);
+
 const RunBody = z.object({
   reset: z.boolean().default(false),
-  skipResources: z.boolean().default(false),
+  /** Play for the log only: nothing is saved (see runs/testRuns.ts). */
+  testOnly: z.boolean().default(false),
 });
 
 export async function runsRoutes(app: FastifyInstance) {
   app.post<{ Params: { id: string } }>('/api/scenarios/:id/run', async (req, reply) => {
     const scenarioId = Number(req.params.id);
-    const { reset, skipResources } = RunBody.parse(req.body ?? {});
+    const { reset, testOnly } = RunBody.parse(req.body ?? {});
     const scenario = getDb().prepare('SELECT id FROM scenarios WHERE id = ?').get(scenarioId);
     if (!scenario) return reply.code(404).send({ error: 'not_found' });
 
     // No session gate here: the runner (via ensureSession) starts the browser
     // session itself when it isn't running. The Run row exists once startRun
     // returns; the run itself continues in the background.
-    const { runId, finished } = startRun(scenarioId, { freshSession: reset, skipResources });
+    const { runId, finished } = startRun(scenarioId, { freshSession: reset, testOnly });
     void finished;
-    return reply.code(202).send(runStore().get(runId));
+    return reply.code(202).send(getRun(runId));
   });
 
   app.get('/api/runs', async () => runStore().list({ limit: 100 }));
@@ -33,8 +38,9 @@ export async function runsRoutes(app: FastifyInstance) {
   // Runs parked at a `pause` step right now, for the Resume/Abort buttons.
   app.get('/api/runs/paused', async () => listPaused());
 
+  // Test runs (negative ids) are polled here too; they appear nowhere else.
   app.get<{ Params: { id: string } }>('/api/runs/:id', async (req, reply) => {
-    const row = runStore().get(Number(req.params.id));
+    const row = getRun(Number(req.params.id));
     if (!row) return reply.code(404).send({ error: 'not_found' });
     return { ...row, pause: pausedRun(row.id) };
   });
