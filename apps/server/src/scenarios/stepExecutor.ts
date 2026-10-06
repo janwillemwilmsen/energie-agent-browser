@@ -1,7 +1,15 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import sharp from 'sharp';
-import { DEFAULT_MOBILE_DEVICE, encodeSlot, slotStamp } from '@eab/shared';
+import {
+  DEFAULT_MOBILE_DEVICE,
+  DESKTOP_VIEWPORT,
+  DEVICE_PROFILES,
+  encodeSlot,
+  slotStamp,
+  zoomedViewport,
+  type ViewportSize,
+} from '@eab/shared';
 import type { A11yNode, A11yTree, FindLocator, SelectorStrategy, StepPayload } from '@eab/shared';
 import type { AuthSelectors } from '../authSelectors.js';
 import { resolveSelector } from './selector.js';
@@ -674,10 +682,15 @@ export async function applyViewport(
     await browser.run(['set', 'device', MOBILE_DEVICE], { timeoutMs: 15_000 });
     log(`< set device ok`);
   } else {
-    log(`> set viewport 1440x900`);
-    await browser.run(['set', 'viewport', '1440', '900'], { timeoutMs: 15_000 });
-    log(`< set viewport ok`);
+    // Scale given explicitly so a zoomed capture's scale never lingers.
+    await setViewport(browser, DESKTOP_VIEWPORT, log);
   }
+}
+
+async function setViewport(browser: Browser, v: ViewportSize, log: (line: string) => void): Promise<void> {
+  log(`> set viewport ${v.width}x${v.height} @${v.scale}x`);
+  await browser.run(['set', 'viewport', String(v.width), String(v.height), String(v.scale)], { timeoutMs: 15_000 });
+  log(`< set viewport ok`);
 }
 
 // Chrome's CDP error for "the frame has no layout yet" — seen when a screenshot
@@ -725,7 +738,6 @@ async function screenshot(
 ): Promise<void> {
   const { browser, log } = ctx;
   const artifacts = requireArtifacts(ctx, step.kind);
-  const label = step.label ?? `step-${position}`;
   // A 'mobile' shot captures at the mobile device regardless of the run's
   // viewport, so it gets the 'mobile' suffix (and pairs across runs in the
   // diff view). Otherwise it follows the run's current viewport.
@@ -733,6 +745,10 @@ async function screenshot(
   const suffix = mobileShot ? 'mobile' : artifacts.viewport;
   // The step may name the device; otherwise the run's mobile default.
   const device = step.device ?? MOBILE_DEVICE;
+  // Browser zoom: a zoomed shot is its own slot (`home-zoom200`), so it pairs
+  // with other runs' zoomed shots, never with the unzoomed one.
+  const zoom = step.zoom ?? null;
+  const label = `${step.label ?? `step-${position}`}${zoom ? `-zoom${zoom}` : ''}`;
   // png (default) is lossless; jpeg is captured natively by agent-browser;
   // webp is captured as png and post-converted with sharp below.
   const format = step.format ?? 'png';
@@ -753,6 +769,10 @@ async function screenshot(
   // legend (label [N] -> @eN role/name) to stdout.
   const annotate = step.annotate === true;
 
+  // The capture may change the viewport (another device, zoom); whatever
+  // happens, the run's viewport is restored afterwards so the following
+  // steps see the site as the run does.
+  const switched = mobileShot || zoom != null;
   if (mobileShot) {
     // Let the current layout settle, switch to the mobile device, let the
     // responsive reflow happen, then capture.
@@ -761,54 +781,65 @@ async function screenshot(
     await browser.run(['set', 'device', device], { timeoutMs: 15_000 });
     await timing.sleep(50);
   }
-
-  // Global flags must precede the subcommand.
-  const args: string[] = [];
-  if (format === 'jpeg') args.push('--screenshot-format', 'jpeg', '--screenshot-quality', String(quality));
-  args.push('screenshot');
-  if (fullPage) args.push('--full');
-  if (annotate) args.push('--annotate');
-  args.push(capturePath);
-  log(
-    `screenshot${fullPage ? ' (full)' : ' (viewport)'}${expand ? ' (expanded)' : ''}${mobileShot ? ' (mobile)' : ''}${annotate ? ' (annotated)' : ''}${format !== 'png' ? ` (${format} q${quality})` : ''} → ${filename}`,
-  );
-  if (expand) {
-    log(`expand scrollers: ${await expandScrollers(browser)}`);
-    // Give the browser a frame to relayout at the new document height.
-    await timing.sleep(100);
-  }
-  let r;
   try {
-    // Chrome refuses to capture while a navigation is mid-flight (the new
-    // document has no layout yet). That's transient — typically the step right
-    // after a click that navigated elsewhere. Wait for the load state and retry
-    // a few times before giving up.
-    r = await browser.run(args, { timeoutMs: 60_000 });
-    for (let attempt = 1; r.exitCode !== 0 && isPageNotReadyError(r.stderr, r.stdout) && attempt <= SCREENSHOT_NOT_READY_RETRIES; attempt++) {
-      log(`screenshot: page not ready yet (${(r.stderr || r.stdout).trim().split('\n')[0]}) — waiting for load and retrying (${attempt}/${SCREENSHOT_NOT_READY_RETRIES})`);
-      await timing.sleep(500);
-      await waitForLoad(browser, 10_000);
-      r = await browser.run(args, { timeoutMs: 60_000 });
+    if (zoom != null) {
+      // Zoom on top of whatever is being captured: the step's device, or the
+      // run's own viewport (desktop, or its mobile device).
+      const base: ViewportSize = mobileShot
+        ? DEVICE_PROFILES[device]
+        : artifacts.viewport === 'mobile' ? DEVICE_PROFILES[MOBILE_DEVICE] : DESKTOP_VIEWPORT;
+      await setViewport(browser, zoomedViewport(base, zoom), (l) => log(`${l} (zoom ${zoom}%)`));
+      await timing.sleep(50);
     }
-  } finally {
-    // Always put the page's layout back, even when the capture failed —
-    // the following steps must see the site as it really is.
-    if (expand) await restoreScrollers(browser).catch(() => {});
-  }
-  if (r.exitCode !== 0) throw new Error(`screenshot failed: ${r.stderr || r.stdout}`);
-  if (format === 'webp') {
-    // agent-browser can't emit webp — convert the png capture and drop it.
-    await sharp(capturePath).webp({ quality }).toFile(filepath);
-    fs.rmSync(capturePath, { force: true });
-  }
-  artifacts.screenshots.push(filename);
-  // The annotate legend is on stdout — keep it in the run log so the labels
-  // are interpretable later.
-  if (annotate && r.stdout.trim()) log(r.stdout.trim());
 
-  if (mobileShot) {
-    // Restore the run's viewport so following steps run as before.
-    await timing.sleep(50);
-    await applyViewport(browser, artifacts.viewport, log);
+    // Global flags must precede the subcommand.
+    const args: string[] = [];
+    if (format === 'jpeg') args.push('--screenshot-format', 'jpeg', '--screenshot-quality', String(quality));
+    args.push('screenshot');
+    if (fullPage) args.push('--full');
+    if (annotate) args.push('--annotate');
+    args.push(capturePath);
+    log(
+      `screenshot${fullPage ? ' (full)' : ' (viewport)'}${expand ? ' (expanded)' : ''}${mobileShot ? ` (mobile: ${device})` : ''}${zoom ? ` (zoom ${zoom}%)` : ''}${annotate ? ' (annotated)' : ''}${format !== 'png' ? ` (${format} q${quality})` : ''} → ${filename}`,
+    );
+    if (expand) {
+      log(`expand scrollers: ${await expandScrollers(browser)}`);
+      // Give the browser a frame to relayout at the new document height.
+      await timing.sleep(100);
+    }
+    let r;
+    try {
+      // Chrome refuses to capture while a navigation is mid-flight (the new
+      // document has no layout yet). That's transient — typically the step right
+      // after a click that navigated elsewhere. Wait for the load state and retry
+      // a few times before giving up.
+      r = await browser.run(args, { timeoutMs: 60_000 });
+      for (let attempt = 1; r.exitCode !== 0 && isPageNotReadyError(r.stderr, r.stdout) && attempt <= SCREENSHOT_NOT_READY_RETRIES; attempt++) {
+        log(`screenshot: page not ready yet (${(r.stderr || r.stdout).trim().split('\n')[0]}) — waiting for load and retrying (${attempt}/${SCREENSHOT_NOT_READY_RETRIES})`);
+        await timing.sleep(500);
+        await waitForLoad(browser, 10_000);
+        r = await browser.run(args, { timeoutMs: 60_000 });
+      }
+    } finally {
+      // Always put the page's layout back, even when the capture failed —
+      // the following steps must see the site as it really is.
+      if (expand) await restoreScrollers(browser).catch(() => {});
+    }
+    if (r.exitCode !== 0) throw new Error(`screenshot failed: ${r.stderr || r.stdout}`);
+    if (format === 'webp') {
+      // agent-browser can't emit webp — convert the png capture and drop it.
+      await sharp(capturePath).webp({ quality }).toFile(filepath);
+      fs.rmSync(capturePath, { force: true });
+    }
+    artifacts.screenshots.push(filename);
+    // The annotate legend is on stdout — keep it in the run log so the labels
+    // are interpretable later.
+    if (annotate && r.stdout.trim()) log(r.stdout.trim());
+  } finally {
+    if (switched) {
+      // Restore the run's viewport so following steps run as before.
+      await timing.sleep(50);
+      await applyViewport(browser, artifacts.viewport, log).catch((e: any) => log(`restore viewport failed: ${e?.message ?? e}`));
+    }
   }
 }

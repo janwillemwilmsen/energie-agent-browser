@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { parseStepPayload as parseStep, safeParseScenarioStepPayload, safeParseStepPayload, type A11yTree } from '@eab/shared';
 import { parseSnapshotText } from '../agentBrowser/parser.js';
 import {
@@ -264,6 +267,38 @@ describe('Step executor', () => {
     // Non-resource steps are unaffected.
     await executeStep(ctx, parseStep('click', { selector: { role: '', name: '', locator: '#go' } }));
     expect(ran(b, 'click')).toEqual([['click', '#go']]);
+  });
+
+  it('emulates browser zoom as a smaller viewport at a higher scale, then restores the run viewport', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'eab-shot-'));
+    // The fake "captures" by creating the file the CLI was asked to write.
+    const b = fakeBrowser([], [
+      (a) => { if (a[0] === 'screenshot') { fs.writeFileSync(a[a.length - 1]!, ''); return OK; } return undefined; },
+    ]);
+    const artifacts = { screenshotDir: dir, viewport: 'desktop' as const, screenshots: [], texts: [] };
+    const ctx = context(b, { artifacts });
+    try {
+      await executeStep(ctx, parseStep('screenshot', { label: 'home', zoom: 200, fullPage: false }), 3);
+      // 1440x900 at 200% → 720x450 CSS px at scale 2; afterwards back to 1440x900 @1.
+      expect(b.calls.filter((c) => c[0] === 'set')).toEqual([
+        ['set', 'viewport', '720', '450', '2'],
+        ['set', 'viewport', '1440', '900', '1'],
+      ]);
+      // Its own slot, so it never pairs with the unzoomed 'home' across runs.
+      expect(artifacts.screenshots).toHaveLength(1);
+      expect(artifacts.screenshots[0]).toMatch(/^\d{8}-\d{6}-home-zoom200-desktop\.png$/);
+
+      // Zoom on a mobile shot stacks on the device profile (iPhone 14: 390x844 @3).
+      b.calls.length = 0;
+      await executeStep(ctx, parseStep('screenshot', { label: 'home', viewport: 'mobile', zoom: 400, fullPage: false }), 4);
+      expect(b.calls.filter((c) => c[0] === 'set')).toEqual([
+        ['set', 'device', 'iPhone 14'],
+        ['set', 'viewport', '98', '211', '12'],
+        ['set', 'viewport', '1440', '900', '1'],
+      ]);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('passes auth selector overrides through to auth login', async () => {

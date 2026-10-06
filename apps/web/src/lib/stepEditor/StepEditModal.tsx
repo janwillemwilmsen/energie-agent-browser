@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { DEFAULT_MOBILE_DEVICE, DEVICE_NAMES } from '@eab/shared';
+import { DEFAULT_MOBILE_DEVICE, DEVICE_NAMES, DEVICE_PROFILES, DESKTOP_VIEWPORT, ZOOM_LEVELS, zoomedViewport } from '@eab/shared';
 import type { EditableStep } from './store.js';
 
 // Modal for the ✎ button on a step row. Screenshot steps get friendly fields —
@@ -29,6 +29,10 @@ export function StepEditModal({
   const [device, setDevice] = useState<string>(
     typeof initial.device === 'string' && (DEVICE_NAMES as readonly string[]).includes(initial.device) ? initial.device : '',
   );
+  // 0 = no zoom emulation.
+  const [zoom, setZoom] = useState<number>(
+    (ZOOM_LEVELS as readonly number[]).includes(Number(initial.zoom)) ? Number(initial.zoom) : 0,
+  );
   const [annotate, setAnnotate] = useState(initial.annotate === true);
   const [format, setFormat] = useState<string>(
     initial.format === 'jpeg' || initial.format === 'jpg' ? 'jpeg' : initial.format === 'webp' ? 'webp' : 'png',
@@ -50,6 +54,7 @@ export function StepEditModal({
       if (fullPage && expandScrollers) next.expandScrollers = true; else delete next.expandScrollers;
       if (mobile) next.viewport = 'mobile'; else delete next.viewport;
       if (mobile && device) next.device = device; else delete next.device;
+      if (zoom) next.zoom = zoom; else delete next.zoom;
       if (annotate) next.annotate = true; else delete next.annotate;
       if (format === 'png') {
         delete next.format;
@@ -160,11 +165,28 @@ export function StepEditModal({
                   ))}
                 </select>
                 <span className="muted" style={{ fontSize: 12 }}>
-                  agent-browser&apos;s built-in profiles: viewport, scale, touch and a matching user agent.
+                  agent-browser&apos;s built-in profiles: viewport, scale and a matching user agent.
                   Picking one overrides the default for this step only.
                 </span>
               </label>
             )}
+            <label style={col}>
+              <span>Browser zoom</span>
+              <select value={zoom} onChange={(e) => setZoom(Number(e.target.value))}>
+                <option value={0}>None (100%)</option>
+                {ZOOM_LEVELS.map((z) => {
+                  // Preview what the page will see at that zoom.
+                  const base = mobile ? DEVICE_PROFILES[(device || DEFAULT_MOBILE_DEVICE) as keyof typeof DEVICE_PROFILES] : DESKTOP_VIEWPORT;
+                  const v = zoomedViewport(base, z);
+                  return <option key={z} value={z}>{z}% — page sees {v.width}×{v.height} CSS px</option>;
+                })}
+              </select>
+              <span className="muted" style={{ fontSize: 12 }}>
+                Emulates a user with browser/display zoom (accessibility): the layout width shrinks and every
+                breakpoint reacts as it would for them; the image stays the same size. Saved as a separate slot
+                (<code>label-zoom200</code>) so it diffs against other runs&apos; zoomed shots. 200–400% are the WCAG reflow test points.
+              </span>
+            </label>
             <label style={row}>
               <input type="checkbox" checked={annotate} onChange={(e) => setAnnotate(e.target.checked)} />
               Annotate interactive elements

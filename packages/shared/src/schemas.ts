@@ -26,6 +26,55 @@ export type DeviceName = (typeof DEVICE_NAMES)[number];
 /** What a 'mobile' viewport / mobile screenshot emulates unless a step picks a device. */
 export const DEFAULT_MOBILE_DEVICE: DeviceName = 'iPhone 14';
 
+export interface ViewportSize {
+  /** CSS pixels. */
+  width: number;
+  height: number;
+  /** Device scale factor (devicePixelRatio). */
+  scale: number;
+}
+
+// Each profile's CSS viewport and scale, measured against agent-browser 0.38.1
+// on a page with `width=device-width`. Needed to emulate zoom on top of a
+// device (see zoomedViewport); the names alone don't tell us the size.
+export const DEVICE_PROFILES: Record<DeviceName, ViewportSize> = {
+  'iPhone 17': { width: 402, height: 874, scale: 3 },
+  'iPhone 16 Pro': { width: 402, height: 874, scale: 3 },
+  'iPhone 16': { width: 393, height: 852, scale: 3 },
+  'iPhone 15': { width: 393, height: 852, scale: 3 },
+  'iPhone 14': { width: 390, height: 844, scale: 3 },
+  'iPhone 12': { width: 390, height: 844, scale: 3 },
+  'iPad Pro': { width: 1024, height: 1366, scale: 2 },
+  'iPad Air': { width: 820, height: 1180, scale: 2 },
+  'iPad': { width: 820, height: 1180, scale: 2 },
+  'Pixel 9': { width: 412, height: 923, scale: 2.625 },
+  'Pixel 7': { width: 412, height: 915, scale: 2.625 },
+  'Pixel 5': { width: 393, height: 851, scale: 2.75 },
+  'Galaxy S25': { width: 360, height: 800, scale: 3 },
+  'Galaxy S21': { width: 360, height: 800, scale: 3 },
+};
+
+/** The desktop pass's viewport. */
+export const DESKTOP_VIEWPORT: ViewportSize = { width: 1440, height: 900, scale: 1 };
+
+// Browser zoom levels a screenshot step may emulate, in percent. A subset of
+// Chrome's own zoom ladder: 125/150 are what most users with "larger" display
+// settings run; 200/300/400 are the accessibility test points (WCAG reflow is
+// judged at 400%).
+export const ZOOM_LEVELS = [125, 150, 200, 300, 400] as const;
+export type ZoomLevel = (typeof ZOOM_LEVELS)[number];
+
+/**
+ * Browser zoom as a viewport: Chrome zooms by making a CSS pixel bigger, so
+ * a 1440×900 window at 200% is a 720×450 CSS viewport at scale 2 — same
+ * rendered size, half the layout width, every breakpoint reacting as it
+ * would for a real user at that zoom.
+ */
+export function zoomedViewport(base: ViewportSize, zoomPercent: number): ViewportSize {
+  const f = zoomPercent / 100;
+  return { width: Math.round(base.width / f), height: Math.round(base.height / f), scale: base.scale * f };
+}
+
 // agent-browser's semantic locators (`agent-browser find <by> <value> …`):
 // Playwright-style getByRole / getByText / getByLabel / … resolved in the live
 // page by the browser tool itself, not against our snapshot of the a11y tree.
@@ -162,6 +211,10 @@ const StepScreenshot = z.object({
   // Which device the 'mobile' capture emulates (agent-browser `set device`).
   // Absent → the default mobile device (DEFAULT_MOBILE_DEVICE).
   device: z.enum(DEVICE_NAMES).optional(),
+  // Emulate browser zoom (percent) for this capture: the viewport shrinks and
+  // the scale grows accordingly, then the run's viewport is restored. Works
+  // on top of the desktop viewport or the (step's or default) mobile device.
+  zoom: z.union([z.literal(125), z.literal(150), z.literal(200), z.literal(300), z.literal(400)]).optional(),
   // Overlay numbered labels on interactive elements (agent-browser --annotate).
   annotate: z.boolean().optional(),
   // Output format. png (default) is lossless; jpeg/webp are lossy but much

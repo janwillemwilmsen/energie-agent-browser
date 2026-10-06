@@ -41,7 +41,7 @@ Payload example:
 
 Screenshot steps support a per-step **file format** — `png` (lossless, default), `jpeg`, or `webp` — plus a **quality** (1–100) for the lossy formats. Full-page captures of long pages shrink dramatically with `webp` at quality 70–85. Diffs keep working across format changes: runs pair screenshots by label + viewport, ignoring the extension.
 
-Other screenshot options: **capture area** (full page vs viewport), a one-off **mobile viewport** capture, and **annotate** (numbered labels on interactive elements, legend in the run log).
+Other screenshot options: **capture area** (full page vs viewport), a one-off **mobile viewport** capture (iPhone 14 by default, or any profile from the **Device** dropdown — see [Device profiles](/docs/devices) for sizes), and **annotate** (numbered labels on interactive elements, legend in the run log).
 
 > **Full-page shot comes out viewport-sized?** Some sites (e.g. the Greenchoice sign-up funnel) pin the page to the window height and scroll inside an inner panel, so the document has nothing beyond the viewport to capture. Tick **Expand inner scroll containers** on the screenshot step: the runner temporarily unlocks that panel so the document grows to the real content height, captures, then restores the layout. The run log shows what it unlocked ("expand scrollers: 1 inner scroller(s) unlocked, document now 1927px tall").
 
