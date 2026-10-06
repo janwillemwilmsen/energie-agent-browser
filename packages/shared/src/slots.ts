@@ -9,14 +9,15 @@
 // - <label> is the screenshot Step's label, sanitized to [a-z0-9._-]; it may
 //   itself contain dashes, which is why <viewport> is always the LAST segment.
 // - <viewport> is 'desktop' or 'mobile'.
-// - <ext> follows the Step's format: png, jpg or webp; it changes when the
-//   format does, so it is not part of the cross-run key either.
+// - <ext> follows the Step's format: png, jpg or webp for screenshots, md for
+//   the texts a save_text Step writes; it changes when the format does, so it
+//   is not part of the cross-run key either.
 //
 // Older files carry a leading `NNN-` (the Step's position) and the stamp was
 // the Run's start time, or absent: `NNN-[YYYYMMDD-HHMMSS-]<label>-<viewport>`.
 // They still parse; the position is reported when present.
 
-const EXT_RE = /\.(png|jpe?g|webp)$/i;
+const EXT_RE = /\.(png|jpe?g|webp|md)$/i;
 // A position is at most 7 digits so it can never be mistaken for the 8-digit date.
 const PREFIX_RE = /^(?:(\d{1,7})-)?(?:(\d{8}-\d{6})-)?/;
 

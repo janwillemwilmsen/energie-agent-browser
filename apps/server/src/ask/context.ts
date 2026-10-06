@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import sharp from 'sharp';
-import { parseStepPayload } from '@eab/shared';
+import { parseSlot, parseStepPayload, slotDisplayLabel } from '@eab/shared';
 import { getDb } from '../db/index.js';
 import { runStore } from '../runs/index.js';
 import { describeStep } from '../scenarios/stepExecutor.js';
@@ -90,11 +90,9 @@ function stepNarrative(scenarioId: number): string[] {
   });
 }
 
-// A screenshot filename looks like 005-20260929-223929-step-58-desktop.png:
-// sequence, run stamp, label (step-N or the step's label), viewport.
+// "label (viewport)" from the slot filename (shared protocol, slots.ts).
 function shotLabel(file: string): string {
-  const m = /^\d+-\d{8}-\d{6}-(.+)-(desktop|mobile)\.[a-z]+$/i.exec(file);
-  return m ? `${m[1]} (${m[2]})` : file;
+  return parseSlot(file) ? slotDisplayLabel(file) : file;
 }
 
 async function tilesFor(runId: number, file: string, budget: number): Promise<PackImage[]> {

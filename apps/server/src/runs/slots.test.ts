@@ -17,6 +17,12 @@ describe('slot filename codec', () => {
     // A label that starts with digits is not mistaken for a position.
     expect(parseSlot('20260606-143025-404-page-desktop.png')).toMatchObject({ position: null, label: '404-page' });
     expect(parseSlot('20260606-143025-solo.JPG')?.ext).toBe('jpg');
+    // save_text files follow the same protocol with an .md extension.
+    expect(parseSlot('20260606-143025-pricing-desktop.md')).toEqual({
+      position: null, stamp: '20260606-143025', label: 'pricing', viewport: 'desktop', ext: 'md',
+    });
+    expect(parseSlot('004-20260606-143025-pricing-mobile.md')?.label).toBe('pricing');
+    expect(slotKey('20260606-143025-pricing-desktop.md')).toBe('pricing-desktop');
     expect(parseSlot('notes.txt')).toBeNull();
     expect(parseSlot('nope-desktop.png')).toBeNull();
   });

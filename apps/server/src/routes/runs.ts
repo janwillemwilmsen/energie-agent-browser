@@ -2,6 +2,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { parseSlot } from '@eab/shared';
 import { getDb } from '../db/index.js';
 import { isTestRunId, runStore, testRuns, type RunRow } from '../runs/index.js';
 import { startRun } from '../scenarios/runner.js';
@@ -158,10 +159,10 @@ export async function runsRoutes(app: FastifyInstance) {
       for (const file of runStore().texts(run.id) ?? []) {
         const p = runStore().screenshotPath(run.id, file);
         if (!p || !fs.existsSync(p)) continue;
-        const m = /^\d+-\d{8}-\d{6}-(.+)-(desktop|mobile)\.md$/i.exec(file);
+        const slot = parseSlot(file);
         out.push({
           runId: run.id, startedAt: run.started_at, status: run.status, file,
-          label: m?.[1] ?? file, viewport: m?.[2] ?? '', bytes: fs.statSync(p).size,
+          label: slot?.label ?? file, viewport: slot?.viewport ?? '', bytes: fs.statSync(p).size,
         });
       }
     }
