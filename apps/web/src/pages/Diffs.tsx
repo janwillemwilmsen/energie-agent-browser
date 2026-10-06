@@ -1,5 +1,4 @@
 import { useMemo, useState } from 'react';
-import { parseSlot } from '@eab/shared';
 import { api, type Artifact, type Comparison } from '../lib/api.js';
 import { useResource } from '../lib/resource.js';
 
@@ -14,11 +13,11 @@ function statusClass(status: Comparison['status']): string {
   return 'status-failed';
 }
 
-// Leading NNN of the slot label (e.g. "002-cart-desktop.png" -> 2) so per-run
-// screenshots sort in scenario step order.
-function slotPosition(c: Comparison): number {
-  const label = c.baseline?.label ?? c.target?.label ?? c.diff?.label ?? '';
-  return parseSlot(label)?.position ?? Number.MAX_SAFE_INTEGER;
+// Order within a run: the slot name starts with the capture stamp (older files:
+// the step position), so a plain string compare on the baseline's name is
+// capture order either way.
+function slotOrder(c: Comparison): string {
+  return c.baseline?.label ?? c.target?.label ?? c.diff?.label ?? '';
 }
 
 interface DiffGroup {
@@ -68,7 +67,7 @@ export function Diffs() {
       g.comparisons.push(c);
     }
     const out = Array.from(map.values());
-    for (const g of out) g.comparisons.sort((a, b) => slotPosition(a) - slotPosition(b));
+    for (const g of out) g.comparisons.sort((a, b) => slotOrder(a).localeCompare(slotOrder(b)));
     // Newest run-pairs first (highest comparison id in the group).
     out.sort((a, b) => maxId(b.comparisons) - maxId(a.comparisons));
     return out;

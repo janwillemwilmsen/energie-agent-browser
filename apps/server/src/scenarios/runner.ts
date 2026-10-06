@@ -18,7 +18,7 @@ import { pauseRun } from './pauseRegistry.js';
 import { StreamRecorder } from './streamRecorder.js';
 import { runStore, testRuns, type RunStatus } from '../runs/index.js';
 import { notifyRunFinished } from '../notifications.js';
-import { parseStepPayload, type ViewportPreset } from '@eab/shared';
+import { parseStepPayload, slotStamp, type ViewportPreset } from '@eab/shared';
 
 // Scenario-run orchestration: loads the Scenario and its Preflight, creates the
 // Run row, binds the browser session, applies the Preflight, runs the Steps per
@@ -83,18 +83,6 @@ interface RunContext {
 
 function nowIso(): string {
   return new Date().toISOString();
-}
-
-// Compact, filesystem-safe, sortable local-time stamp for screenshot filenames:
-// "20260606-143025" (YYYYMMDD-HHMMSS). Local time so it matches the timestamps
-// the UI renders elsewhere (toLocaleString). The cross-run slot matchers in the
-// timeline and diff pairing strip this block, so it's purely informational.
-function fileStamp(d: Date): string {
-  const p = (n: number) => String(n).padStart(2, '0');
-  return (
-    `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}` +
-    `-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`
-  );
 }
 
 function appendLog(ctx: { runId: number; journal: RunJournal; log: string[] }, line: string): void {
@@ -266,8 +254,8 @@ export function startRun(scenarioId: number, opts: StartRunOptions = {}): Starte
   const journal: RunJournal = testOnly
     ? { appendLog: testRuns.appendLog, finish: (id, status, logText) => testRuns.finish(id, status, logText) }
     : runStore();
-  // One stamp for the whole run; reused across viewports and restart attempts.
-  const runFileStamp = fileStamp(new Date());
+  // One stamp for the run's recordings (screenshots stamp themselves at capture).
+  const runFileStamp = slotStamp();
 
   const viewports: ('desktop' | 'mobile')[] =
     scenario.viewport_preset === 'both'
@@ -467,7 +455,14 @@ export function startRun(scenarioId: number, opts: StartRunOptions = {}): Starte
           }
         }
 
-        // Each attempt starts from a clean artifact set (filenames are reused).
+        // Each attempt starts from a clean artifact set. Filenames carry the
+        // capture time, so the failed attempt's files would otherwise linger
+        // in the run dir unreferenced — remove them.
+        if (screenshotDir) {
+          for (const name of [...screenshots, ...texts]) {
+            try { fs.rmSync(path.join(screenshotDir, name), { force: true }); } catch { /* best effort */ }
+          }
+        }
         screenshots.length = 0;
         texts.length = 0;
         status = 'success';
@@ -505,7 +500,7 @@ export function startRun(scenarioId: number, opts: StartRunOptions = {}): Starte
             ...(screenshotDir === null
               ? { skipResources: true }
               : {
-                  artifacts: { screenshotDir, fileStamp: runFileStamp, viewport, screenshots, texts },
+                  artifacts: { screenshotDir, viewport, screenshots, texts },
                   recorder: {
                     start: () => startRecordingStep(ctx),
                     stop: () => stopRecordingStep(ctx),

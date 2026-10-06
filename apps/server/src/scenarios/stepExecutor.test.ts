@@ -245,7 +245,7 @@ describe('Step executor', () => {
 
   it('skips every resource-writing kind when skipResources is set, even with artifacts present', async () => {
     const b = fakeBrowser([]);
-    const artifacts = { screenshotDir: '/nowhere', fileStamp: 'x', viewport: 'desktop' as const, screenshots: [], texts: [] };
+    const artifacts = { screenshotDir: '/nowhere', viewport: 'desktop' as const, screenshots: [], texts: [] };
     const recorder = { start: async () => { throw new Error('must not record'); }, stop: async () => { throw new Error('must not record'); } };
     const ctx = context(b, { artifacts, recorder, skipResources: true });
     await executeStep(ctx, parseStep('screenshot', { label: 'home' }), 1);

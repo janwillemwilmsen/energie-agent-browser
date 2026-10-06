@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import sharp from 'sharp';
-import { encodeSlot } from '@eab/shared';
+import { encodeSlot, slotStamp } from '@eab/shared';
 import type { A11yNode, A11yTree, FindLocator, SelectorStrategy, StepPayload } from '@eab/shared';
 import type { AuthSelectors } from '../authSelectors.js';
 import { resolveSelector } from './selector.js';
@@ -59,8 +59,6 @@ export interface Timing {
  */
 export interface Artifacts {
   screenshotDir: string;
-  /** Compact stamp (YYYYMMDD-HHMMSS) embedded in every screenshot filename. */
-  fileStamp: string;
   /** The run's viewport; restored after a 'mobile' screenshot. */
   viewport: 'desktop' | 'mobile';
   /** Filenames captured so far; the executor appends to it. */
@@ -515,6 +513,17 @@ function requireArtifacts(ctx: StepContext, kind: string): Artifacts {
   return ctx.artifacts;
 }
 
+// The filename for an artifact captured NOW. Within a run the stamp keeps
+// names unique and chronological; the one way to collide is the same label
+// twice in the same second, which gets a `-2`, `-3`, … on the label.
+function slotFilename(artifacts: Artifacts, parts: { label: string; viewport: string; ext: string }): string {
+  const taken = new Set([...artifacts.screenshots, ...artifacts.texts]);
+  const stamp = slotStamp();
+  let name = encodeSlot({ stamp, ...parts });
+  for (let n = 2; taken.has(name); n++) name = encodeSlot({ stamp, ...parts, label: `${parts.label}-${n}` });
+  return name;
+}
+
 /**
  * Resolve a selector to something agent-browser accepts on the command line.
  * A raw locator ("#id", "[data-testid=…]", "text=…", "xpath=…", any CSS) goes
@@ -690,7 +699,7 @@ async function saveText(
   const { browser, log } = ctx;
   const artifacts = requireArtifacts(ctx, step.kind);
   const label = step.label ?? `step-${position}`;
-  const filename = encodeSlot({ position, stamp: artifacts.fileStamp, label, viewport: artifacts.viewport, ext: 'md' });
+  const filename = slotFilename(artifacts, { label, viewport: artifacts.viewport, ext: 'md' });
   const filepath = path.join(artifacts.screenshotDir, filename);
   const r = await browser.run(['read'], { timeoutMs: 60_000 });
   if (r.exitCode !== 0) throw new Error(`save text failed: ${failureText(r)}`);
@@ -726,9 +735,9 @@ async function screenshot(
   const format = step.format ?? 'png';
   const quality = step.quality ?? 80;
   const ext = format === 'jpeg' ? 'jpg' : format;
-  // The slot filename protocol (see @eab/shared slots.ts): position first,
-  // then the run's stamp, label and viewport; the cross-run key is label+viewport.
-  const filename = encodeSlot({ position, stamp: artifacts.fileStamp, label, viewport: suffix, ext });
+  // The slot filename protocol (see @eab/shared slots.ts): capture stamp,
+  // label and viewport; the cross-run key is label+viewport.
+  const filename = slotFilename(artifacts, { label, viewport: suffix, ext });
   const filepath = path.join(artifacts.screenshotDir, filename);
   const capturePath = format === 'webp' ? `${filepath}.capture.png` : filepath;
   // agent-browser's screenshot default is VIEWPORT-only; --full captures the
