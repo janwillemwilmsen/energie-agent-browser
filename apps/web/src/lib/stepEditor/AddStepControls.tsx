@@ -3,6 +3,7 @@ import { useDraggable } from '@dnd-kit/core';
 import type { FindBy, FindLocator, SelectorStrategy } from '../api.js';
 import type { StepStore } from './store.js';
 import type { BuiltStep, PickDragData } from './StepDnd.js';
+import { shortUrl } from './summarize.js';
 
 // The "+ …" buttons that create Steps. Which buttons appear follows from the
 // kinds the caller allows and the capabilities it provides; the input dialogs
@@ -247,8 +248,8 @@ export function AddStepControls(props: AddStepControlsProps) {
   return (
     <div className="actions step-editor-add">
       {allowed.has('navigate') && (
-        <AddButton id="navigate" kind="navigate" label={defaultUrl ?? 'navigate'} build={buildNavigate} onAdd={onAdd} disabled={disabled} title={title()}>
-          + navigate{defaultUrl ? ` (${defaultUrl})` : ''}
+        <AddButton id="navigate" kind="navigate" label={defaultUrl ?? 'navigate'} build={buildNavigate} onAdd={onAdd} disabled={disabled} title={title(defaultUrl ? `Navigate to ${defaultUrl}` : undefined)}>
+          + navigate{defaultUrl ? ` (${shortUrl(defaultUrl)})` : ''}
         </AddButton>
       )}
       {selectorKinds.length > 0 && (

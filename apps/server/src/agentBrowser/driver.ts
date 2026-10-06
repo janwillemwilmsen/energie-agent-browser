@@ -210,7 +210,8 @@ const DEBUG = process.env.AB_DRIVER_DEBUG === '1';
  * The terminal's shell builds on it too.
  */
 export function agentBrowserEnv(): NodeJS.ProcessEnv {
-  return backendEnv(currentBackend().backend);
+  const { backend, stealth } = currentBackend();
+  return backendEnv(backend, stealth);
 }
 
 /** The native agent-browser binary the driver spawns (for admin tools like doctor/install). */
@@ -469,7 +470,7 @@ async function spawnConnectDetached(session: string, sessionName?: string | null
   // up. That chicken-and-egg makes the very first `--session-name` bootstrap
   // fail with "Could not configure browser … No such file or directory
   // (os error 2)". Pre-create it so binding a brand-new preflight works.
-  const { backend } = currentBackend();
+  const { backend, stealth } = currentBackend();
   const cliArgs = ['--session', session];
   if (sessionName) {
     try {
@@ -493,7 +494,7 @@ async function spawnConnectDetached(session: string, sessionName?: string | null
   // Local / cloud provider: opening a cheap, side-effect-free page is what
   // spawns the daemon + launches (or creates) the browser; the recorder's
   // first real navigation replaces about:blank. cdp: connect to the remote.
-  cliArgs.push(...bootstrapArgs(backend));
+  cliArgs.push(...bootstrapArgs(backend, stealth));
 
   // Spawn the daemon via a PLAIN child spawn. Up to agent-browser 0.28 the
   // Windows exe needed a pty (conpty) to start its CDP client, but 0.29+

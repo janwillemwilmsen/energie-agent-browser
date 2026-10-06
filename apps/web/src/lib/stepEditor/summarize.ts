@@ -12,6 +12,20 @@ export function selectorLabel(s: Partial<SelectorStrategy> | null | undefined): 
   return [base, extra].filter(Boolean).join(' ');
 }
 
+// A URL short enough for a button label: origin + the start of the path, with
+// the middle elided. The full URL belongs in the title/tooltip.
+export function shortUrl(url: string, max = 56): string {
+  if (url.length <= max) return url;
+  try {
+    const u = new URL(url);
+    const rest = url.slice(u.origin.length);
+    const room = Math.max(8, max - u.origin.length - 1);
+    return `${u.origin}${rest.slice(0, room)}…`;
+  } catch {
+    return `${url.slice(0, max - 1)}…`;
+  }
+}
+
 // One-line summary of a Step for the editor list. Works on the loose payload
 // shape so an unknown key or an odd stored value still renders something.
 export function summarizeStep(kind: string, p: Record<string, unknown>): string {

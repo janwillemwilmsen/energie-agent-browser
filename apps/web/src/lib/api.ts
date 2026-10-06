@@ -110,8 +110,8 @@ export interface CompareRunsResult {
 }
 
 // Which browser the session daemon drives. Mirrors the server's BackendSchema
-// (agentBrowser/backend.ts); secrets come back redacted as `••••xxxx`, and
-// sending that hint back on save means "keep the stored value".
+// (agentBrowser/backend.ts). Secrets come back in full — the admin page is
+// the owner's own, behind the app login — and are encrypted at rest.
 export type BrowserBackend =
   | { kind: 'local'; executablePath: string }
   | { kind: 'cdp'; url: string; token: string }
@@ -123,16 +123,49 @@ export type BrowserBackend =
       ttlMs: number;
       stealth: boolean;
     }
-  | { kind: 'browserbase'; apiKey: string };
+  | { kind: 'browserbase'; apiKey: string }
+  | {
+      kind: 'kernel';
+      apiKey: string;
+      headless: boolean;
+      stealth: boolean;
+      timeoutSeconds: number;
+      profileName: string;
+      profileSaveChanges: boolean;
+    };
 export type BrowserBackendKind = BrowserBackend['kind'];
 
+// Every backend's settings plus which one is active. Inactive backends may be
+// half-filled (empty URL/key); only the active one is validated on save.
+export interface BrowserStealth {
+  enabled: boolean;
+  userAgent: string;
+  /** Whitespace-separated Chromium flags. */
+  launchArgs: string;
+  ignoreDefaultArgs: string;
+  initScript: string;
+}
+
+export interface BrowserConfig {
+  active: BrowserBackendKind;
+  backends: { [K in BrowserBackendKind]: Extract<BrowserBackend, { kind: K }> };
+  stealth: BrowserStealth;
+}
+
 export interface BrowserSettings {
-  backend: BrowserBackend;
+  config: BrowserConfig;
   source: 'setting' | 'env';
-  envBackend: BrowserBackend;
-  cloudPrefill: Partial<Extract<BrowserBackend, { kind: 'browserless-cloud' }>>;
-  browserbasePrefill: { apiKey?: string };
-  stealthEnabled: boolean;
+  envConfig: BrowserConfig;
+}
+
+// What a hosted provider reports about the account behind the stored key.
+export interface ProviderAccount {
+  kind: BrowserBackendKind;
+  checkedAt: string;
+  ok: boolean;
+  dashboardUrl: string | null;
+  facts: Array<{ label: string; value: string }>;
+  error: string | null;
 }
 
 // The active backend plus a reachability probe. `remote` is null for the
@@ -692,11 +725,13 @@ export const api = {
   browserHealth: () =>
     req<BrowserHealth>('/api/browser/health'),
   getBrowserSettings: () => req<BrowserSettings>('/api/admin/browser'),
-  saveBrowserSettings: (backend: BrowserBackend | null) =>
-    req<{ backend: BrowserBackend; source: 'setting' | 'env' }>('/api/admin/browser', {
+  saveBrowserSettings: (config: BrowserConfig | null) =>
+    req<{ config: BrowserConfig; source: 'setting' | 'env' }>('/api/admin/browser', {
       method: 'PUT',
-      body: JSON.stringify({ backend }),
+      body: JSON.stringify({ config }),
     }),
+  browserAccount: (kind: BrowserBackendKind) =>
+    req<ProviderAccount>(`/api/admin/browser/account/${encodeURIComponent(kind)}`),
   testBrowser: () => req<BrowserTestResult>('/api/admin/browser/test', { method: 'POST' }),
   browserDoctor: () => req<DoctorResult>('/api/admin/browser/doctor'),
   startBrowserInstall: (withDeps: boolean) =>

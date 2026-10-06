@@ -1,69 +1,79 @@
-import { useEffect, useState } from 'react';
+﻿import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   api,
   type BrowserBackend,
   type BrowserBackendKind,
+  type BrowserConfig,
   type BrowserHealth,
   type BrowserSettings,
+  type BrowserStealth,
   type BrowserTestResult,
   type DoctorResult,
   type InstallJob,
+  type ProviderAccount,
 } from '../lib/api.js';
 import { useResource, usePolling } from '../lib/resource.js';
 
 // Admin → Browser: pick which browser the agent-browser session daemon drives
-// (local install, a self-hosted browserless over CDP, or browserless.io via
-// agent-browser's provider), check that it works, and install the local one.
-// The choice is stored server-side and applies to the next bootstrap — Save
+// (local install, a self-hosted browserless over CDP, browserless.io,
+// Browserbase or Kernel through agent-browser's providers), check that it
+// works, and install the local one. Every backend's settings are shown and
+// saved together — the radio only picks the active one — and live in the
+// database (encrypted), so switching never means retyping credentials. Save
 // closes the shared session, so scenarios/terminal pick it up immediately.
+
+const KINDS: BrowserBackendKind[] = ['local', 'cdp', 'browserless-cloud', 'browserbase', 'kernel'];
 
 const KIND_LABEL: Record<BrowserBackendKind, string> = {
   local: 'Local browser',
-  cdp: 'Browserless over CDP (self-hosted or browserless.io)',
+  cdp: 'Browserless over CDP — your own instance (token) or browserless.io (API key)',
   'browserless-cloud': 'browserless.io via agent-browser provider',
   browserbase: 'Browserbase',
+  kernel: 'Kernel',
 };
 
 const KIND_HELP: Record<BrowserBackendKind, string> = {
-  local: "agent-browser's own installed Chrome (`agent-browser install`). Runs on this server; Chromium launch args come from STEALTH_LAUNCH_ARGS.",
-  cdp: 'The daemon runs `connect wss://host/chromium?token=…`. Works with your own instance (wss://browserless.chatle.nl + its token) and with browserless.io (wss://production-ams.browserless.io + your API key). Gets the full stealth set: launch args, user agent, init script. Recommended for browserless.io.',
+  local: "agent-browser's own installed Chrome (`agent-browser install`). Runs on this server; Chromium launch args come from the Stealth section below.",
+  cdp: 'The daemon connects straight to a browserless Chrome over CDP (`connect wss://host/chromium?token=…`). Two ways to fill it in: a self-hosted browserless (its URL + the TOKEN it runs with), or browserless.io (a region URL + your API key — the key goes in the same token field). Gets the full stealth set: launch args, ignore-default-args, user agent, init script. This is the recommended way to use browserless.io.',
   'browserless-cloud': "browserless.io through agent-browser's built-in provider (REST session API, https:// URL). Uses browserless.io's own stealth; launch args and the user-agent override do not apply, and the target/ref handling has proven flaky in scenario runs — prefer the CDP option above.",
   browserbase: "Browserbase's hosted browsers through agent-browser's provider. Only the API key is needed (the project is read from the key). Launch args and the user-agent override do not apply.",
+  kernel: "Kernel's hosted browsers (onkernel.com) through agent-browser's provider. Optionally loads a saved Kernel profile (cookies, logins) and can write changes back to it. Launch args and the user-agent override do not apply.",
+};
+
+// Where each hosted provider's account lives (usage, billing, keys) and the
+// agent-browser page for its provider. Shown next to the radio regardless of
+// whether a key is stored. CDP borrows the browserless.io links when its URL
+// points there (the server tells us via the account check).
+const PROVIDER_LINKS: Partial<Record<BrowserBackendKind, { dashboard: string; keys?: string; docs: string }>> = {
+  'browserless-cloud': {
+    dashboard: 'https://account.browserless.io/',
+    docs: 'https://agent-browser.dev/providers/browserless',
+  },
+  browserbase: {
+    dashboard: 'https://www.browserbase.com/overview',
+    keys: 'https://www.browserbase.com/settings',
+    docs: 'https://agent-browser.dev/providers/browserbase',
+  },
+  kernel: {
+    dashboard: 'https://dashboard.onkernel.com/',
+    docs: 'https://agent-browser.dev/providers/kernel',
+  },
 };
 
 const INSTALL_POLL_MS = 1_500;
 const HEALTH_POLL_MS = 15_000;
 
-function defaultFor(kind: BrowserBackendKind, s: BrowserSettings | null): BrowserBackend {
-  switch (kind) {
-    case 'local':
-      return { kind, executablePath: '' };
-    case 'cdp':
-      return { kind, url: 'wss://', token: '' };
-    case 'browserless-cloud':
-      return {
-        kind,
-        apiKey: '',
-        apiUrl: 'https://production-sfo.browserless.io',
-        browserType: 'chromium',
-        ttlMs: 300_000,
-        stealth: true,
-        ...s?.cloudPrefill,
-      };
-    case 'browserbase':
-      return { kind, apiKey: s?.browserbasePrefill?.apiKey ?? '' };
-  }
-}
-
 export function AdminBrowser() {
   const [settings, setSettings] = useState<BrowserSettings | null>(null);
-  const [draft, setDraft] = useState<BrowserBackend | null>(null);
+  const [draft, setDraft] = useState<BrowserConfig | null>(null);
   const [busy, setBusy] = useState<'save' | 'test' | 'doctor' | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [test, setTest] = useState<BrowserTestResult | null>(null);
   const [doctor, setDoctor] = useState<DoctorResult | null>(null);
+  // Per backend: what its provider says about the stored key (null = not asked yet).
+  const [accounts, setAccounts] = useState<Partial<Record<BrowserBackendKind, ProviderAccount | 'loading'>>>({});
 
   const { data: health, refresh: refreshHealth, refreshing: checking } = useResource(
     () => api.browserHealth(),
@@ -71,36 +81,51 @@ export function AdminBrowser() {
   );
   usePolling(refreshHealth, HEALTH_POLL_MS);
 
+  const checkAccount = useCallback(async (kind: BrowserBackendKind) => {
+    setAccounts((a) => ({ ...a, [kind]: 'loading' }));
+    try {
+      const r = await api.browserAccount(kind);
+      setAccounts((a) => ({ ...a, [kind]: r }));
+    } catch (e: any) {
+      setAccounts((a) => ({ ...a, [kind]: { kind, ok: false, checkedAt: new Date().toISOString(), dashboardUrl: null, facts: [], error: e?.message ?? String(e) } }));
+    }
+  }, []);
+
+  // Ask each hosted provider about its account once the stored config is
+  // known — only where a key/URL is stored, so an unconfigured backend doesn't
+  // produce a pointless error line.
+  const checkConfiguredAccounts = useCallback((cfg: BrowserConfig) => {
+    for (const kind of KINDS) {
+      const b = cfg.backends[kind];
+      const configured =
+        (b.kind === 'cdp' && !!b.url) ||
+        ((b.kind === 'browserless-cloud' || b.kind === 'browserbase' || b.kind === 'kernel') && !!b.apiKey);
+      if (configured) void checkAccount(kind);
+    }
+  }, [checkAccount]);
+
   async function load() {
     try {
       const s = await api.getBrowserSettings();
       setSettings(s);
-      setDraft(s.backend);
+      setDraft(s.config);
+      checkConfiguredAccounts(s.config);
     } catch (e: any) {
       setError(e?.message ?? String(e));
     }
   }
-  useEffect(() => { void load(); }, []);
+  useEffect(() => { void load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Switching kind starts from that kind's defaults (or the stored backend if
-  // that's the one being switched back to), so half-typed fields don't leak
-  // between kinds.
-  function pickKind(kind: BrowserBackendKind) {
-    if (settings?.backend.kind === kind) setDraft(settings.backend);
-    else setDraft(defaultFor(kind, settings));
-    setTest(null);
-  }
-
-  async function save(backend: BrowserBackend | null) {
+  async function save(cfg: BrowserConfig | null) {
     setBusy('save');
     setNotice(null);
     setError(null);
     setTest(null);
     try {
-      const r = await api.saveBrowserSettings(backend);
+      const r = await api.saveBrowserSettings(cfg);
       setNotice(
-        backend
-          ? `Saved — the next session uses ${KIND_LABEL[r.backend.kind]}. The shared session was closed; run a test or bootstrap from the Terminal.`
+        cfg
+          ? `Saved — the next session uses ${KIND_LABEL[r.config.active]}. The shared session was closed; run a test or bootstrap from the Terminal.`
           : 'Override removed — back to the .env configuration.',
       );
       await load();
@@ -138,7 +163,11 @@ export function AdminBrowser() {
     }
   }
 
-  const dirty = settings && draft && JSON.stringify(draft) !== JSON.stringify(settings.backend);
+  const dirty = settings && draft && JSON.stringify(draft) !== JSON.stringify(settings.config);
+
+  function setBackend<K extends BrowserBackendKind>(kind: K, backend: BrowserConfig['backends'][K]) {
+    setDraft((d) => (d ? { ...d, backends: { ...d.backends, [kind]: backend } } : d));
+  }
 
   return (
     <section>
@@ -147,6 +176,7 @@ export function AdminBrowser() {
       <p className="muted">
         Which browser the <code>agent-browser</code> session daemon drives for scenarios, preflights,
         the live preview and the terminal. Saving applies to the next bootstrap — no restart needed.
+        Credentials are stored in the database, encrypted at rest (<code>DATA_DIR/secrets-key</code> or <code>SECRETS_KEY</code>).
       </p>
 
       {error && <p className="error">{error}</p>}
@@ -155,34 +185,40 @@ export function AdminBrowser() {
       <StatusPanel health={health} checking={checking} onRefresh={refreshHealth} />
 
       {settings && draft && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 720, marginTop: 16 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 760, marginTop: 16 }}>
           <div>
             <strong>Active source:</strong>{' '}
             {settings.source === 'setting' ? (
-              <>admin override (this page)</>
+              <>admin setting (this page)</>
             ) : (
               <>
-                <code>.env</code> (<code>BROWSER_MODE={settings.envBackend.kind === 'local' ? 'local' : 'browserless'}</code>)
+                <code>.env</code> (<code>BROWSER_MODE={settings.envConfig.active === 'local' ? 'local' : 'browserless'}</code>) — nothing saved here yet; the fields below are prefilled from it
               </>
             )}
           </div>
 
-          <fieldset style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: 12 }}>
-            <legend>Backend</legend>
-            {(Object.keys(KIND_LABEL) as BrowserBackendKind[]).map((k) => (
-              <label key={k} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', cursor: 'pointer' }}>
-                <input type="radio" name="kind" checked={draft.kind === k} onChange={() => pickKind(k)} />
-                <span>
-                  <strong>{KIND_LABEL[k]}</strong>
-                  {settings.backend.kind === k && <span className="muted"> (active)</span>}
-                  <br />
-                  <span className="muted" style={{ fontSize: 12 }}>{KIND_HELP[k]}</span>
-                </span>
-              </label>
+          <fieldset className="bb-kinds">
+            <legend>Backend — the radio picks the active one; every backend's settings are saved together</legend>
+            {KINDS.map((k) => (
+              <BackendSection
+                key={k}
+                kind={k}
+                active={draft.active === k}
+                stored={settings.config.active === k}
+                backend={draft.backends[k]}
+                account={accounts[k] ?? null}
+                onPick={() => { setDraft({ ...draft, active: k }); setTest(null); }}
+                onChange={(b) => setBackend(k, b as BrowserConfig['backends'][typeof k])}
+                onCheckAccount={() => void checkAccount(k)}
+              />
             ))}
           </fieldset>
 
-          <BackendFields draft={draft} onChange={setDraft} />
+          <StealthSection
+            stealth={draft.stealth}
+            envStealth={settings.envConfig.stealth}
+            onChange={(stealth) => setDraft({ ...draft, stealth })}
+          />
 
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <button onClick={() => void save(draft)} disabled={busy !== null || !dirty}>
@@ -198,12 +234,12 @@ export function AdminBrowser() {
             <button
               onClick={() => void save(null)}
               disabled={busy !== null || settings.source !== 'setting'}
-              title="Remove the override and fall back to .env"
+              title="Remove everything saved here and fall back to .env"
             >
               Reset to .env
             </button>
           </div>
-          {dirty && <p className="muted" style={{ fontSize: 12, margin: 0 }}>Unsaved changes — Test runs against the saved backend.</p>}
+          {dirty && <p className="muted" style={{ fontSize: 12, margin: 0 }}>Unsaved changes — Test and the account checks use the saved settings.</p>}
         </div>
       )}
 
@@ -224,6 +260,133 @@ export function AdminBrowser() {
       </div>
       {doctor && <DoctorReport result={doctor} />}
     </section>
+  );
+}
+
+// One backend: its radio, help, fields (always visible and editable), and
+// what its provider says about the stored account.
+function BackendSection({
+  kind, active, stored, backend, account, onPick, onChange, onCheckAccount,
+}: {
+  kind: BrowserBackendKind;
+  active: boolean;
+  stored: boolean;
+  backend: BrowserBackend;
+  account: ProviderAccount | 'loading' | null;
+  onPick: () => void;
+  onChange: (b: BrowserBackend) => void;
+  onCheckAccount: () => void;
+}) {
+  // The provider's own site: where the key comes from and where usage/billing
+  // lives. For CDP the server knows whether the URL points at browserless.io.
+  const dashboard =
+    kind === 'cdp'
+      ? (account && account !== 'loading' && account.dashboardUrl ? PROVIDER_LINKS['browserless-cloud'] : null)
+      : PROVIDER_LINKS[kind];
+  return (
+    <div className={`bb-kind${active ? ' bb-kind-active' : ''}`}>
+      <label className="bb-kind-head">
+        <input type="radio" name="kind" checked={active} onChange={onPick} />
+        <strong>{KIND_LABEL[kind]}</strong>
+        {stored && <span className="muted">(active)</span>}
+        {dashboard && (
+          <span className="bb-kind-links" onClick={(e) => e.stopPropagation()}>
+            <a href={dashboard.dashboard} target="_blank" rel="noreferrer" title="Usage, billing, API keys">Dashboard ↗</a>
+            {dashboard.keys && <a href={dashboard.keys} target="_blank" rel="noreferrer" title="Create or copy an API key">API keys ↗</a>}
+            <a href={dashboard.docs} target="_blank" rel="noreferrer" title="agent-browser provider docs">Docs ↗</a>
+          </span>
+        )}
+      </label>
+      <p className="muted bb-kind-help">{KIND_HELP[kind]}</p>
+      <BackendFields draft={backend} onChange={onChange} />
+      {kind !== 'local' && <AccountLine account={account} onCheck={onCheckAccount} />}
+    </div>
+  );
+}
+
+// Plan / concurrency / usage as reported by the provider's API for the STORED
+// key. None of them exposes a remaining budget over the API — that is what
+// the dashboard link is for.
+function AccountLine({ account, onCheck }: { account: ProviderAccount | 'loading' | null; onCheck: () => void }) {
+  return (
+    <div className="bb-account">
+      <span className="muted">Account:</span>{' '}
+      {account === 'loading' ? (
+        <span className="muted">checking…</span>
+      ) : !account ? (
+        <span className="muted">not checked</span>
+      ) : account.ok ? (
+        <span className="bb-account-facts">
+          {account.facts.map((f) => (
+            <span key={f.label}><span className="muted">{f.label}</span> {f.value}</span>
+          ))}
+        </span>
+      ) : (
+        <span className="error">{account.error}</span>
+      )}
+      <button type="button" onClick={onCheck} disabled={account === 'loading'} className="bb-account-check">
+        {account && account !== 'loading' ? 'Refresh' : 'Check'}
+      </button>
+    </div>
+  );
+}
+
+const UA_LIST_URL = 'https://www.whatismybrowser.com/guides/the-latest-user-agent/chrome';
+
+// Browser-fingerprint stealth, saved with the backends. Each knob says which
+// backends actually honour it — that is a property of agent-browser and the
+// providers, not of this page.
+function StealthSection({ stealth, envStealth, onChange }: { stealth: BrowserStealth; envStealth: BrowserStealth; onChange: (s: BrowserStealth) => void }) {
+  const set = <K extends keyof BrowserStealth>(key: K, value: BrowserStealth[K]) => onChange({ ...stealth, [key]: value });
+  const field = (label: string, applies: string, input: JSX.Element, hint?: JSX.Element | string) => (
+    <label className="bb-stealth-field">
+      <span>
+        {label} <span className="muted bb-stealth-applies">· {applies}</span>
+      </span>
+      {input}
+      {hint && <span className="muted" style={{ fontSize: 12 }}>{hint}</span>}
+    </label>
+  );
+  const mono = { fontFamily: 'Consolas, monospace', fontSize: 12 } as const;
+  return (
+    <fieldset className="bb-kinds bb-stealth" disabled={false}>
+      <legend>Stealth — fingerprint tweaks applied to the active backend (where it supports them)</legend>
+      <label style={{ display: 'flex', gap: 8, alignItems: 'center', cursor: 'pointer' }}>
+        <input type="checkbox" checked={stealth.enabled} onChange={(e) => set('enabled', e.target.checked)} />
+        <strong>Enabled</strong>
+        <span className="muted" style={{ fontSize: 12 }}>off = none of the settings below reach the browser</span>
+      </label>
+      <div className="bb-fields" style={{ opacity: stealth.enabled ? 1 : 0.5 }}>
+        {field(
+          'User agent',
+          'local, CDP; providers set it but have ignored it',
+          <input value={stealth.userAgent} onChange={(e) => set('userAgent', e.target.value)} placeholder={envStealth.userAgent} style={mono} />,
+          <>
+            Keep it close to a current Chrome:{' '}
+            <a href={UA_LIST_URL} target="_blank" rel="noreferrer">latest Chrome user agents ↗</a>.
+            Empty = no override (the browser's own UA).
+          </>,
+        )}
+        {field(
+          'Launch args',
+          'local (AGENT_BROWSER_ARGS), CDP (browserless launch query); not providers',
+          <textarea value={stealth.launchArgs} onChange={(e) => set('launchArgs', e.target.value)} rows={3} placeholder={envStealth.launchArgs} style={mono} />,
+          'Whitespace-separated Chromium flags; a value may contain commas (--disable-features=A,B). Local adds --no-sandbox and --disable-dev-shm-usage itself.',
+        )}
+        {field(
+          'Ignore default args',
+          'CDP (browserless) only — agent-browser has no equivalent for local',
+          <input value={stealth.ignoreDefaultArgs} onChange={(e) => set('ignoreDefaultArgs', e.target.value)} placeholder={envStealth.ignoreDefaultArgs} style={mono} />,
+          'Default Chromium flags browserless should drop, e.g. --enable-automation (the flag that triggers the "controlled by automated software" bar and navigator.webdriver).',
+        )}
+        {field(
+          'Init script path',
+          'every backend (injected into each page by agent-browser)',
+          <input value={stealth.initScript} onChange={(e) => set('initScript', e.target.value)} placeholder={envStealth.initScript} style={mono} />,
+          'A JavaScript file on this server, run before any page script (navigator.webdriver, plugins, languages…). Empty = none.',
+        )}
+      </div>
+    </fieldset>
   );
 }
 
@@ -249,11 +412,18 @@ function BackendFields({ draft, onChange }: { draft: BrowserBackend; onChange: (
       <button type="button" onClick={() => setReveal((r) => !r)}>{reveal ? 'Hide' : 'Show'}</button>
     </div>
   );
+  const check = (label: string, checked: boolean, set: (v: boolean) => void, title?: string) => (
+    <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13 }} title={title}>
+      <input type="checkbox" checked={checked} onChange={(e) => set(e.target.checked)} />
+      {label}
+    </label>
+  );
+  const KEEP_HINT = 'Stored encrypted; Show reveals it.';
 
   switch (draft.kind) {
     case 'local':
       return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div className="bb-fields">
           {field(
             'Executable path (optional)',
             <input
@@ -265,42 +435,54 @@ function BackendFields({ draft, onChange }: { draft: BrowserBackend; onChange: (
           )}
         </div>
       );
-    case 'cdp':
+    case 'cdp': {
+      // Same wire protocol either way; what differs is where the secret
+      // comes from, so the labels follow the URL.
+      const cloud = /browserless\.io/i.test(draft.url);
       return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div className="bb-fields">
+          <div className="bb-cdp-which">
+            <span className={cloud ? '' : 'bb-cdp-on'}>🏠 Self-hosted browserless: <code>wss://your-host</code> + the <code>TOKEN</code> it was started with</span>
+            <span className={cloud ? 'bb-cdp-on' : ''}>☁️ browserless.io: <code>wss://production-sfo.browserless.io</code> (or -lon / -ams) + your API key</span>
+          </div>
           {field(
             'WebSocket URL',
             <input
               value={draft.url}
               onChange={(e) => onChange({ ...draft, url: e.target.value })}
-              placeholder="wss://browserless.chatle.nl"
+              placeholder="wss://browserless.chatle.nl  or  wss://production-ams.browserless.io"
             />,
-            'The host only — /chromium and ?token= are added automatically (browserless v2).',
+            `The host only — /chromium and ?token= are added automatically (browserless v2).${draft.url ? (cloud ? ' → browserless.io detected.' : ' → treated as self-hosted.') : ''}`,
           )}
           {field(
-            'Token',
-            secret(draft.token, (token) => onChange({ ...draft, token }), 'the TOKEN your browserless was started with'),
-            'A value starting with •••• is the stored token; leave it to keep it.',
+            cloud ? 'API key (browserless.io)' : 'Token (self-hosted)',
+            secret(
+              draft.token,
+              (token) => onChange({ ...draft, token }),
+              cloud ? 'from account.browserless.io' : 'the TOKEN env var your browserless container was started with',
+            ),
+            `${cloud ? 'Sent as ?token= like a self-hosted token.' : 'Sent as ?token= on the CDP URL.'} ${KEEP_HINT}`,
           )}
         </div>
       );
+    }
     case 'browserbase':
       return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div className="bb-fields">
           {field(
             'API key',
             secret(draft.apiKey, (apiKey) => onChange({ ...draft, apiKey }), 'from the Browserbase dashboard'),
-            'A value starting with •••• is the stored key; leave it to keep it.',
+            KEEP_HINT,
           )}
         </div>
       );
     case 'browserless-cloud':
       return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div className="bb-fields">
           {field(
             'API key',
             secret(draft.apiKey, (apiKey) => onChange({ ...draft, apiKey }), 'from the browserless.io dashboard'),
-            'A value starting with •••• is the stored key; leave it to keep it.',
+            KEEP_HINT,
           )}
           {field(
             'API URL',
@@ -333,14 +515,49 @@ function BackendFields({ draft, onChange }: { draft: BrowserBackend; onChange: (
                 style={{ width: 120 }}
               />,
             )}
-            <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13 }}>
+            {check('Stealth', draft.stealth, (stealth) => onChange({ ...draft, stealth }))}
+          </div>
+        </div>
+      );
+    case 'kernel':
+      return (
+        <div className="bb-fields">
+          {field(
+            'API key',
+            secret(draft.apiKey, (apiKey) => onChange({ ...draft, apiKey }), 'from the Kernel dashboard'),
+            KEEP_HINT,
+          )}
+          <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+            {field(
+              'Session timeout (s)',
               <input
-                type="checkbox"
-                checked={draft.stealth}
-                onChange={(e) => onChange({ ...draft, stealth: e.target.checked })}
-              />
-              Stealth
-            </label>
+                type="number"
+                min={10}
+                step={10}
+                value={draft.timeoutSeconds}
+                onChange={(e) => onChange({ ...draft, timeoutSeconds: Number(e.target.value) || 300 })}
+                style={{ width: 120 }}
+              />,
+            )}
+            {check('Headless', draft.headless, (headless) => onChange({ ...draft, headless }), 'KERNEL_HEADLESS')}
+            {check('Stealth', draft.stealth, (stealth) => onChange({ ...draft, stealth }), 'KERNEL_STEALTH — bot-detection evasion on their side')}
+          </div>
+          <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+            {field(
+              'Profile name (optional)',
+              <input
+                value={draft.profileName}
+                onChange={(e) => onChange({ ...draft, profileName: e.target.value })}
+                placeholder="an existing Kernel browser profile"
+              />,
+              'Loads that profile (cookies, logins) into every session. Create profiles in the Kernel dashboard.',
+            )}
+            {check(
+              'Save changes back to the profile',
+              draft.profileSaveChanges,
+              (profileSaveChanges) => onChange({ ...draft, profileSaveChanges }),
+              'KERNEL_PROFILE_SAVE_CHANGES — only applies when a profile name is set',
+            )}
           </div>
         </div>
       );

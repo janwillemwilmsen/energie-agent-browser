@@ -2,17 +2,21 @@ import { spawn } from 'node:child_process';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import {
-  BackendSchema,
+  BrowserConfigSchema,
   bootstrapCommand,
   cdpApiBase,
   cdpConnectUrl,
   currentBackend,
-  envBackend,
-  isRedacted,
-  redactBackend,
-  setBackendSetting,
+  currentConfig,
+  envConfig,
+  mergeSecrets,
+  setConfigSetting,
+  validateActive,
+  BACKEND_KINDS,
+  type BackendKind,
   type BrowserBackend,
 } from '../agentBrowser/backend.js';
+import { providerAccount } from '../agentBrowser/providerAccount.js';
 import {
   DEFAULT_SESSION,
   agentBrowserEnv,
@@ -30,11 +34,17 @@ import { config } from '../config.js';
 // GET  /api/browser/health           the active backend + a reachability
 //                                    probe; the Terminal/Network pages use it
 //                                    for their badge and bootstrap button.
-// GET  /api/admin/browser            the active backend (secrets redacted),
-//                                    its source, and the env fallback.
-// PUT  /api/admin/browser            save a backend (or null → back to env).
-//                                    Closes the shared session so the next
-//                                    bootstrap uses the new backend.
+// GET  /api/admin/browser            every backend's settings + which is active
+//                                    (secrets redacted), the source, and the
+//                                    env fallback.
+// PUT  /api/admin/browser            save the whole config (or null → back to
+//                                    env). Closes the shared session so the
+//                                    next bootstrap uses the new backend.
+// GET  /api/admin/browser/account/:kind
+//                                    what that provider says about the account
+//                                    behind the STORED key (plan, concurrency,
+//                                    usage) + its dashboard link. Any kind,
+//                                    not just the active one.
 // POST /api/admin/browser/test       end-to-end check: restart the shared
 //                                    session on the active backend and run a
 //                                    command in it.
@@ -147,47 +157,12 @@ let installJob: InstallJob | null = null;
 
 const InstallBody = z.object({ withDeps: z.boolean().default(false) });
 
-// PUT body: a backend, or null to drop the setting and fall back to env.
+// PUT body: the whole config, or null to drop the setting and fall back to env.
 // Secret fields may carry the redaction hint from GET, meaning "keep what's stored".
-const PutBody = z.object({ backend: BackendSchema.nullable() });
-
-// A redacted secret in the PUT body means "keep": the stored one when the kind
-// is unchanged, else the matching .env value (that's what the prefill showed).
-function mergeSecrets(next: BrowserBackend, prev: BrowserBackend): BrowserBackend {
-  if (next.kind === 'cdp' && isRedacted(next.token)) {
-    return { ...next, token: prev.kind === 'cdp' ? prev.token : (process.env.BROWSERLESS_TOKEN ?? '') };
-  }
-  if (next.kind === 'browserless-cloud' && isRedacted(next.apiKey)) {
-    const apiKey = prev.kind === 'browserless-cloud' ? prev.apiKey : (process.env.BROWSERLESS_API_KEY ?? '');
-    if (!apiKey) throw new Error('No stored browserless.io API key to keep — enter one');
-    return { ...next, apiKey };
-  }
-  if (next.kind === 'browserbase' && isRedacted(next.apiKey)) {
-    const apiKey = prev.kind === 'browserbase' ? prev.apiKey : (process.env.BROWSERBASE_API_KEY ?? '');
-    if (!apiKey) throw new Error('No stored Browserbase API key to keep — enter one');
-    return { ...next, apiKey };
-  }
-  return next;
-}
-
-const hint = (s: string) => `••••${s.slice(-4)}`;
-
-// The browserless.io provider vars a user may already have in .env — offered
-// as prefill so switching to that backend doesn't mean retyping them. The key
-// is redacted like every other secret; saving the hint keeps the env value.
-function cloudPrefillFromEnv(): Partial<Extract<BrowserBackend, { kind: 'browserless-cloud' }>> {
-  const e = process.env;
-  const out: Partial<Extract<BrowserBackend, { kind: 'browserless-cloud' }>> = {};
-  if (e.BROWSERLESS_API_KEY) out.apiKey = hint(e.BROWSERLESS_API_KEY);
-  if (e.BROWSERLESS_API_URL && /^https?:\/\//.test(e.BROWSERLESS_API_URL)) out.apiUrl = e.BROWSERLESS_API_URL;
-  if (e.BROWSERLESS_BROWSER_TYPE === 'chrome' || e.BROWSERLESS_BROWSER_TYPE === 'chromium') out.browserType = e.BROWSERLESS_BROWSER_TYPE;
-  if (e.BROWSERLESS_TTL && Number(e.BROWSERLESS_TTL) > 0) out.ttlMs = Number(e.BROWSERLESS_TTL);
-  if (e.BROWSERLESS_STEALTH) out.stealth = e.BROWSERLESS_STEALTH !== 'false';
-  return out;
-}
+const PutBody = z.object({ config: BrowserConfigSchema.nullable() });
 
 async function health() {
-  const { backend, source } = currentBackend();
+  const { backend, stealth, source } = currentBackend();
   const base = {
     kind: backend.kind,
     source,
@@ -201,7 +176,7 @@ async function health() {
       return { ...base, ok: true, latencyMs: 0, executablePath: backend.executablePath || null, remote: null };
     case 'cdp': {
       const r = await probeBrowserless(cdpApiBase(backend.url), backend.token);
-      const cdp = new URL(cdpConnectUrl(backend));
+      const cdp = new URL(cdpConnectUrl(backend, stealth));
       cdp.searchParams.delete('token');
       cdp.searchParams.delete('launch');
       return { ...base, ok: r.ok, latencyMs: r.latencyMs, executablePath: null, remote: { configuredUrl: cdp.toString(), docs: r.docs, version: r.version } };
@@ -211,6 +186,7 @@ async function health() {
       return { ...base, ok: r.ok, latencyMs: r.latencyMs, executablePath: null, remote: { configuredUrl: backend.apiUrl, docs: r.docs, version: r.version } };
     }
     case 'browserbase':
+    case 'kernel':
       // No cheap unauthenticated-ish probe (sessions are created per key via
       // their SDK); the Test button is the check.
       return { ...base, ok: true, latencyMs: 0, executablePath: null, remote: null };
@@ -220,34 +196,38 @@ async function health() {
 export async function adminBrowserRoutes(app: FastifyInstance) {
   app.get('/api/browser/health', async () => health());
 
+  // Secrets go to the page in full: this is the owner's own admin page behind
+  // the app login, and a masked key can be neither checked nor copied. (They
+  // stay encrypted at rest; `mergeSecrets` still accepts a •••• hint from an
+  // older page as "keep".)
   app.get('/api/admin/browser', async () => {
-    const { backend, source } = currentBackend();
-    return {
-      backend: redactBackend(backend),
-      source,
-      envBackend: redactBackend(envBackend()),
-      cloudPrefill: cloudPrefillFromEnv(),
-      browserbasePrefill: process.env.BROWSERBASE_API_KEY ? { apiKey: hint(process.env.BROWSERBASE_API_KEY) } : {},
-      stealthEnabled: config.stealth.enabled,
-    };
+    const { config: cfg, source } = currentConfig();
+    return { config: cfg, source, envConfig: envConfig() };
   });
 
   app.put('/api/admin/browser', async (req, reply) => {
-    const { backend } = PutBody.parse(req.body);
-    const prev = currentBackend().backend;
-    let merged: BrowserBackend | null = null;
-    try {
-      merged = backend ? mergeSecrets(backend, prev) : null;
-    } catch (e: any) {
-      return reply.code(400).send({ error: 'validation_error', message: e?.message ?? String(e) });
+    const { config: next } = PutBody.parse(req.body);
+    let merged = null;
+    if (next) {
+      merged = mergeSecrets(next, currentConfig().config);
+      // Inactive backends may be half-filled; the one about to be used may not.
+      const problem = validateActive(merged);
+      if (problem) return reply.code(400).send({ error: 'validation_error', message: problem });
     }
-    setBackendSetting(merged);
+    setConfigSetting(merged);
     // The live daemon was started against the old backend; drop it so the
     // next bootstrap (Test below, a scenario run, the Terminal button) picks
     // up the new one. Best-effort: nothing to close is fine.
     await closeSession(DEFAULT_SESSION).catch(() => undefined);
-    const now = currentBackend();
-    return { backend: redactBackend(now.backend), source: now.source };
+    const now = currentConfig();
+    return { config: now.config, source: now.source };
+  });
+
+  app.get<{ Params: { kind: string } }>('/api/admin/browser/account/:kind', async (req, reply) => {
+    const kind = req.params.kind as BackendKind;
+    if (!BACKEND_KINDS.includes(kind)) return reply.code(404).send({ error: 'not_found' });
+    const backend = currentConfig().config.backends[kind] as BrowserBackend;
+    return providerAccount(backend);
   });
 
   // End-to-end: a fresh shared-session daemon on the active backend, then a

@@ -54,8 +54,8 @@ function ptyEnv(): NodeJS.ProcessEnv {
     PATH: `${binDirs.join(pathSep)}${pathSep}${currentPath}`,
     AGENT_BROWSER_SESSION: DEFAULT_SESSION,
   };
-  const { backend } = currentBackend();
-  if (backend.kind === 'cdp') env.BROWSERLESS_CDP_URL = cdpConnectUrl(backend);
+  const { backend, stealth } = currentBackend();
+  if (backend.kind === 'cdp') env.BROWSERLESS_CDP_URL = cdpConnectUrl(backend, stealth);
   return env;
 }
 

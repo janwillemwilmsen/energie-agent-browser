@@ -357,6 +357,9 @@ button:hover { filter: brightness(1.1); }
   text-align: left;
 }
 .table a { color: var(--accent); text-decoration: none; }
+/* A scenario URL can be hundreds of characters with no break opportunity;
+   wrap it anywhere and cap the column so it never pushes the rest off-screen. */
+.scenario-url { max-width: 360px; overflow-wrap: anywhere; word-break: break-all; }
 
 .error { color: var(--error); }
 .muted { color: var(--muted); font-size: 13px; }
@@ -436,7 +439,9 @@ code { background: rgba(255,255,255,0.06); padding: 2px 4px; border-radius: 3px;
   transition: background 0.12s ease;
 }
 .step-list li:hover { background: rgba(255, 255, 255, 0.06); }
-.step-list .step-body { flex: 1; }
+/* min-width: 0 lets the flex child shrink below its content width, so a long
+   unbreakable value (a URL) wraps inside the row instead of widening it. */
+.step-list .step-body { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 /* Colored badge per step kind, so the different action types are
    distinguishable at a glance. */
 .step-kind {
@@ -867,6 +872,30 @@ code { background: rgba(255,255,255,0.06); padding: 2px 4px; border-radius: 3px;
 .bl-health-grid dt { color: var(--muted); }
 .bl-health-grid dd { margin: 0; }
 .bl-health-grid code { word-break: break-all; }
+
+/* Admin → Browser: one block per backend, radio + fields + account line. */
+.bb-kinds { display: flex; flex-direction: column; gap: 10px; padding: 12px; }
+.bb-kinds legend { font-size: 13px; color: var(--muted); }
+.bb-kind { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.bb-kind-active { border-color: var(--accent); }
+.bb-kind-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; cursor: pointer; }
+.bb-kind-head input[type='radio'] { width: auto; margin: 0; }
+.bb-kind-links { margin-left: auto; display: inline-flex; gap: 12px; font-size: 12px; }
+.bb-kind-links a { color: var(--accent); text-decoration: none; }
+.bb-kind-links a:hover { text-decoration: underline; }
+.bb-kind-help { margin: 0; font-size: 12px; }
+.bb-fields { display: flex; flex-direction: column; gap: 8px; }
+.bb-account { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; }
+.bb-account-facts { display: inline-flex; gap: 14px; flex-wrap: wrap; }
+.bb-account-check { padding: 2px 8px; font-size: 12px; }
+/* CDP: the two ways to fill it in; the one the URL matches lights up. */
+.bb-cdp-which { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--muted); }
+.bb-cdp-which .bb-cdp-on { color: var(--text); }
+.bb-cdp-which code { font-size: 11px; }
+.bb-stealth-field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.bb-stealth-applies { font-size: 12px; }
+.bb-stealth textarea { resize: vertical; }
+.bb-stealth a { color: var(--accent); }
 
 .preview-stream {
   border: 1px solid var(--border);

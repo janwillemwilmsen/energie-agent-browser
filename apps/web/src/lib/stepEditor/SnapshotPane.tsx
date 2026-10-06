@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { api, type A11yTree } from '../api.js';
 import { SnapshotPicker, type Pick } from '../SnapshotPicker.js';
 import type { StepStore } from './store.js';
+import { shortUrl } from './summarize.js';
 
 // Snapshot the live page and pick nodes to turn into Steps. Which pick buttons
 // a node offers follows from the kinds the caller allows.
@@ -85,7 +86,7 @@ export function SnapshotPane(props: SnapshotPaneProps) {
           disabled={snapshotting}
           title={`Navigate to ${defaultUrl}, then snapshot`}
         >
-          {snapshotting ? 'Snapshotting…' : label(defaultUrl)}
+          {snapshotting ? 'Snapshotting…' : label(shortUrl(defaultUrl))}
         </button>
       )}{' '}
       <button onClick={() => void takeSnapshot()} disabled={snapshotting} title="Snapshot the page the browser is on now">

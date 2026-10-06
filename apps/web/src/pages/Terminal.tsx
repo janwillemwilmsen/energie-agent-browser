@@ -6,6 +6,8 @@ import { useResource, usePolling } from '../lib/resource.js';
 
 const HEALTH_POLL_MS = 10_000;
 
+const PROVIDER_NAME = { 'browserless-cloud': 'browserless.io', browserbase: 'Browserbase', kernel: 'Kernel' } as const;
+
 export function Terminal() {
   const termRef = useRef<TerminalShellHandle | null>(null);
   const [openUrl, setOpenUrl] = useState('https://example.com');
@@ -33,8 +35,8 @@ export function Terminal() {
             The session connects to your browserless instance over{' '}
             <code>%BROWSERLESS_CDP_URL%</code>, which the shell exports from the configured URL + token.
           </>
-        ) : health?.kind === 'browserless-cloud' || health?.kind === 'browserbase' ? (
-          <>The session is created on {health.kind === 'browserbase' ? 'Browserbase' : 'browserless.io'} through agent-browser's provider; opening a page is what starts it.</>
+        ) : health?.kind === 'browserless-cloud' || health?.kind === 'browserbase' || health?.kind === 'kernel' ? (
+          <>The session is created on {PROVIDER_NAME[health.kind]} through agent-browser's provider; opening a page is what starts it.</>
         ) : (
           <>
             The session runs agent-browser's locally installed browser; opening a page is what launches it.
@@ -111,7 +113,8 @@ function BrowserHealthPanel({
   const label =
     health?.kind === 'cdp' ? 'browserless'
       : health?.kind === 'browserless-cloud' ? 'browserless.io'
-        : health?.kind === 'browserbase' ? 'browserbase' : 'browser';
+        : health?.kind === 'browserbase' ? 'browserbase'
+          : health?.kind === 'kernel' ? 'kernel' : 'browser';
   const badgeText =
     state === 'pending' ? 'checking…'
       : state === 'fail' ? 'unreachable'
