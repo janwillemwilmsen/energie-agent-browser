@@ -3,6 +3,29 @@ import { z } from 'zod';
 export const ViewportPreset = z.enum(['desktop', 'mobile', 'both']);
 export type ViewportPreset = z.infer<typeof ViewportPreset>;
 
+// The device profiles agent-browser's `set device <name>` knows (0.38.1; the
+// list lives in its binary, not its docs). Each sets viewport, scale factor,
+// touch and a matching user agent. Newest first; the older ones still work.
+export const DEVICE_NAMES = [
+  'iPhone 17',
+  'iPhone 16 Pro',
+  'iPhone 16',
+  'iPhone 15',
+  'iPhone 14',
+  'iPhone 12',
+  'iPad Pro',
+  'iPad Air',
+  'iPad',
+  'Pixel 9',
+  'Pixel 7',
+  'Pixel 5',
+  'Galaxy S25',
+  'Galaxy S21',
+] as const;
+export type DeviceName = (typeof DEVICE_NAMES)[number];
+/** What a 'mobile' viewport / mobile screenshot emulates unless a step picks a device. */
+export const DEFAULT_MOBILE_DEVICE: DeviceName = 'iPhone 14';
+
 // agent-browser's semantic locators (`agent-browser find <by> <value> …`):
 // Playwright-style getByRole / getByText / getByLabel / … resolved in the live
 // page by the browser tool itself, not against our snapshot of the a11y tree.
@@ -136,6 +159,9 @@ const StepScreenshot = z.object({
   // When 'mobile', the runner temporarily switches to the mobile device,
   // captures, then restores the run's viewport.
   viewport: z.enum(['mobile']).optional(),
+  // Which device the 'mobile' capture emulates (agent-browser `set device`).
+  // Absent → the default mobile device (DEFAULT_MOBILE_DEVICE).
+  device: z.enum(DEVICE_NAMES).optional(),
   // Overlay numbered labels on interactive elements (agent-browser --annotate).
   annotate: z.boolean().optional(),
   // Output format. png (default) is lossless; jpeg/webp are lossy but much

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { DEFAULT_MOBILE_DEVICE, DEVICE_NAMES } from '@eab/shared';
 import type { EditableStep } from './store.js';
 
 // Modal for the ✎ button on a step row. Screenshot steps get friendly fields —
@@ -24,6 +25,10 @@ export function StepEditModal({
   const [fullPage, setFullPage] = useState(initial.fullPage !== false);
   const [expandScrollers, setExpandScrollers] = useState(initial.expandScrollers === true);
   const [mobile, setMobile] = useState(initial.viewport === 'mobile');
+  // '' = the default mobile device; a name overrides it for this step.
+  const [device, setDevice] = useState<string>(
+    typeof initial.device === 'string' && (DEVICE_NAMES as readonly string[]).includes(initial.device) ? initial.device : '',
+  );
   const [annotate, setAnnotate] = useState(initial.annotate === true);
   const [format, setFormat] = useState<string>(
     initial.format === 'jpeg' || initial.format === 'jpg' ? 'jpeg' : initial.format === 'webp' ? 'webp' : 'png',
@@ -44,6 +49,7 @@ export function StepEditModal({
       const next: Record<string, unknown> = { ...initial, label: label.trim() || 'screenshot', fullPage };
       if (fullPage && expandScrollers) next.expandScrollers = true; else delete next.expandScrollers;
       if (mobile) next.viewport = 'mobile'; else delete next.viewport;
+      if (mobile && device) next.device = device; else delete next.device;
       if (annotate) next.annotate = true; else delete next.annotate;
       if (format === 'png') {
         delete next.format;
@@ -142,7 +148,23 @@ export function StepEditModal({
             <label style={row}>
               <input type="checkbox" checked={mobile} onChange={(e) => setMobile(e.target.checked)} />
               Mobile viewport (switch device, capture, switch back)
+              {mobile && !device && <span className="muted"> — {DEFAULT_MOBILE_DEVICE}</span>}
             </label>
+            {mobile && (
+              <label style={{ ...col, marginLeft: 22 }}>
+                <span>Device</span>
+                <select value={device} onChange={(e) => setDevice(e.target.value)}>
+                  <option value="">Default ({DEFAULT_MOBILE_DEVICE})</option>
+                  {DEVICE_NAMES.map((d) => (
+                    <option key={d} value={d}>{d}</option>
+                  ))}
+                </select>
+                <span className="muted" style={{ fontSize: 12 }}>
+                  agent-browser&apos;s built-in profiles: viewport, scale, touch and a matching user agent.
+                  Picking one overrides the default for this step only.
+                </span>
+              </label>
+            )}
             <label style={row}>
               <input type="checkbox" checked={annotate} onChange={(e) => setAnnotate(e.target.checked)} />
               Annotate interactive elements

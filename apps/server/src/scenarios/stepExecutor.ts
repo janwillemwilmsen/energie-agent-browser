@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import sharp from 'sharp';
-import { encodeSlot, slotStamp } from '@eab/shared';
+import { DEFAULT_MOBILE_DEVICE, encodeSlot, slotStamp } from '@eab/shared';
 import type { A11yNode, A11yTree, FindLocator, SelectorStrategy, StepPayload } from '@eab/shared';
 import type { AuthSelectors } from '../authSelectors.js';
 import { resolveSelector } from './selector.js';
@@ -133,7 +133,8 @@ export interface IndexedStep {
   step: StepPayload;
 }
 
-export const MOBILE_DEVICE = 'iPhone 14';
+/** The device a 'mobile' viewport emulates; a screenshot step may pick another. */
+export const MOBILE_DEVICE = DEFAULT_MOBILE_DEVICE;
 
 // Selector-resolution timing. Cookie banners and other JS-injected UI often
 // don't appear in the accessibility tree until a beat after navigation.
@@ -730,6 +731,8 @@ async function screenshot(
   // diff view). Otherwise it follows the run's current viewport.
   const mobileShot = step.viewport === 'mobile';
   const suffix = mobileShot ? 'mobile' : artifacts.viewport;
+  // The step may name the device; otherwise the run's mobile default.
+  const device = step.device ?? MOBILE_DEVICE;
   // png (default) is lossless; jpeg is captured natively by agent-browser;
   // webp is captured as png and post-converted with sharp below.
   const format = step.format ?? 'png';
@@ -754,8 +757,8 @@ async function screenshot(
     // Let the current layout settle, switch to the mobile device, let the
     // responsive reflow happen, then capture.
     await timing.sleep(50);
-    log(`> set device "${MOBILE_DEVICE}" (mobile screenshot)`);
-    await browser.run(['set', 'device', MOBILE_DEVICE], { timeoutMs: 15_000 });
+    log(`> set device "${device}" (mobile screenshot)`);
+    await browser.run(['set', 'device', device], { timeoutMs: 15_000 });
     await timing.sleep(50);
   }
 
