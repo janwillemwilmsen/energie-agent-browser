@@ -513,6 +513,8 @@ export const api = {
         | 'preflight_id'
         | 'preflight_mode'
         | 'record_enabled'
+        | 'step_scroll_into_view'
+        | 'step_settle_ms'
       >
     >,
   ) => req<Scenario>(`/api/scenarios/${id}`, { method: 'PUT', body: JSON.stringify(body) }),

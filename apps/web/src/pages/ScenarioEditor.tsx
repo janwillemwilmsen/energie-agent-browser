@@ -197,6 +197,8 @@ export function ScenarioEditor() {
       retry_wait_before_ms: number;
       retry_wait_after_ms: number;
       restart_on_failure: number;
+      step_scroll_into_view: number;
+      step_settle_ms: number;
     }>,
   ) {
     try {
@@ -473,7 +475,7 @@ export function ScenarioEditor() {
               className={`steps-raw-link${retryOpen ? ' active' : ''}`}
               aria-pressed={retryOpen}
               aria-expanded={retryOpen}
-              title={retryOpen ? 'Hide the retry / restart settings' : 'Show the per-step retry and whole-run restart settings'}
+              title={retryOpen ? 'Hide the retry / restart / settle settings' : 'Show the per-step retry, whole-run restart and step settle settings'}
               onClick={() => setRetryOpen((v) => !v)}
             >
               {retryOpen ? 'retries ✓' : 'retries'}
@@ -554,6 +556,32 @@ export function ScenarioEditor() {
                 onBlur={(e) => saveRetry({ restart_on_failure: clampInt(e.target.value) })}
               />
               <span>times</span>
+            </label>
+          </div>
+          {/* Settle policy: extra care around click/type/fill/select/check/
+              uncheck for pages where the browser's own waits aren't enough.
+              Both off by default so existing scenarios run unchanged. */}
+          <div className="retry-policy">
+            <span className="muted">Around each click / fill / type / select / check:</span>
+            <label title="Scroll the target element into view before acting on it (best-effort; a failed scroll never fails the step)">
+              <input
+                type="checkbox"
+                checked={!!data.step_scroll_into_view}
+                onChange={(e) => saveRetry({ step_scroll_into_view: e.target.checked ? 1 : 0 })}
+              />
+              <span>scroll into view first</span>
+            </label>
+            <label title="Pause this long after the action so the page can react before the next step (0 = off)">
+              <span>then wait</span>
+              <input
+                type="number"
+                min={0}
+                max={60000}
+                step={50}
+                defaultValue={data.step_settle_ms}
+                onBlur={(e) => saveRetry({ step_settle_ms: Math.min(60_000, clampInt(e.target.value)) })}
+              />
+              <span>ms</span>
             </label>
           </div>
           </>

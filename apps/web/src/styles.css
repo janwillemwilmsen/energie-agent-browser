@@ -431,6 +431,7 @@ code { background: rgba(255,255,255,0.06); padding: 2px 4px; border-radius: 3px;
   margin: 4px 0 12px;
 }
 .retry-policy label { display: inline-flex; align-items: center; gap: 4px; }
+.retry-policy input[type="checkbox"] { width: auto; }
 .retry-policy input {
   width: 64px;
   background: var(--bg);
