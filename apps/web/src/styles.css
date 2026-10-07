@@ -268,6 +268,18 @@ button.steps-raw-link.active { color: var(--accent); border-color: var(--accent)
 }
 
 /* Export / import scenarios (Admin → Export / import scenarios). */
+.io-search {
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 8px;
+  padding: 6px 10px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 14px;
+}
+.io-search:focus { border-color: var(--accent); outline: none; }
 .io-scenario-list {
   display: flex;
   flex-direction: column;
@@ -1178,6 +1190,27 @@ code { background: rgba(255,255,255,0.06); padding: 2px 4px; border-radius: 3px;
 .scenario-meta-summary:hover { color: var(--accent); }
 .scenario-meta-summary-name { font-weight: 600; font-size: 15px; }
 .scenario-meta-summary-hint { margin-left: auto; font-size: 12px; }
+.scenario-meta-summary-link { font-size: 12px; text-decoration: none; }
+.scenario-meta-summary-link:hover { color: var(--accent); text-decoration: underline; }
+/* /runs: the "one scenario's history" banner and the window footer. */
+.runs-scope { margin: 0 0 8px; font-size: 13px; }
+.runs-scope a { color: var(--accent); text-decoration: none; }
+/* Same panel look as the filter panel above and the compare bar below. */
+.runs-window {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  /* The filter panel ends with 24px and the compare bar starts with 8px;
+     pull up so all three panels sit 8px apart. */
+  margin: -16px 0 0;
+  padding: 8px 12px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.runs-window select { padding: 3px 6px; font-size: 13px; }
 .scenario-meta-dirty { background: rgba(245, 158, 11, 0.18); color: #fbbf24; }
 .scenario-meta[open] > .scenario-meta-summary { border-bottom: 1px solid var(--border); }
 .scenario-meta-form {

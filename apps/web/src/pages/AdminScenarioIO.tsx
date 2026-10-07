@@ -16,6 +16,9 @@ import { useResource } from '../lib/resource.js';
 
 export function AdminScenarioIO() {
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  // Narrows the export list; matches name, brand, type, URL or "#id". Selections
+  // outside the match are kept, so you can search-and-tick in several passes.
+  const [query, setQuery] = useState('');
   const [exportText, setExportText] = useState('');
   const [exporting, setExporting] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -41,8 +44,16 @@ export function AdminScenarioIO() {
       return next;
     });
   }
+  const q = query.trim().toLowerCase();
+  const shown = q
+    ? scenarios.filter((s) =>
+        [s.name, s.brand, s.type, s.url, `#${s.id}`].some((v) => v?.toLowerCase().includes(q)),
+      )
+    : scenarios;
+
+  // With a search active, "Select all" means "select all matches".
   function selectAll() {
-    setSelected(new Set(scenarios.map((s) => s.id)));
+    setSelected((cur) => new Set([...cur, ...shown.map((s) => s.id)]));
   }
   function selectNone() {
     setSelected(new Set());
@@ -135,9 +146,17 @@ export function AdminScenarioIO() {
         {/* ---- Export ---- */}
         <div>
           <h2>Export</h2>
+          <input
+            type="search"
+            className="io-search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search name, brand, type, URL or #id…"
+            aria-label="Search scenarios"
+          />
           <div className="actions" style={{ marginBottom: 8 }}>
-            <button onClick={selectAll} disabled={scenarios.length === 0}>
-              Select all
+            <button onClick={selectAll} disabled={shown.length === 0}>
+              {q ? `Select all ${shown.length} matching` : 'Select all'}
             </button>
             <button onClick={selectNone} disabled={selected.size === 0}>
               Clear
@@ -147,7 +166,7 @@ export function AdminScenarioIO() {
             </button>
           </div>
           <div className="io-scenario-list">
-            {scenarios.map((s) => (
+            {shown.map((s) => (
               <label key={s.id} className="io-scenario-row">
                 <input
                   type="checkbox"
@@ -161,7 +180,16 @@ export function AdminScenarioIO() {
               </label>
             ))}
             {scenarios.length === 0 && <p className="muted">No scenarios.</p>}
+            {scenarios.length > 0 && shown.length === 0 && (
+              <p className="muted">No scenarios match “{query.trim()}”.</p>
+            )}
           </div>
+          {q && shown.length < scenarios.length && (
+            <p className="muted" style={{ fontSize: 12, margin: '4px 0 0' }}>
+              {shown.length} of {scenarios.length} shown
+              {selected.size > 0 ? ` · ${selected.size} selected in total (including any hidden by the search)` : ''}
+            </p>
+          )}
 
           {exportText && (
             <>

@@ -351,6 +351,9 @@ export function Scenarios() {
                   >
                     {runningId === s.id ? 'Running…' : '▶ Run'}
                   </button>
+                  <Link to={`/runs?scenario=${s.id}`} className="btn-link" title="Every run of this scenario, however old">
+                    Runs
+                  </Link>
                   <Link to={`/scenarios/${s.id}/texts`} className="btn-link" title="Page texts saved by save text steps">
                     Texts
                   </Link>

@@ -458,7 +458,14 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ reset: opts.reset ?? false, testOnly: opts.testOnly ?? false }),
     }),
-  listRuns: () => req<Run[]>('/api/runs'),
+  /** Newest first; `limit` reaches further back, `scenarioId` narrows to one scenario. */
+  listRuns: (opts: { limit?: number; scenarioId?: number } = {}) => {
+    const q = new URLSearchParams();
+    if (opts.limit) q.set('limit', String(opts.limit));
+    if (opts.scenarioId) q.set('scenarioId', String(opts.scenarioId));
+    const qs = q.toString();
+    return req<Run[]>(`/api/runs${qs ? `?${qs}` : ''}`);
+  },
   getRun: (id: number) => req<Run & { pause: PausedRun | null }>(`/api/runs/${id}`),
   pausedRuns: () => req<PausedRun[]>('/api/runs/paused'),
   resumeRun: (id: number) => req<{ ok: true }>(`/api/runs/${id}/resume`, { method: 'POST' }),

@@ -309,7 +309,14 @@ export function ScenarioEditor() {
       >
         <summary className="scenario-meta-summary">
           <span className="scenario-meta-summary-name">{data.name}</span>
-        
+          <Link
+            to={`/runs?scenario=${scenarioId}`}
+            className="muted scenario-meta-summary-link"
+            onClick={(e) => e.stopPropagation()}
+            title="Every run of this scenario, however old"
+          >
+            runs
+          </Link>
           {dirty && <span className="tag scenario-meta-dirty">unsaved changes</span>}
           <span className="muted scenario-meta-summary-hint">
             {metaOpen ? 'hide settings' : 'show settings'}

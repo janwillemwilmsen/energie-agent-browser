@@ -1,0 +1,786 @@
+{
+  "_type": "eab.scenarios",
+  "version": 1,
+  "scenarios": [
+    {
+      "name": "Essent scroll homepage",
+      "url": "https://www.essent.nl",
+      "viewport_preset": "desktop",
+      "brand": "Essent",
+      "type": "Homepage",
+      "retries": 0,
+      "retry_wait_before_ms": 0,
+      "retry_wait_after_ms": 0,
+      "restart_on_failure": 0,
+      "preflight_name": "essent-cookie",
+      "steps": [
+        {
+          "position": 0,
+          "kind": "navigate",
+          "payload": {
+            "url": "https://www.essent.nl"
+          }
+        },
+        {
+          "position": 1,
+          "kind": "wait",
+          "payload": {
+            "ms": 500
+          }
+        },
+        {
+          "position": 2,
+          "kind": "record_start",
+          "payload": {}
+        },
+        {
+          "position": 3,
+          "kind": "wait",
+          "payload": {
+            "ms": 1000
+          }
+        },
+        {
+          "position": 4,
+          "kind": "scroll",
+          "payload": {
+            "toBottom": true
+          }
+        },
+        {
+          "position": 5,
+          "kind": "wait",
+          "payload": {
+            "ms": 250
+          }
+        },
+        {
+          "position": 6,
+          "kind": "scroll",
+          "payload": {
+            "toTop": true
+          }
+        },
+        {
+          "position": 7,
+          "kind": "wait",
+          "payload": {
+            "ms": 1000
+          }
+        },
+        {
+          "position": 8,
+          "kind": "record_stop",
+          "payload": {}
+        },
+        {
+          "position": 10,
+          "kind": "wait",
+          "payload": {
+            "ms": 1000
+          }
+        },
+        {
+          "position": 11,
+          "kind": "screenshot",
+          "payload": {
+            "label": "essent-homepage-iphone17",
+            "fullPage": true,
+            "viewport": "mobile",
+            "device": "iPhone 17"
+          }
+        },
+        {
+          "position": 12,
+          "kind": "wait",
+          "payload": {
+            "ms": 1000
+          }
+        },
+        {
+          "position": 13,
+          "kind": "screenshot",
+          "payload": {
+            "label": "essent-homepage-iphone16-pro",
+            "fullPage": true,
+            "viewport": "mobile",
+            "device": "iPhone 16 Pro"
+          }
+        },
+        {
+          "position": 14,
+          "kind": "wait",
+          "payload": {
+            "ms": 1000
+          }
+        },
+        {
+          "position": 15,
+          "kind": "screenshot",
+          "payload": {
+            "label": "essent-homepage-iphone16",
+            "fullPage": true,
+            "viewport": "mobile",
+            "device": "iPhone 16"
+          }
+        },
+        {
+          "position": 16,
+          "kind": "wait",
+          "payload": {
+            "ms": 1000
+          }
+        },
+        {
+          "position": 17,
+          "kind": "screenshot",
+          "payload": {
+            "label": "essent-homepage-iphone15",
+            "fullPage": true,
+            "viewport": "mobile",
+            "device": "iPhone 15"
+          }
+        },
+        {
+          "position": 18,
+          "kind": "wait",
+          "payload": {
+            "ms": 1000
+          }
+        },
+        {
+          "position": 19,
+          "kind": "screenshot",
+          "payload": {
+            "label": "essent-homepage-iphone14",
+            "fullPage": true,
+            "viewport": "mobile",
+            "device": "iPhone 14"
+          }
+        },
+        {
+          "position": 20,
+          "kind": "wait",
+          "payload": {
+            "ms": 1000
+          }
+        },
+        {
+          "position": 21,
+          "kind": "screenshot",
+          "payload": {
+            "label": "essent-homepage-iphone12",
+            "fullPage": true,
+            "viewport": "mobile",
+            "device": "iPhone 12"
+          }
+        },
+        {
+          "position": 22,
+          "kind": "wait",
+          "payload": {
+            "ms": 1000
+          }
+        },
+        {
+          "position": 23,
+          "kind": "screenshot",
+          "payload": {
+            "label": "essent-homepage-ipad-pro",
+            "fullPage": true,
+            "viewport": "mobile",
+            "device": "iPad Pro"
+          }
+        },
+        {
+          "position": 24,
+          "kind": "wait",
+          "payload": {
+            "ms": 1000
+          }
+        },
+        {
+          "position": 25,
+          "kind": "screenshot",
+          "payload": {
+            "label": "essent-homepage-ipad-air",
+            "fullPage": true,
+            "viewport": "mobile",
+            "device": "iPad Air"
+          }
+        },
+        {
+          "position": 26,
+          "kind": "wait",
+          "payload": {
+            "ms": 1000
+          }
+        },
+        {
+          "position": 27,
+          "kind": "screenshot",
+          "payload": {
+            "label": "essent-homepage-ipad",
+            "fullPage": true,
+            "viewport": "mobile",
+            "device": "iPad"
+          }
+        },
+        {
+          "position": 28,
+          "kind": "wait",
+          "payload": {
+            "ms": 1000
+          }
+        },
+        {
+          "position": 29,
+          "kind": "screenshot",
+          "payload": {
+            "label": "essent-homepage-pixel9",
+            "fullPage": true,
+            "viewport": "mobile",
+            "device": "Pixel 9"
+          }
+        },
+        {
+          "position": 30,
+          "kind": "wait",
+          "payload": {
+            "ms": 1000
+          }
+        },
+        {
+          "position": 31,
+          "kind": "screenshot",
+          "payload": {
+            "label": "essent-homepage-pixel7",
+            "fullPage": true,
+            "viewport": "mobile",
+            "device": "Pixel 7"
+          }
+        },
+        {
+          "position": 32,
+          "kind": "wait",
+          "payload": {
+            "ms": 1000
+          }
+        },
+        {
+          "position": 33,
+          "kind": "screenshot",
+          "payload": {
+            "label": "essent-homepage-pixel5",
+            "fullPage": true,
+            "viewport": "mobile",
+            "device": "Pixel 5"
+          }
+        },
+        {
+          "position": 34,
+          "kind": "wait",
+          "payload": {
+            "ms": 1000
+          }
+        },
+        {
+          "position": 35,
+          "kind": "screenshot",
+          "payload": {
+            "label": "essent-homepage-galaxyS25",
+            "fullPage": true,
+            "viewport": "mobile",
+            "device": "Galaxy S25"
+          }
+        },
+        {
+          "position": 36,
+          "kind": "wait",
+          "payload": {
+            "ms": 1000
+          }
+        },
+        {
+          "position": 37,
+          "kind": "screenshot",
+          "payload": {
+            "label": "essent-homepage-galaxy-s21",
+            "fullPage": true,
+            "viewport": "mobile",
+            "device": "Galaxy S21"
+          }
+        },
+        {
+          "position": 38,
+          "kind": "wait",
+          "payload": {
+            "ms": 1000
+          }
+        },
+        {
+          "position": 38,
+          "kind": "screenshot",
+          "payload": {
+            "label": "essent-home-iphone17-2x",
+            "fullPage": true,
+            "viewport": "mobile",
+            "device": "iPhone 17",
+            "zoom": 200
+          }
+        },
+        {
+          "position": 39,
+          "kind": "screenshot",
+          "payload": {
+            "label": "essent-home-iphone16pro-2",
+            "fullPage": true,
+            "viewport": "mobile",
+            "device": "iPhone 16 Pro",
+            "zoom": 200
+          }
+        },
+        {
+          "position": 40,
+          "kind": "screenshot",
+          "payload": {
+            "label": "essent-home-iphone16-2x",
+            "fullPage": true,
+            "viewport": "mobile",
+            "device": "iPhone 16",
+            "zoom": 200
+          }
+        },
+        {
+          "position": 41,
+          "kind": "screenshot",
+          "payload": {
+            "label": "essent-home-iphone15-2x",
+            "fullPage": true,
+            "viewport": "mobile",
+            "device": "iPhone 15",
+            "zoom": 200
+          }
+        },
+        {
+          "position": 42,
+          "kind": "screenshot",
+          "payload": {
+            "label": "essent-home-iphone14-2x",
+            "fullPage": true,
+            "viewport": "mobile",
+            "device": "iPhone 14",
+            "zoom": 200
+          }
+        },
+        {
+          "position": 43,
+          "kind": "screenshot",
+          "payload": {
+            "label": "essent-home-iphone12-2x",
+            "fullPage": true,
+            "viewport": "mobile",
+            "device": "iPhone 12",
+            "zoom": 200
+          }
+        },
+        {
+          "position": 44,
+          "kind": "screenshot",
+          "payload": {
+            "label": "essent-home-ipadpro-2x",
+            "fullPage": true,
+            "viewport": "mobile",
+            "device": "iPad Pro",
+            "zoom": 200
+          }
+        },
+        {
+          "position": 45,
+          "kind": "screenshot",
+          "payload": {
+            "label": "essent-home-ipadair-2x",
+            "fullPage": true,
+            "viewport": "mobile",
+            "device": "iPad Air",
+            "zoom": 200
+          }
+        },
+        {
+          "position": 46,
+          "kind": "screenshot",
+          "payload": {
+            "label": "essent-home-ipad-2x",
+            "fullPage": true,
+            "viewport": "mobile",
+            "device": "iPad",
+            "zoom": 200
+          }
+        },
+        {
+          "position": 47,
+          "kind": "screenshot",
+          "payload": {
+            "label": "essent-home-pixel9-2x",
+            "fullPage": true,
+            "viewport": "mobile",
+            "device": "Pixel 9",
+            "zoom": 200
+          }
+        },
+        {
+          "position": 48,
+          "kind": "screenshot",
+          "payload": {
+            "label": "essent-home-pixel7-2x",
+            "fullPage": true,
+            "viewport": "mobile",
+            "device": "Pixel 7",
+            "zoom": 200
+          }
+        },
+        {
+          "position": 49,
+          "kind": "screenshot",
+          "payload": {
+            "label": "essent-home-pixel5-2x",
+            "fullPage": true,
+            "viewport": "mobile",
+            "device": "Pixel 5",
+            "zoom": 200
+          }
+        },
+        {
+          "position": 50,
+          "kind": "screenshot",
+          "payload": {
+            "label": "essent-home-galaxy-s25-2x",
+            "fullPage": true,
+            "viewport": "mobile",
+            "device": "Galaxy S25",
+            "zoom": 200
+          }
+        },
+        {
+          "position": 51,
+          "kind": "screenshot",
+          "payload": {
+            "label": "essent-home-galaxy-s21-2x",
+            "fullPage": true,
+            "viewport": "mobile",
+            "device": "Galaxy S21",
+            "zoom": 200
+          }
+        },
+  		{
+          "position": 52,
+          "kind": "screenshot",
+          "payload": {
+            "label": "essent-home-iphone17-3x",
+            "fullPage": true,
+            "viewport": "mobile",
+            "device": "iPhone 17",
+            "zoom": 300
+          }
+        },
+        {
+          "position": 53,
+          "kind": "screenshot",
+          "payload": {
+            "label": "essent-home-iphone16pro-3X",
+            "fullPage": true,
+            "viewport": "mobile",
+            "device": "iPhone 16 Pro",
+            "zoom": 300
+          }
+        },
+        {
+          "position": 54,
+          "kind": "screenshot",
+          "payload": {
+            "label": "essent-home-iphone16-3x",
+            "fullPage": true,
+            "viewport": "mobile",
+            "device": "iPhone 16",
+            "zoom": 300
+          }
+        },
+        {
+          "position": 55,
+          "kind": "screenshot",
+          "payload": {
+            "label": "essent-home-iphone15-3x",
+            "fullPage": true,
+            "viewport": "mobile",
+            "device": "iPhone 15",
+            "zoom": 300
+          }
+        },
+        {
+          "position": 56,
+          "kind": "screenshot",
+          "payload": {
+            "label": "essent-home-iphone14-3x",
+            "fullPage": true,
+            "viewport": "mobile",
+            "device": "iPhone 14",
+            "zoom": 300
+          }
+        },
+        {
+          "position": 57,
+          "kind": "screenshot",
+          "payload": {
+            "label": "essent-home-iphone12-3x",
+            "fullPage": true,
+            "viewport": "mobile",
+            "device": "iPhone 12",
+            "zoom": 300
+          }
+        },
+        {
+          "position": 58,
+          "kind": "screenshot",
+          "payload": {
+            "label": "essent-home-ipadpro-3x",
+            "fullPage": true,
+            "viewport": "mobile",
+            "device": "iPad Pro",
+            "zoom": 300
+          }
+        },
+        {
+          "position": 59,
+          "kind": "screenshot",
+          "payload": {
+            "label": "essent-home-ipadair-3x",
+            "fullPage": true,
+            "viewport": "mobile",
+            "device": "iPad Air",
+            "zoom": 300
+          }
+        },
+        {
+          "position": 60,
+          "kind": "screenshot",
+          "payload": {
+            "label": "essent-home-ipad-3x",
+            "fullPage": true,
+            "viewport": "mobile",
+            "device": "iPad",
+            "zoom": 300
+          }
+        },
+        {
+          "position": 61,
+          "kind": "screenshot",
+          "payload": {
+            "label": "essent-home-pixel9-3x",
+            "fullPage": true,
+            "viewport": "mobile",
+            "device": "Pixel 9",
+            "zoom": 300
+          }
+        },
+        {
+          "position": 62,
+          "kind": "screenshot",
+          "payload": {
+            "label": "essent-home-pixel7-3x",
+            "fullPage": true,
+            "viewport": "mobile",
+            "device": "Pixel 7",
+            "zoom": 300
+          }
+        },
+        {
+          "position": 63,
+          "kind": "screenshot",
+          "payload": {
+            "label": "essent-home-pixel5-3x",
+            "fullPage": true,
+            "viewport": "mobile",
+            "device": "Pixel 5",
+            "zoom": 300
+          }
+        },
+        {
+          "position": 64,
+          "kind": "screenshot",
+          "payload": {
+            "label": "essent-home-galaxy-s25-3x",
+            "fullPage": true,
+            "viewport": "mobile",
+            "device": "Galaxy S25",
+            "zoom": 300
+          }
+        },
+        {
+          "position": 65,
+          "kind": "screenshot",
+          "payload": {
+            "label": "essent-home-galaxy-s21-3x",
+            "fullPage": true,
+            "viewport": "mobile",
+            "device": "Galaxy S21",
+            "zoom": 300
+          }
+        },
+  		{
+          "position": 66,
+          "kind": "screenshot",
+          "payload": {
+            "label": "essent-home-iphone17-4x",
+            "fullPage": true,
+            "viewport": "mobile",
+            "device": "iPhone 17",
+            "zoom": 400
+          }
+        },
+        {
+          "position": 67,
+          "kind": "screenshot",
+          "payload": {
+            "label": "essent-home-iphone16pro-4x",
+            "fullPage": true,
+            "viewport": "mobile",
+            "device": "iPhone 16 Pro",
+            "zoom": 400
+          }
+        },
+        {
+          "position": 68,
+          "kind": "screenshot",
+          "payload": {
+            "label": "essent-home-iphone16-4x",
+            "fullPage": true,
+            "viewport": "mobile",
+            "device": "iPhone 16",
+            "zoom": 400
+          }
+        },
+        {
+          "position": 69,
+          "kind": "screenshot",
+          "payload": {
+            "label": "essent-home-iphone15-4x",
+            "fullPage": true,
+            "viewport": "mobile",
+            "device": "iPhone 15",
+            "zoom": 400
+          }
+        },
+        {
+          "position": 70,
+          "kind": "screenshot",
+          "payload": {
+            "label": "essent-home-iphone14-4x",
+            "fullPage": true,
+            "viewport": "mobile",
+            "device": "iPhone 14",
+            "zoom": 400
+          }
+        },
+        {
+          "position": 71,
+          "kind": "screenshot",
+          "payload": {
+            "label": "essent-home-iphone12-4x",
+            "fullPage": true,
+            "viewport": "mobile",
+            "device": "iPhone 12",
+            "zoom": 400
+          }
+        },
+        {
+          "position": 72,
+          "kind": "screenshot",
+          "payload": {
+            "label": "essent-home-ipadpro-4x",
+            "fullPage": true,
+            "viewport": "mobile",
+            "device": "iPad Pro",
+            "zoom": 400
+          }
+        },
+        {
+          "position": 73,
+          "kind": "screenshot",
+          "payload": {
+            "label": "essent-home-ipadair-4x",
+            "fullPage": true,
+            "viewport": "mobile",
+            "device": "iPad Air",
+            "zoom": 400
+          }
+        },
+        {
+          "position": 74,
+          "kind": "screenshot",
+          "payload": {
+            "label": "essent-home-ipad-4x",
+            "fullPage": true,
+            "viewport": "mobile",
+            "device": "iPad",
+            "zoom": 400
+          }
+        },
+        {
+          "position": 75,
+          "kind": "screenshot",
+          "payload": {
+            "label": "essent-home-pixel9-4x",
+            "fullPage": true,
+            "viewport": "mobile",
+            "device": "Pixel 9",
+            "zoom": 400
+          }
+        },
+        {
+          "position": 76,
+          "kind": "screenshot",
+          "payload": {
+            "label": "essent-home-pixel7-4x",
+            "fullPage": true,
+            "viewport": "mobile",
+            "device": "Pixel 7",
+            "zoom": 400
+          }
+        },
+        {
+          "position": 77,
+          "kind": "screenshot",
+          "payload": {
+            "label": "essent-home-pixel5-4x",
+            "fullPage": true,
+            "viewport": "mobile",
+            "device": "Pixel 5",
+            "zoom": 400
+          }
+        },
+        {
+          "position": 78,
+          "kind": "screenshot",
+          "payload": {
+            "label": "essent-home-galaxy-s25-4x",
+            "fullPage": true,
+            "viewport": "mobile",
+            "device": "Galaxy S25",
+            "zoom": 400
+          }
+        },
+        {
+          "position": 79,
+          "kind": "screenshot",
+          "payload": {
+            "label": "essent-home-galaxy-s21-4x",
+            "fullPage": true,
+            "viewport": "mobile",
+            "device": "Galaxy S21",
+            "zoom": 400
+          }
+        }
+      ]
+    }
+  ]
+}

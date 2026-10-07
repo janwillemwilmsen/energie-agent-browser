@@ -57,8 +57,8 @@ export interface RunStore {
 
   get(id: number): RunRow | undefined;
   getWithScenario(id: number): RunListRow | undefined;
-  /** Newest first, joined with the Scenario. */
-  list(opts?: { limit?: number }): RunListRow[];
+  /** Newest first, joined with the Scenario; optionally one Scenario's only. */
+  list(opts?: { limit?: number; scenarioId?: number }): RunListRow[];
   /** Every Run of one Scenario, oldest first. */
   listForScenario(scenarioId: number): RunRow[];
   /** Runs started within a sqlite datetime window such as '-1 day', newest first. */
@@ -114,6 +114,7 @@ export function createRunStore(deps: { db: Database; dataDir: string }): RunStor
     list: db.prepare(
       `SELECT runs.*, scenarios.name AS scenario_name, scenarios.brand, scenarios.type
        FROM runs LEFT JOIN scenarios ON scenarios.id = runs.scenario_id
+       WHERE (? IS NULL OR runs.scenario_id = ?)
        ORDER BY runs.id DESC LIMIT ?`,
     ),
     listForScenario: db.prepare(
@@ -182,7 +183,7 @@ export function createRunStore(deps: { db: Database; dataDir: string }): RunStor
 
     get: (id) => q.get.get(id) as RunRow | undefined,
     getWithScenario: (id) => q.getWithScenario.get(id) as RunListRow | undefined,
-    list: (opts = {}) => q.list.all(opts.limit ?? 100) as RunListRow[],
+    list: (opts = {}) => q.list.all(opts.scenarioId ?? null, opts.scenarioId ?? null, opts.limit ?? 100) as RunListRow[],
     listForScenario: (scenarioId) => q.listForScenario.all(scenarioId) as RunRow[],
     listStartedSince: (window) => q.listSince.all(window) as RunListRow[],
     latestFinishedForScenario(scenarioId) {

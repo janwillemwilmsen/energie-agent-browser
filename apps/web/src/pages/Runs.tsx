@@ -4,10 +4,19 @@ import { api, type PausedRun, type Run } from '../lib/api.js';
 import { GroupBySwitch, GroupLabel, groupKey, sortByGroup, type GroupBy } from '../lib/tagGrouping.js';
 import { useResource, usePolling } from '../lib/resource.js';
 
+/** How many of the newest runs the list shows; ALL is "no window". */
+const ALL = 100_000;
+const WINDOWS = [100, 200, 300, 400, 500, ALL] as const;
+const PAGE = WINDOWS[0];
+
+/** Status filter chips, failed first since that is the one you look for. */
+const STATUSES: Run['status'][] = ['failed', 'success', 'running', 'queued'];
+
 export function Runs() {
   const [selected, setSelected] = useState<Run | null>(null);
   const [selectedBrands, setSelectedBrands] = useState<Set<string>>(new Set());
   const [selectedTypes, setSelectedTypes] = useState<Set<string>>(new Set());
+  const [selectedStatuses, setSelectedStatuses] = useState<Set<string>>(new Set());
   // Ordered, unbounded selection. Drives both bulk-delete and compare (which
   // requires exactly two, baseline = first picked). Order is preserved.
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
@@ -24,9 +33,14 @@ export function Runs() {
   // editor's play status). Applied once, so the 4s refresh won't fight clicks.
   const appliedRunParam = useRef(false);
 
-  const { data: runs, error: err, setError: setErr, refresh: load } = useResource(
-    () => api.listRuns(),
-    { initial: [] as Run[] },
+  // The list is a window on the newest runs (the "Show" dropdown sets how
+  // many); /runs?scenario=<id> instead shows one scenario's whole history,
+  // however old — the way to find a run that fell out of the window.
+  const scenarioParam = Number(searchParams.get('scenario')) || null;
+  const [limit, setLimit] = useState<number>(PAGE);
+  const { data: runs, error: err, setError: setErr, refresh: load, loading } = useResource(
+    () => api.listRuns(scenarioParam ? { scenarioId: scenarioParam, limit: ALL } : { limit }),
+    { initial: [] as Run[], deps: [scenarioParam, limit] },
   );
 
   // `selected` captures the run row at click-time, so its log never grew
@@ -57,15 +71,24 @@ export function Runs() {
   usePolling(load, watching ? 1500 : 4000);
 
   useEffect(() => {
-    if (appliedRunParam.current) return;
+    if (appliedRunParam.current || loading) return;
     const raw = searchParams.get('run');
     if (!raw) return;
+    appliedRunParam.current = true;
     const r = runs.find((x) => x.id === Number(raw));
     if (r) {
       setSelected(r);
-      appliedRunParam.current = true;
+      return;
     }
-  }, [runs, searchParams]);
+    // Older than the window (a link from Screenshots, Recordings or Texts
+    // can point years back): show it anyway, with its scenario's history.
+    api.getRun(Number(raw))
+      .then((run) => {
+        setSelected(run);
+        if (!scenarioParam) navigate(`/runs?scenario=${run.scenario_id}&run=${run.id}`, { replace: true });
+      })
+      .catch((e) => setErr(`Run #${raw}: ${e?.message ?? e}`));
+  }, [runs, loading, searchParams, scenarioParam, navigate, setErr]);
 
   const brands = useMemo(() => collectTagValues(runs, 'brand'), [runs]);
   const types = useMemo(() => collectTagValues(runs, 'type'), [runs]);
@@ -74,9 +97,10 @@ export function Runs() {
     return runs.filter((r) => {
       const brandOk = selectedBrands.size === 0 || (r.brand != null && selectedBrands.has(r.brand));
       const typeOk = selectedTypes.size === 0 || (r.type != null && selectedTypes.has(r.type));
-      return brandOk && typeOk;
+      const statusOk = selectedStatuses.size === 0 || selectedStatuses.has(r.status);
+      return brandOk && typeOk && statusOk;
     });
-  }, [runs, selectedBrands, selectedTypes]);
+  }, [runs, selectedBrands, selectedTypes, selectedStatuses]);
 
   // The rows in the order they are shown: date order for the list view, or
   // stably re-sorted by tag group (untagged last) for the grouped view. All
@@ -100,7 +124,7 @@ export function Runs() {
     setter(next);
   }
 
-  const activeFilterCount = selectedBrands.size + selectedTypes.size;
+  const activeFilterCount = selectedBrands.size + selectedTypes.size + selectedStatuses.size;
 
   const isSelected = (id: number) => selectedIds.includes(id);
 
@@ -221,6 +245,16 @@ export function Runs() {
       </div>
       {err && <p className="error">{err}</p>}
 
+      {scenarioParam && (
+        <p className="runs-scope">
+          Showing every run of{' '}
+          <Link to={`/scenarios/${scenarioParam}`}>
+            {runs[0]?.scenario_name ?? `scenario #${scenarioParam}`}
+          </Link>{' '}
+          ({runs.length}) · <Link to="/runs">all recent runs</Link>
+        </p>
+      )}
+
       <details className="filter-panel" open={activeFilterCount > 0}>
         <summary>
           Filter{' '}
@@ -265,6 +299,21 @@ export function Runs() {
               </div>
             )}
           </div>
+          <div className="filter-group">
+            <div className="filter-group-label">Status</div>
+            <div className="chip-row">
+              {STATUSES.map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  className={`chip${selectedStatuses.has(s) ? ' chip-on' : ''}`}
+                  onClick={() => toggle(selectedStatuses, s, setSelectedStatuses)}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          </div>
           {activeFilterCount > 0 && (
             <button
               type="button"
@@ -272,6 +321,7 @@ export function Runs() {
               onClick={() => {
                 setSelectedBrands(new Set());
                 setSelectedTypes(new Set());
+                setSelectedStatuses(new Set());
               }}
             >
               Clear filters
@@ -279,6 +329,21 @@ export function Runs() {
           )}
         </div>
       </details>
+
+      {/* How far back the list reaches. The Brand/Type filter chips above are
+          built from the loaded rows, so a short window also hides tags that
+          only older runs carry — widen it to see them. */}
+      {!scenarioParam && (
+        <label className="runs-window muted">
+          Show
+          <select value={limit} onChange={(e) => setLimit(Number(e.target.value))}>
+            {WINDOWS.map((n) => (
+              <option key={n} value={n}>{n === ALL ? 'all' : n}</option>
+            ))}
+          </select>
+          most recent runs{runs.length >= limit ? '' : ` (${runs.length} in total)`}
+        </label>
+      )}
 
       <div className="compare-bar">
         <span className="muted">

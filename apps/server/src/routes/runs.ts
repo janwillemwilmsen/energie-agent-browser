@@ -34,7 +34,13 @@ export async function runsRoutes(app: FastifyInstance) {
     return reply.code(202).send(getRun(runId));
   });
 
-  app.get('/api/runs', async () => runStore().list({ limit: 100 }));
+  // Newest first. `limit` pages the list back in time; `scenarioId` narrows
+  // it to one scenario (its whole history fits the default limit for years).
+  const ListQuery = z.object({
+    limit: z.coerce.number().int().min(1).max(100_000).default(100),
+    scenarioId: z.coerce.number().int().positive().optional(),
+  });
+  app.get('/api/runs', async (req) => runStore().list(ListQuery.parse(req.query ?? {})));
 
   // Runs parked at a `pause` step right now, for the Resume/Abort buttons.
   app.get('/api/runs/paused', async () => listPaused());
