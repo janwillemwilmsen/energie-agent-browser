@@ -305,6 +305,10 @@ export const ScenarioCreate = z.object({
   preflight_id: z.number().int().nullable().optional(),
   preflight_mode: PreflightMode.optional(),
   record_enabled: z.number().int().min(0).max(1).optional(),
+  // Settle policy for interactive Steps (see the Step executor's Settle):
+  // scroll the target into view before acting (0/1), pause after acting (ms).
+  step_scroll_into_view: z.number().int().min(0).max(1).optional(),
+  step_settle_ms: z.number().int().min(0).max(60_000).optional(),
 });
 export type ScenarioCreate = z.infer<typeof ScenarioCreate>;
 

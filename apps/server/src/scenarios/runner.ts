@@ -12,6 +12,7 @@ import {
   type IndexedStep,
   type PauseController,
   type RetryPolicy,
+  type Settle,
   type StepContext,
 } from './stepExecutor.js';
 import { pauseRun } from './pauseRegistry.js';
@@ -60,6 +61,8 @@ interface ScenarioRow {
   restart_on_failure: number;
   preflight_id: number | null;
   preflight_mode: string;
+  step_scroll_into_view: number;
+  step_settle_ms: number;
 }
 
 /**
@@ -193,7 +196,7 @@ export function startRun(scenarioId: number, opts: StartRunOptions = {}): Starte
     .prepare(
       `SELECT id, name, url, viewport_preset,
               retries, retry_wait_before_ms, retry_wait_after_ms, restart_on_failure,
-              preflight_id, preflight_mode
+              preflight_id, preflight_mode, step_scroll_into_view, step_settle_ms
        FROM scenarios WHERE id = ?`,
     )
     .get(scenarioId) as ScenarioRow | undefined;
@@ -284,6 +287,15 @@ export function startRun(scenarioId: number, opts: StartRunOptions = {}): Starte
     retryWaitBeforeMs: Math.max(0, scenario.retry_wait_before_ms ?? 0),
     retryWaitAfterMs: Math.max(0, scenario.retry_wait_after_ms ?? 0),
   };
+  // The scenario's own Steps only; an attached preflight's Steps run as the
+  // preflight recorded them.
+  const settle: Settle = {
+    scrollIntoView: !!scenario.step_scroll_into_view,
+    afterMs: Math.max(0, scenario.step_settle_ms ?? 0),
+  };
+  if (settle.scrollIntoView || settle.afterMs > 0) {
+    appendLog(ctx, `settle policy: ${settle.scrollIntoView ? 'scroll into view before' : 'no scroll'}, ${settle.afterMs}ms after each interactive step`);
+  }
 
   // Finish the run as failed before any Step ran (bad step data, preflight
   // failure). The normal path at the bottom handles everything else.
@@ -495,6 +507,7 @@ export function startRun(scenarioId: number, opts: StartRunOptions = {}): Starte
             log: (line) => appendLog(ctx, line),
             authSelectors: getAuthSelectors,
             pause,
+            settle,
             // A test run has nowhere to put artifacts; the executor logs and
             // skips the resource steps instead of failing on the missing dir.
             ...(screenshotDir === null

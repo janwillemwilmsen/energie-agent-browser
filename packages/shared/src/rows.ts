@@ -20,6 +20,9 @@ export interface Scenario {
   preflight_mode: PreflightMode;
   /** 0/1 (sqlite boolean). */
   record_enabled: number;
+  /** Settle policy for interactive Steps: scroll into view first (0/1), pause after (ms). */
+  step_scroll_into_view: number;
+  step_settle_ms: number;
   created_at: string;
   updated_at: string;
 }
