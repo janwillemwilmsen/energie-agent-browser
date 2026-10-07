@@ -214,6 +214,72 @@ describe('Step executor', () => {
     expect(ran(b, 'click')).toHaveLength(2);
   });
 
+  // The settle policy: opt-in care around the interactive kinds. Without it
+  // the command sequence is exactly what it always was (the tests above).
+  describe('settle policy', () => {
+    const settle = { scrollIntoView: true, afterMs: 100 };
+
+    it('scrolls the resolved ref into view before acting and pauses after', async () => {
+      const b = fakeBrowser([WITH_BUTTON]);
+      const ctx = context(b, { settle });
+      await executeStep(ctx, parseStep('click', { selector: { role: 'button', name: 'Go' } }));
+      expect(b.calls).toEqual([
+        ['scrollintoview', '@e1'],
+        ['click', '@e1'],
+        ['wait', '--load', 'load'],
+      ]);
+      // One snapshot: the scroll reuses the ref the click resolved.
+      expect(b.snapshots).toBe(1);
+      expect(ctx.slept).toEqual([150, 100]);
+    });
+
+    it('applies to fill/type/check too, which otherwise never settle', async () => {
+      const b = fakeBrowser([]);
+      const ctx = context(b, { settle });
+      await executeStep(ctx, parseStep('fill', { selector: { role: '', name: '', locator: '#email' }, value: 'a@b.c' }));
+      await executeStep(ctx, parseStep('check', { selector: { role: '', name: '', locator: '#terms' } }));
+      expect(b.calls).toEqual([
+        ['scrollintoview', '#email'],
+        ['fill', '#email', 'a@b.c'],
+        ['scrollintoview', '#terms'],
+        ['check', '#terms'],
+      ]);
+      expect(ctx.slept).toEqual([100, 100]);
+    });
+
+    it('keeps acting when the scroll fails, and leaves `find` selectors alone', async () => {
+      const b = fakeBrowser([], [
+        (a) => (a[0] === 'scrollintoview' ? { stdout: '', stderr: 'Error: Element not found: #deep', exitCode: 1 } : undefined),
+      ]);
+      const ctx = context(b, { settle });
+      await executeStep(ctx, parseStep('click', { selector: { role: '', name: '', locator: '#deep' } }));
+      expect(ran(b, 'click')).toEqual([['click', '#deep']]);
+      expect(ctx.lines.some((l) => /settle: scroll into view skipped/.test(l))).toBe(true);
+
+      b.calls.length = 0;
+      await executeStep(ctx, parseStep('click', { selector: { role: '', name: '', find: { by: 'text', value: 'Go' } } }));
+      expect(ran(b, 'scrollintoview')).toHaveLength(0);
+      expect(b.calls[0]).toEqual(['find', 'text', 'Go', 'click']);
+    });
+
+    it('does not touch non-interactive kinds', async () => {
+      const b = fakeBrowser([]);
+      const ctx = context(b, { settle });
+      await executeStep(ctx, parseStep('press', { key: 'Enter' }));
+      await executeStep(ctx, parseStep('wait', { ms: 5 }));
+      expect(ran(b, 'scrollintoview')).toHaveLength(0);
+      expect(ctx.slept).toEqual([150]);
+    });
+
+    it('is a no-op at zero / off', async () => {
+      const b = fakeBrowser([WITH_BUTTON]);
+      const ctx = context(b, { settle: { scrollIntoView: false, afterMs: 0 } });
+      await executeStep(ctx, parseStep('fill', { selector: { role: 'button', name: 'Go' }, value: 'x' }));
+      expect(b.calls).toEqual([['fill', '@e1', 'x']]);
+      expect(ctx.slept).toEqual([]);
+    });
+  });
+
   it('presses a key on the focused element and lets a navigation settle', async () => {
     const b = fakeBrowser([]);
     await executeStep(context(b), parseStep('press', { key: ' Enter ' }));

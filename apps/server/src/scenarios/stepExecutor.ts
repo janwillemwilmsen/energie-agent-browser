@@ -102,11 +102,33 @@ export class RunAbortedError extends Error {
   }
 }
 
+/**
+ * Extra care around the interactive Steps (click, type, fill, select, check,
+ * uncheck) for pages where the browser tool's own actionability checks are
+ * not enough: scroll the target into view before acting, and pause after
+ * acting so the page can react before the next Step. Off unless a caller
+ * asks for it, so every existing sequence runs exactly as before.
+ */
+export interface Settle {
+  /**
+   * Scroll the resolved element into view before acting. Best-effort: a
+   * failure is logged and the action still runs. Not applied to `find`
+   * selectors (the browser tool finds and acts in one command).
+   */
+  scrollIntoView: boolean;
+  /** Pause this long after every interactive Step; 0 means none. */
+  afterMs: number;
+}
+
+export const NO_SETTLE: Settle = { scrollIntoView: false, afterMs: 0 };
+
 export interface StepContext {
   browser: Browser;
   log: (line: string) => void;
   /** Override the defaults (tests use instant sleeps and short waits). */
   timing?: Partial<Timing>;
+  /** Care around interactive Steps; absent means none (see Settle). */
+  settle?: Settle;
   artifacts?: Artifacts;
   recorder?: Recorder;
   pause?: PauseController;
@@ -317,75 +339,12 @@ export async function executeStep(ctx: StepContext, step: StepPayload, position 
     // is already in the desired state, unlike a blind click toggle.
     case 'check':
     case 'uncheck': {
-      const selector = step.selector;
-      const value =
-        step.kind === 'type' ? step.text
-        : step.kind === 'fill' || step.kind === 'select' ? step.value
-        : undefined;
-      if (selector.find) {
-        // Semantic locator: the browser tool finds AND acts in one command,
-        // so there is no ref to resolve and nothing for the fallbacks to do
-        // (Playwright locators already pierce shadow DOM).
-        if (step.kind !== 'click' && step.kind !== 'fill' && step.kind !== 'check') {
-          throw new Error(
-            `${step.kind} does not support a find selector (agent-browser find offers click, fill and check` +
-            `${step.kind === 'type' ? ' — use fill' : ''}); use a locator or role+name instead`,
-          );
-        }
-        const args = ['find', ...findArgs(selector.find), step.kind];
-        if (value !== undefined) args.push(value);
-        args.push(...findOptions(selector.find));
-        log(args.join(' '));
-        const r = await browser.run(args, { timeoutMs: 30_000 });
-        if (r.exitCode !== 0) throw new Error(`${step.kind} failed: ${failureText(r)}`);
-        if (step.kind === 'click') await settleAfterInteraction(browser, timing);
-        return;
+      await interact(ctx, timing, step);
+      const afterMs = Math.max(0, ctx.settle?.afterMs ?? 0);
+      if (afterMs > 0) {
+        log(`settle: waiting ${afterMs}ms after ${step.kind}`);
+        await timing.sleep(afterMs);
       }
-      const ref = await resolveRef(ctx, timing, selector);
-      // A select step whose selector targets the OPTION (not the dropdown)
-      // means the a11y tree had no ref-addressable combobox (e.g. Chromium's
-      // MenuListPopup shape) — set the parent <select> via the JS fallback.
-      if (step.kind === 'select' && !selector.locator && isOptionSelector(selector)) {
-        log(`select (option fallback) ${JSON.stringify(step.value)}`);
-        await execSelectOptionFallback(browser, selector, step.value);
-        return;
-      }
-      const args = [step.kind, ref];
-      // 'select' picks an option in a native <select> by label/value — the
-      // selector targets the combobox itself (options have no box model).
-      if (value !== undefined) args.push(value);
-      log(`${step.kind} ${ref}`);
-      let r = await browser.run(args, { timeoutMs: 30_000 });
-      // Refs are bound to one snapshot; if the DOM re-rendered between our
-      // snapshot and the click (a cookie banner still hydrating — wider window
-      // on a remote browser), agent-browser answers "Unknown ref". Resolve the
-      // same role+name against the page as it is now and try once more.
-      if (r.exitCode !== 0 && !selector.locator && /unknown ref/i.test(r.stderr + r.stdout)) {
-        const again = await resolveRef(ctx, timing, selector);
-        log(`${step.kind}: ${ref} went stale — re-resolved to ${again}, retrying`);
-        args[1] = again;
-        r = await browser.run(args, { timeoutMs: 30_000 });
-      }
-      if (r.exitCode !== 0) {
-        // CSS/text/xpath locators don't pierce shadow DOM in agent-browser;
-        // retry in-page via a deep query over open shadow roots.
-        if (selector.locator && isElementNotFound(r.stderr, r.stdout)) {
-          log(`${step.kind}: locator not found by CLI — trying shadow-DOM fallback`);
-          const fb = await runLocatorFallback(browser, step.kind, selector.locator, value);
-          if (fb.ok) {
-            log(`${step.kind} ${selector.locator} via shadow-DOM fallback (<${fb.tag}>)`);
-            return;
-          }
-          throw new Error(
-            `${step.kind} failed: ${(r.stderr || r.stdout).trim()} — shadow-DOM fallback also failed: ${fb.reason}`,
-          );
-        }
-        throw new Error(`${step.kind} failed: ${r.stderr || r.stdout}`);
-      }
-      // A click may have kicked off a navigation (e.g. a link to another
-      // site). Give the new document a moment to load so the next step
-      // doesn't race it.
-      if (step.kind === 'click') await settleAfterInteraction(browser, timing);
       return;
     }
     case 'scroll': {
@@ -502,6 +461,104 @@ export async function executeStep(ctx: StepContext, step: StepPayload, position 
     case 'screenshot':
       await screenshot(ctx, timing, step, position);
       return;
+  }
+}
+
+// --- Interactive Steps ------------------------------------------------------------
+
+type InteractiveStep = Extract<StepPayload, { kind: 'click' | 'type' | 'fill' | 'select' | 'check' | 'uncheck' }>;
+
+/**
+ * Act on one element: resolve the selector, run the agent-browser subcommand
+ * of the same name, and fall back (stale ref, shadow DOM, option-less select)
+ * where the straight path fails. The caller adds the post-Step settle.
+ */
+async function interact(ctx: StepContext, timing: Timing, step: InteractiveStep): Promise<void> {
+  const { browser, log } = ctx;
+  const selector = step.selector;
+  const value =
+    step.kind === 'type' ? step.text
+    : step.kind === 'fill' || step.kind === 'select' ? step.value
+    : undefined;
+  if (selector.find) {
+    // Semantic locator: the browser tool finds AND acts in one command,
+    // so there is no ref to resolve and nothing for the fallbacks to do
+    // (Playwright locators already pierce shadow DOM).
+    if (step.kind !== 'click' && step.kind !== 'fill' && step.kind !== 'check') {
+      throw new Error(
+        `${step.kind} does not support a find selector (agent-browser find offers click, fill and check` +
+        `${step.kind === 'type' ? ' — use fill' : ''}); use a locator or role+name instead`,
+      );
+    }
+    const args = ['find', ...findArgs(selector.find), step.kind];
+    if (value !== undefined) args.push(value);
+    args.push(...findOptions(selector.find));
+    log(args.join(' '));
+    const r = await browser.run(args, { timeoutMs: 30_000 });
+    if (r.exitCode !== 0) throw new Error(`${step.kind} failed: ${failureText(r)}`);
+    if (step.kind === 'click') await settleAfterInteraction(browser, timing);
+    return;
+  }
+  const ref = await resolveRef(ctx, timing, selector);
+  // A select step whose selector targets the OPTION (not the dropdown)
+  // means the a11y tree had no ref-addressable combobox (e.g. Chromium's
+  // MenuListPopup shape) — set the parent <select> via the JS fallback.
+  if (step.kind === 'select' && !selector.locator && isOptionSelector(selector)) {
+    log(`select (option fallback) ${JSON.stringify(step.value)}`);
+    await execSelectOptionFallback(browser, selector, step.value);
+    return;
+  }
+  // Settle policy: bring the target into view before acting. The ref is
+  // already resolved, so this costs one browser command and no snapshot.
+  if (ctx.settle?.scrollIntoView) await scrollIntoViewBestEffort(ctx, ref);
+  const args = [step.kind, ref];
+  // 'select' picks an option in a native <select> by label/value — the
+  // selector targets the combobox itself (options have no box model).
+  if (value !== undefined) args.push(value);
+  log(`${step.kind} ${ref}`);
+  let r = await browser.run(args, { timeoutMs: 30_000 });
+  // Refs are bound to one snapshot; if the DOM re-rendered between our
+  // snapshot and the click (a cookie banner still hydrating — wider window
+  // on a remote browser), agent-browser answers "Unknown ref". Resolve the
+  // same role+name against the page as it is now and try once more.
+  if (r.exitCode !== 0 && !selector.locator && /unknown ref/i.test(r.stderr + r.stdout)) {
+    const again = await resolveRef(ctx, timing, selector);
+    log(`${step.kind}: ${ref} went stale — re-resolved to ${again}, retrying`);
+    args[1] = again;
+    r = await browser.run(args, { timeoutMs: 30_000 });
+  }
+  if (r.exitCode !== 0) {
+    // CSS/text/xpath locators don't pierce shadow DOM in agent-browser;
+    // retry in-page via a deep query over open shadow roots.
+    if (selector.locator && isElementNotFound(r.stderr, r.stdout)) {
+      log(`${step.kind}: locator not found by CLI — trying shadow-DOM fallback`);
+      const fb = await runLocatorFallback(browser, step.kind, selector.locator, value);
+      if (fb.ok) {
+        log(`${step.kind} ${selector.locator} via shadow-DOM fallback (<${fb.tag}>)`);
+        return;
+      }
+      throw new Error(
+        `${step.kind} failed: ${(r.stderr || r.stdout).trim()} — shadow-DOM fallback also failed: ${fb.reason}`,
+      );
+    }
+    throw new Error(`${step.kind} failed: ${r.stderr || r.stdout}`);
+  }
+  // A click may have kicked off a navigation (e.g. a link to another
+  // site). Give the new document a moment to load so the next step
+  // doesn't race it.
+  if (step.kind === 'click') await settleAfterInteraction(browser, timing);
+}
+
+// The settle policy's pre-action scroll. Never fails the Step: a locator the
+// CLI cannot see (shadow DOM) fails here too, and the action's own fallback
+// scrolls the element itself before clicking it.
+async function scrollIntoViewBestEffort(ctx: StepContext, ref: string): Promise<void> {
+  ctx.log(`settle: scroll into view ${ref}`);
+  try {
+    const r = await ctx.browser.run(['scrollintoview', ref], { timeoutMs: 10_000 });
+    if (r.exitCode !== 0) ctx.log(`settle: scroll into view skipped (${failureText(r).split('\n')[0]})`);
+  } catch (e: any) {
+    ctx.log(`settle: scroll into view skipped (${e?.message ?? e})`);
   }
 }
 
