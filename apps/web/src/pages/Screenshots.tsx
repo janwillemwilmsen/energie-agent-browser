@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api, type Run } from '../lib/api.js';
+import { api, type RunDay, type Scenario } from '../lib/api.js';
 import { useResource, usePolling } from '../lib/resource.js';
 
 // Per-scenario gallery: one section per scenario that has runs (after the
@@ -9,21 +9,17 @@ import { useResource, usePolling } from '../lib/resource.js';
 // different days. Default per scenario:
 // the day of its latest run. A "reset all" shortcut snaps every section back
 // to that latest-per-scenario default.
+//
+// Data: /api/runs/daily (the latest run per scenario per day, all history) so
+// a scenario that has not run lately still has its section; /api/runs is a
+// window over the newest runs and would drop it. The Brand/Type chips come
+// from the scenarios themselves, so every tag in use is offered — even one
+// whose scenarios have no runs yet.
 
-function toDayKey(iso: string): string {
-  // SQLite started_at format is "YYYY-MM-DD HH:MM:SS" (no T, no Z). Take the
-  // date prefix; falling back to ISO parsing for safety.
-  const m = iso.match(/^(\d{4}-\d{2}-\d{2})/);
-  if (m && m[1]) return m[1];
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '';
-  return d.toISOString().slice(0, 10);
-}
-
-function collectTagValues(runs: Run[], key: 'brand' | 'type'): string[] {
+function collectTagValues(scenarios: Scenario[], key: 'brand' | 'type'): string[] {
   const set = new Set<string>();
-  for (const r of runs) {
-    const v = r[key];
+  for (const s of scenarios) {
+    const v = s[key];
     if (v) set.add(v);
   }
   return Array.from(set).sort((a, b) => a.localeCompare(b));
@@ -38,7 +34,7 @@ interface ScenarioData {
   // the per-scenario day dropdown.
   populatedDays: string[];
   // Latest run on a given day for this scenario.
-  runByDay: Map<string, Run>;
+  runByDay: Map<string, RunDay>;
 }
 
 export function Screenshots() {
@@ -48,21 +44,20 @@ export function Screenshots() {
   const [dayByScenario, setDayByScenario] = useState<Record<number, string>>({});
 
   const { data: runs, error: err, setError: setErr, refresh: load } = useResource(
-    () => api.listRuns(),
-    { initial: [] as Run[] },
+    () => api.listRunsDaily(),
+    { initial: [] as RunDay[] },
   );
+  const { data: allScenarios } = useResource(() => api.listScenarios(), { initial: [] as Scenario[] });
   // Polling keeps the page live while a scheduled run completes.
   usePolling(load, 6000);
 
-  const brands = useMemo(() => collectTagValues(runs, 'brand'), [runs]);
-  const types = useMemo(() => collectTagValues(runs, 'type'), [runs]);
+  const brands = useMemo(() => collectTagValues(allScenarios, 'brand'), [allScenarios]);
+  const types = useMemo(() => collectTagValues(allScenarios, 'type'), [allScenarios]);
   const activeFilterCount = selectedBrands.size + selectedTypes.size;
 
-  // Group runs by scenario, retaining only the latest run per (scenario, day)
-  // and the sorted list of days that have any runs for that scenario.
+  // Group the daily rows by scenario: one run per (scenario, day) already,
+  // plus the sorted list of days that have any runs for that scenario.
   const scenarios: ScenarioData[] = useMemo(() => {
-    // /api/runs returns newest first, so first occurrence per scenario_id per
-    // day is the latest for that day — no extra sorting needed.
     const map = new Map<number, ScenarioData>();
     for (const r of runs) {
       // Apply chip filters here so empty scenarios drop out of the list.
@@ -70,7 +65,7 @@ export function Screenshots() {
       const typeOk = selectedTypes.size === 0 || (r.type != null && selectedTypes.has(r.type));
       if (!brandOk || !typeOk) continue;
 
-      const day = toDayKey(r.started_at);
+      const day = r.day;
       if (!day) continue;
       let s = map.get(r.scenario_id);
       if (!s) {

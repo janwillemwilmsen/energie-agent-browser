@@ -81,3 +81,9 @@ export interface Run {
   brand?: string | null;
   type?: string | null;
 }
+
+/** GET /api/runs/daily: the latest run per scenario per day, whole history, no log. */
+export type RunDay = Omit<Run, 'log_text'> & {
+  /** UTC day the run started, 'YYYY-MM-DD'. */
+  day: string;
+};

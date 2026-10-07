@@ -1,4 +1,4 @@
-import type { A11yTree, AuthProfile, Preflight, PreflightStep, Run, Scenario, Schedule, ScenarioStep } from '@eab/shared';
+import type { A11yTree, AuthProfile, Preflight, PreflightStep, Run, RunDay, Scenario, Schedule, ScenarioStep } from '@eab/shared';
 import { request as req, requestRaw } from './request.js';
 
 export { ApiError, errorMessage, onUnauthenticated } from './request.js';
@@ -47,6 +47,7 @@ export type {
   Preflight,
   PreflightStep,
   Run,
+  RunDay,
   RunStatus,
   Scenario,
   ScenarioStep,
@@ -466,6 +467,8 @@ export const api = {
     const qs = q.toString();
     return req<Run[]>(`/api/runs${qs ? `?${qs}` : ''}`);
   },
+  /** Latest run per scenario per day, whole history, no log text (the Screenshots gallery). */
+  listRunsDaily: () => req<RunDay[]>('/api/runs/daily'),
   getRun: (id: number) => req<Run & { pause: PausedRun | null }>(`/api/runs/${id}`),
   pausedRuns: () => req<PausedRun[]>('/api/runs/paused'),
   resumeRun: (id: number) => req<{ ok: true }>(`/api/runs/${id}/resume`, { method: 'POST' }),

@@ -33,6 +33,16 @@ export interface RunListRow extends RunRow {
   type: string | null;
 }
 
+/**
+ * The latest Run of one Scenario on one day, for galleries that show a day
+ * per Scenario. The log is left out: it is the bulk of a Run row and no
+ * gallery reads it.
+ */
+export type RunDayRow = Omit<RunListRow, 'log_text'> & {
+  /** The UTC day the Run started, 'YYYY-MM-DD' (the date prefix of started_at). */
+  day: string;
+};
+
 export interface LatestRun {
   id: number;
   started_at: string;
@@ -61,6 +71,12 @@ export interface RunStore {
   list(opts?: { limit?: number; scenarioId?: number }): RunListRow[];
   /** Every Run of one Scenario, oldest first. */
   listForScenario(scenarioId: number): RunRow[];
+  /**
+   * The latest Run per (Scenario, day) over the whole history, newest first —
+   * every Scenario that ever ran is in here, however old its Runs. One row per
+   * day a Scenario ran, so it stays small where list() would carry every Run.
+   */
+  listLatestPerDay(): RunDayRow[];
   /** Runs started within a sqlite datetime window such as '-1 day', newest first. */
   listStartedSince(window: string): RunListRow[];
   latestFinishedForScenario(scenarioId: number): LatestRun | undefined;
@@ -119,6 +135,16 @@ export function createRunStore(deps: { db: Database; dataDir: string }): RunStor
     ),
     listForScenario: db.prepare(
       'SELECT * FROM runs WHERE scenario_id = ? ORDER BY started_at ASC, id ASC',
+    ),
+    // started_at is a UTC 'YYYY-MM-DD HH:MM:SS' string, so date() is its day
+    // prefix; the highest id on a day is that day's latest Run.
+    listLatestPerDay: db.prepare(
+      `SELECT runs.id, runs.scenario_id, runs.started_at, runs.finished_at, runs.status,
+              runs.screenshot_paths_json, runs.text_paths_json, date(runs.started_at) AS day,
+              scenarios.name AS scenario_name, scenarios.brand, scenarios.type
+       FROM runs LEFT JOIN scenarios ON scenarios.id = runs.scenario_id
+       WHERE runs.id IN (SELECT MAX(id) FROM runs GROUP BY scenario_id, date(started_at))
+       ORDER BY runs.started_at DESC, runs.id DESC`,
     ),
     listSince: db.prepare(
       `SELECT runs.*, scenarios.name AS scenario_name, scenarios.brand, scenarios.type
@@ -185,6 +211,7 @@ export function createRunStore(deps: { db: Database; dataDir: string }): RunStor
     getWithScenario: (id) => q.getWithScenario.get(id) as RunListRow | undefined,
     list: (opts = {}) => q.list.all(opts.scenarioId ?? null, opts.scenarioId ?? null, opts.limit ?? 100) as RunListRow[],
     listForScenario: (scenarioId) => q.listForScenario.all(scenarioId) as RunRow[],
+    listLatestPerDay: () => q.listLatestPerDay.all() as RunDayRow[],
     listStartedSince: (window) => q.listSince.all(window) as RunListRow[],
     latestFinishedForScenario(scenarioId) {
       const row = q.latestFinished.get(scenarioId) as

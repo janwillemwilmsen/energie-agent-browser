@@ -71,6 +71,29 @@ describe('Run store', () => {
     expect(store.listStartedSince('-1 day')).toHaveLength(2);
   });
 
+  it('lists the latest Run per Scenario per day over the whole history, without the log', () => {
+    const other = Number(
+      db.prepare(`INSERT INTO scenarios (name, url, type) VALUES ('Blog', 'https://blog.test/', 'content')`).run().lastInsertRowid,
+    );
+    // Two runs on one day for Shop (the later one wins), one old run for Blog
+    // that no recent-runs window would reach.
+    const a = store.create(scenarioId).runId;
+    const b = store.create(scenarioId).runId;
+    const old = store.create(other).runId;
+    db.prepare(`UPDATE runs SET started_at = '2024-01-05 09:00:00' WHERE id = ?`).run(old);
+    store.appendLog(b, 'a long log');
+    const today = store.get(a)!.started_at.slice(0, 10);
+
+    const rows = store.listLatestPerDay();
+    expect(rows.map((r) => [r.id, r.scenario_id, r.day])).toEqual([
+      [b, scenarioId, today],
+      [old, other, '2024-01-05'],
+    ]);
+    expect(rows[0]).toMatchObject({ scenario_name: 'Shop', brand: 'acme', type: null });
+    expect(rows[1]).toMatchObject({ scenario_name: 'Blog', type: 'content' });
+    expect('log_text' in rows[0]!).toBe(false);
+  });
+
   it('reports the latest finished Run with its final screenshot', () => {
     const a = store.create(scenarioId).runId;
     store.finish(a, 'failed', '', ['001-x-home-desktop.png', '002-x-cart-desktop.png']);

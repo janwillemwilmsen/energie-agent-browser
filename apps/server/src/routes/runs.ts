@@ -42,6 +42,11 @@ export async function runsRoutes(app: FastifyInstance) {
   });
   app.get('/api/runs', async (req) => runStore().list(ListQuery.parse(req.query ?? {})));
 
+  // The latest run per scenario per day, all history, no log text. The
+  // Screenshots gallery reads this: a window over /api/runs would hide
+  // scenarios that have not run recently.
+  app.get('/api/runs/daily', async () => runStore().listLatestPerDay());
+
   // Runs parked at a `pause` step right now, for the Resume/Abort buttons.
   app.get('/api/runs/paused', async () => listPaused());
 
