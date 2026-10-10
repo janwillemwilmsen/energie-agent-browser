@@ -32,6 +32,8 @@ export interface PortableScenario {
   // Settle policy around interactive steps; absent in older bundles → off.
   step_scroll_into_view: number;
   step_settle_ms: number;
+  // Free-text notes; absent in older bundles → ''.
+  notes: string;
   // Resolved by name for portability; null when the scenario has no preflight.
   preflight_name: string | null;
   steps: PortableStep[];
@@ -67,6 +69,7 @@ export function toPortableScenario(
     restart_on_failure: detail.restart_on_failure,
     step_scroll_into_view: detail.step_scroll_into_view ?? 0,
     step_settle_ms: detail.step_settle_ms ?? 0,
+    notes: detail.notes ?? '',
     preflight_name:
       detail.preflight_id != null ? preflightNameById.get(detail.preflight_id) ?? null : null,
     steps: detail.steps
@@ -135,6 +138,7 @@ function validateScenario(s: any, idx: number): PortableScenario {
     restart_on_failure: Number(s.restart_on_failure) || 0,
     step_scroll_into_view: s.step_scroll_into_view ? 1 : 0,
     step_settle_ms: Number(s.step_settle_ms) || 0,
+    notes: typeof s.notes === 'string' ? s.notes : '',
     preflight_name: typeof s.preflight_name === 'string' ? s.preflight_name : null,
     steps: outSteps,
   };
@@ -180,7 +184,7 @@ export async function importPortableScenario(
   // update if any value is non-default.
   if (
     s.retries || s.retry_wait_before_ms || s.retry_wait_after_ms || s.restart_on_failure ||
-    s.step_scroll_into_view || s.step_settle_ms
+    s.step_scroll_into_view || s.step_settle_ms || s.notes
   ) {
     await api.updateScenario(created.id, {
       retries: s.retries,
@@ -189,6 +193,7 @@ export async function importPortableScenario(
       restart_on_failure: s.restart_on_failure,
       step_scroll_into_view: s.step_scroll_into_view,
       step_settle_ms: s.step_settle_ms,
+      notes: s.notes,
     });
   }
 

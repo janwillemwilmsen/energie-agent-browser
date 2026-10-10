@@ -518,6 +518,7 @@ export const api = {
         | 'record_enabled'
         | 'step_scroll_into_view'
         | 'step_settle_ms'
+        | 'notes'
       >
     >,
   ) => req<Scenario>(`/api/scenarios/${id}`, { method: 'PUT', body: JSON.stringify(body) }),

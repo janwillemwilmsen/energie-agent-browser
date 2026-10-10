@@ -13,6 +13,7 @@ const SESSION = 'default';
 // Run button off screen. Remembered across scenarios like the sidebar state.
 const COMPACT_STEPS_KEY = 'eab.scenarioEditor.compactSteps';
 const RETRY_OPEN_KEY = 'eab.scenarioEditor.retryOpen';
+const NOTES_OPEN_KEY = 'eab.scenarioEditor.notesOpen';
 const COMPACT_HEIGHT_KEY = 'eab.scenarioEditor.compactHeight';
 
 // View filters for the step list (display only; the scenario is unchanged).
@@ -139,6 +140,21 @@ export function ScenarioEditor() {
       /* ignore */
     }
   }, [retryOpen]);
+  // The scenario's free-text notes, behind a toggle like the retry rows.
+  const [notesOpen, setNotesOpen] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(NOTES_OPEN_KEY) === '1';
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem(NOTES_OPEN_KEY, notesOpen ? '1' : '0');
+    } catch {
+      /* ignore */
+    }
+  }, [notesOpen]);
   const [metaOpen, setMetaOpen] = useState<boolean>(() => {
     try {
       return localStorage.getItem(META_OPEN_KEY) !== '0';
@@ -202,6 +218,7 @@ export function ScenarioEditor() {
       restart_on_failure: number;
       step_scroll_into_view: number;
       step_settle_ms: number;
+      notes: string;
     }>,
   ) {
     try {
@@ -487,6 +504,16 @@ export function ScenarioEditor() {
             </button>{' '}
             <button
               type="button"
+              className={`steps-raw-link${notesOpen ? ' active' : ''}`}
+              aria-pressed={notesOpen}
+              aria-expanded={notesOpen}
+              title={notesOpen ? 'Hide the notes' : data.notes ? 'Show the notes about this scenario' : 'Add notes about this scenario (for your own reference)'}
+              onClick={() => setNotesOpen((v) => !v)}
+            >
+              {notesOpen ? 'notes ✓' : data.notes ? 'notes •' : 'notes'}
+            </button>{' '}
+            <button
+              type="button"
               className={`steps-raw-link${compactSteps ? ' active' : ''}`}
               aria-pressed={compactSteps}
               title={
@@ -590,6 +617,18 @@ export function ScenarioEditor() {
             </label>
           </div>
           </>
+          )}
+          {notesOpen && (
+            <textarea
+              key={`notes-${data.id}`}
+              className="scenario-notes"
+              defaultValue={data.notes ?? ''}
+              placeholder="Notes about this scenario, for your own reference. Saved when you click away."
+              rows={4}
+              onBlur={(e) => {
+                if (e.target.value !== (data.notes ?? '')) void saveRetry({ notes: e.target.value });
+              }}
+            />
           )}
           <div
             ref={compactRef}

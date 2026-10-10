@@ -309,6 +309,8 @@ export const ScenarioCreate = z.object({
   // scroll the target into view before acting (0/1), pause after acting (ms).
   step_scroll_into_view: z.number().int().min(0).max(1).optional(),
   step_settle_ms: z.number().int().min(0).max(60_000).optional(),
+  // Free-text notes for the editor's own reference; not used by runs.
+  notes: z.string().max(20_000).optional(),
 });
 export type ScenarioCreate = z.infer<typeof ScenarioCreate>;
 

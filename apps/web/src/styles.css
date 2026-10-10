@@ -433,6 +433,21 @@ code { background: rgba(255,255,255,0.06); padding: 2px 4px; border-radius: 3px;
   margin: 4px 0 12px;
 }
 .retry-policy label { display: inline-flex; align-items: center; gap: 4px; }
+/* The scenario's notes textarea (behind the "notes" toggle next to "retries"). */
+.scenario-notes {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin: 4px 0 12px;
+  padding: 6px 8px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font: inherit;
+  font-size: 13px;
+  resize: vertical;
+}
 .retry-policy input[type="checkbox"] { width: auto; }
 .retry-policy input {
   width: 64px;
