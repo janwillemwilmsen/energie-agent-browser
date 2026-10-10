@@ -26,6 +26,39 @@ export function shortUrl(url: string, max = 56): string {
   }
 }
 
+// The one payload field a Step kind can be edited on in place, in the list
+// row: the label of a screenshot or text file, a wait's duration, a URL, the
+// text to type. Everything else still goes through the edit modal. `optional`
+// fields are removed from the payload when cleared.
+export interface InlineField {
+  key: string;
+  label: string;
+  type: 'text' | 'number';
+  optional?: boolean;
+}
+
+export function inlineField(kind: string, p: Record<string, unknown>): InlineField | null {
+  switch (kind) {
+    case 'screenshot':
+    case 'save_text':
+    case 'pause':
+      return { key: 'label', label: 'label', type: 'text', optional: true };
+    case 'wait':
+      return p.selector ? null : { key: 'ms', label: 'ms', type: 'number' };
+    case 'navigate':
+      return { key: 'url', label: 'URL', type: 'text' };
+    case 'type':
+      return { key: 'text', label: 'text', type: 'text' };
+    case 'fill':
+    case 'select':
+      return { key: 'value', label: 'value', type: 'text' };
+    case 'press':
+      return { key: 'key', label: 'key', type: 'text' };
+    default:
+      return null;
+  }
+}
+
 // One-line summary of a Step for the editor list. Works on the loose payload
 // shape so an unknown key or an odd stored value still renders something.
 export function summarizeStep(kind: string, p: Record<string, unknown>): string {

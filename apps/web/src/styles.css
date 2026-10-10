@@ -455,6 +455,23 @@ code { background: rgba(255,255,255,0.06); padding: 2px 4px; border-radius: 3px;
 /* min-width: 0 lets the flex child shrink below its content width, so a long
    unbreakable value (a URL) wraps inside the row instead of widening it. */
 .step-list .step-body { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+/* Inline edit of a row's main value: the summary is clickable, and turns
+   into an input that fills the row. */
+.step-list .step-inline { cursor: text; border-bottom: 1px dotted transparent; }
+.step-list .step-inline:hover,
+.step-list .step-inline:focus-visible { border-bottom-color: var(--muted); outline: none; }
+.step-list .step-inline-edit { display: inline-flex; align-items: center; gap: 6px; width: calc(100% - 110px); }
+.step-list .step-inline-edit input {
+  flex: 1;
+  min-width: 80px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font: inherit;
+}
+.step-list .step-inline-edit .error { font-size: 12px; white-space: nowrap; }
 /* Colored badge per step kind, so the different action types are
    distinguishable at a glance. */
 .step-kind {

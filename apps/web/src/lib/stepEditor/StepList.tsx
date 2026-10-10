@@ -3,7 +3,7 @@ import { useDroppable } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { StepEditModal } from './StepEditModal.js';
-import { summarizeStep } from './summarize.js';
+import { inlineField, summarizeStep } from './summarize.js';
 import { STEP_LIST_END, useStepDnd } from './StepDnd.js';
 import type { EditableStep, StepId, StepStore } from './store.js';
 
@@ -62,6 +62,7 @@ export function StepList({
                 busy={store.busy}
                 pickDragging={activePick != null}
                 onEdit={() => setEditing(s)}
+                onUpdate={(payload) => store.update(s.id, payload)}
                 onMoveUp={() => void store.move(s.id, 'up')}
                 onMoveDown={() => void store.move(s.id, 'down')}
                 onDelete={() => void store.remove(s.id)}
@@ -110,6 +111,7 @@ function StepRow({
   busy,
   pickDragging,
   onEdit,
+  onUpdate,
   onMoveUp,
   onMoveDown,
   onDelete,
@@ -120,6 +122,8 @@ function StepRow({
   busy: boolean;
   pickDragging: boolean;
   onEdit: () => void;
+  /** Replace the payload; rejects with a message when the store refuses it. */
+  onUpdate: (payload: Record<string, unknown>) => Promise<void>;
   onMoveUp: () => void;
   onMoveDown: () => void;
   onDelete: () => void;
@@ -134,6 +138,7 @@ function StepRow({
   };
   // A pick hovering this row will be inserted BEFORE it.
   const insertBefore = pickDragging && isOver;
+  const field = step.invalid ? null : inlineField(step.kind, step.payload);
   return (
     <li ref={setNodeRef} style={style} data-step-id={String(step.id)} className={insertBefore ? 'step-insert-before' : undefined}>
       <button
@@ -151,6 +156,8 @@ function StepRow({
           <span className="error" title="Edit the payload JSON with ✎, or delete the step">
             invalid step — {step.invalid}
           </span>
+        ) : field ? (
+          <InlineValue step={step} field={field} busy={busy} onUpdate={onUpdate} />
         ) : (
           summarizeStep(step.kind, step.payload)
         )}
@@ -173,5 +180,83 @@ function StepRow({
         ×
       </button>
     </li>
+  );
+}
+
+// The row's summary, editable in place on its one inline field (see
+// inlineField): click the text to get an input, Enter or blur saves, Escape
+// cancels. A rejected save keeps the input open with the message beside it.
+function InlineValue({
+  step, field, busy, onUpdate,
+}: {
+  step: EditableStep;
+  field: NonNullable<ReturnType<typeof inlineField>>;
+  busy: boolean;
+  onUpdate: (payload: Record<string, unknown>) => Promise<void>;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  // Enter then a click away would save twice; the blur during a save is dropped.
+  const saving = useRef(false);
+  const current = step.payload[field.key];
+  const currentText = current == null ? '' : String(current);
+
+  async function save() {
+    if (draft == null || saving.current) return;
+    const text = draft.trim();
+    if (text === currentText) { setDraft(null); setError(null); return; }
+    const next = { ...step.payload };
+    if (field.type === 'number') {
+      const n = Number(text);
+      if (!text || !Number.isFinite(n)) { setError('enter a number'); return; }
+      next[field.key] = n;
+    } else if (!text && field.optional) {
+      delete next[field.key];
+    } else {
+      next[field.key] = text;
+    }
+    saving.current = true;
+    try {
+      await onUpdate(next);
+      setDraft(null);
+      setError(null);
+    } catch (e: any) {
+      setError(e?.message ?? String(e));
+    } finally {
+      saving.current = false;
+    }
+  }
+
+  if (draft == null) {
+    return (
+      <span
+        className="step-inline"
+        role="button"
+        tabIndex={0}
+        title={`Click to edit the ${field.label}`}
+        onClick={() => { if (!busy) { setDraft(currentText); setError(null); } }}
+        onKeyDown={(e) => { if (e.key === 'Enter' && !busy) { setDraft(currentText); setError(null); } }}
+      >
+        {summarizeStep(step.kind, step.payload)}
+      </span>
+    );
+  }
+  return (
+    <span className="step-inline-edit">
+      <input
+        autoFocus
+        type={field.type}
+        value={draft}
+        placeholder={field.label}
+        disabled={busy}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => void save()}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') { e.preventDefault(); void save(); }
+          if (e.key === 'Escape') { e.preventDefault(); setDraft(null); setError(null); }
+        }}
+      />
+      {error && <span className="error">{error}</span>}
+    </span>
   );
 }
