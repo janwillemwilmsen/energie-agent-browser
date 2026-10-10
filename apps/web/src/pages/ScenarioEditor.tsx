@@ -4,6 +4,7 @@ import { StepKind } from '@eab/shared';
 import { api, type Preflight, type Run, type ScenarioDetail } from '../lib/api.js';
 import { AddStepControls, SnapshotPane, StepEditorDnd, StepList, useServerStepStore } from '../lib/stepEditor/index.js';
 import { PreviewStream } from '../lib/screencast.js';
+import { failureFromLog } from '../lib/runLog.js';
 
 const SESSION = 'default';
 
@@ -160,6 +161,8 @@ export function ScenarioEditor() {
   const [testRun, setTestRun] = useState<Run | null>(null);
   // Set while the run we started is parked at a `pause` step.
   const [paused, setPaused] = useState<{ position: number; label: string | null } | null>(null);
+  /** Why the last run played from here failed (from its log); cleared on the next play. */
+  const [runError, setRunError] = useState<string | null>(null);
   const [draft, setDraft] = useState<MetaDraft>(emptyDraft());
   const [savingMeta, setSavingMeta] = useState(false);
   const [metaSavedAt, setMetaSavedAt] = useState<number | null>(null);
@@ -214,6 +217,7 @@ export function ScenarioEditor() {
     setPlayStatus(null);
     setLastRunId(null);
     setTestRun(null);
+    setRunError(null);
     if (!previewActive) setPreviewActive(true);
     // The server owns session lifecycle now: the runner starts the session if
     // it's down, and `reset: true` restarts it before the run (fresh cookie
@@ -239,6 +243,7 @@ export function ScenarioEditor() {
           if (testOnly) setTestRun(r2);
           setPaused(r2.pause ? { position: r2.pause.position, label: r2.pause.label } : null);
           setPlayStatus(r2.pause ? `${label} paused at step #${r2.pause.position}` : `${label} ${r2.status}`);
+          if (r2.status === 'failed') setRunError(failureFromLog(r2.log_text));
           if (r2.status === 'success' || r2.status === 'failed') break;
         } catch {
           /* keep polling */
@@ -662,6 +667,13 @@ export function ScenarioEditor() {
               </span>
             )}
           </h2>
+          {/* Only present after a failed play: the run's error line, so the
+              fix can be made here without opening the run. */}
+          {runError && (
+            <p className="error se-run-error" title="From the run log — click the run link above for the full log">
+              {runError}
+            </p>
+          )}
           <PreviewStream session={SESSION} active={previewActive} />
 
           {/* A test run is kept nowhere, so its log is only ever visible here.

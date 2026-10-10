@@ -375,6 +375,8 @@ button:hover { filter: brightness(1.1); }
 
 .error { color: var(--error); }
 .muted { color: var(--muted); font-size: 13px; }
+/* The failed play's error line under the Preview heading (scenario editor). */
+.se-run-error { margin: 0 0 8px; font-size: 13px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; }
 code { background: rgba(255,255,255,0.06); padding: 2px 4px; border-radius: 3px; }
 
 .editor-grid {
