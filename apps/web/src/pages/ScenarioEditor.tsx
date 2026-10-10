@@ -595,6 +595,7 @@ export function ScenarioEditor() {
               store={stepStore}
               filter={stepFilter === 'all' ? undefined : (step) => STEP_FILTERS[stepFilter].test(step.kind)}
               empty="No steps yet. Take a snapshot, then click any node to add a step."
+              revealNew={compactSteps}
             />
           </div>
 
