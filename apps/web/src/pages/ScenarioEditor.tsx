@@ -14,6 +14,10 @@ const SESSION = 'default';
 const COMPACT_STEPS_KEY = 'eab.scenarioEditor.compactSteps';
 const RETRY_OPEN_KEY = 'eab.scenarioEditor.retryOpen';
 const NOTES_OPEN_KEY = 'eab.scenarioEditor.notesOpen';
+// "Auto diff": after a play that saved screenshots, diff them against the
+// scenario's most recent earlier run that has screenshots. A per-browser
+// preference (unlike "test only", which is per visit).
+const AUTO_DIFF_KEY = 'eab.scenarioEditor.autoDiff';
 const COMPACT_HEIGHT_KEY = 'eab.scenarioEditor.compactHeight';
 
 // View filters for the step list (display only; the scenario is unchanged).
@@ -179,6 +183,22 @@ export function ScenarioEditor() {
   const [paused, setPaused] = useState<{ position: number; label: string | null } | null>(null);
   /** Why the last run played from here failed (from its log); cleared on the next play. */
   const [runError, setRunError] = useState<string | null>(null);
+  const [autoDiff, setAutoDiff] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(AUTO_DIFF_KEY) === '1';
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem(AUTO_DIFF_KEY, autoDiff ? '1' : '0');
+    } catch {
+      /* ignore */
+    }
+  }, [autoDiff]);
+  /** The auto diff's outcome for the last play; cleared on the next play. */
+  const [diffNote, setDiffNote] = useState<{ text: string; link: boolean } | null>(null);
   const [draft, setDraft] = useState<MetaDraft>(emptyDraft());
   const [savingMeta, setSavingMeta] = useState(false);
   const [metaSavedAt, setMetaSavedAt] = useState<number | null>(null);
@@ -235,6 +255,7 @@ export function ScenarioEditor() {
     setLastRunId(null);
     setTestRun(null);
     setRunError(null);
+    setDiffNote(null);
     if (!previewActive) setPreviewActive(true);
     // The server owns session lifecycle now: the runner starts the session if
     // it's down, and `reset: true` restarts it before the run (fresh cookie
@@ -261,6 +282,7 @@ export function ScenarioEditor() {
           setPaused(r2.pause ? { position: r2.pause.position, label: r2.pause.label } : null);
           setPlayStatus(r2.pause ? `${label} paused at step #${r2.pause.position}` : `${label} ${r2.status}`);
           if (r2.status === 'failed') setRunError(failureFromLog(r2.log_text));
+          if (r2.status === 'success' && autoDiff && !testOnly) await autoDiffRun(r2);
           if (r2.status === 'success' || r2.status === 'failed') break;
         } catch {
           /* keep polling */
@@ -271,6 +293,38 @@ export function ScenarioEditor() {
       setPlayStatus(null);
     } finally {
       setPaused(null);
+    }
+  }
+
+  // Diff the finished run's screenshots against the most recent earlier run
+  // of this scenario that has screenshots (any outcome short of that is a
+  // note, never an error — the run itself succeeded).
+  async function autoDiffRun(run: Run) {
+    const shots = (json: string) => { try { return (JSON.parse(json) as string[]).length; } catch { return 0; } };
+    if (shots(run.screenshot_paths_json) === 0) {
+      setDiffNote({ text: 'auto diff: this run saved no screenshots', link: false });
+      return;
+    }
+    try {
+      const earlier = (await api.listRuns({ scenarioId, limit: 50 }))
+        .find((r) => r.id !== run.id && r.id < run.id && r.status === 'success' && shots(r.screenshot_paths_json) > 0);
+      if (!earlier) {
+        setDiffNote({ text: 'auto diff: no earlier run with screenshots to compare against', link: false });
+        return;
+      }
+      const res = await api.compareRuns(scenarioId, { baselineRunId: earlier.id, targetRunId: run.id });
+      if (res.created.length === 0) {
+        setDiffNote({ text: `auto diff vs run #${earlier.id}: no matching screenshots`, link: false });
+        return;
+      }
+      const changed = res.created.filter((c) => (c.mismatch_ratio ?? 0) > 0).length;
+      const unmatched = res.onlyBaseline.length + res.onlyTarget.length;
+      setDiffNote({
+        text: `auto diff vs run #${earlier.id}: ${res.created.length} compared, ${changed === 0 ? 'no changes' : `${changed} changed`}${unmatched ? `, ${unmatched} unmatched` : ''}`,
+        link: true,
+      });
+    } catch (e: any) {
+      setDiffNote({ text: `auto diff failed: ${e?.message ?? e}`, link: false });
     }
   }
 
@@ -455,6 +509,21 @@ export function ScenarioEditor() {
                 onChange={(e) => setTestOnly(e.target.checked)}
               />
               Test only (nothing saved — no run, screenshots, texts or recordings)
+            </span>
+          </label>
+        </div>
+        <div className="scenario-meta-row">
+          <label
+            className="scenario-meta-check"
+            title="After a successful play, diff its screenshots against this scenario's most recent earlier run that has screenshots. The result appears under the preview and on the Diffs page. Has no effect on test-only plays."
+          >
+            <span className="scenario-meta-check-row">
+              <input
+                type="checkbox"
+                checked={autoDiff}
+                onChange={(e) => setAutoDiff(e.target.checked)}
+              />
+              Auto diff (compare the screenshots with the previous run)
             </span>
           </label>
         </div>
@@ -711,6 +780,11 @@ export function ScenarioEditor() {
           {runError && (
             <p className="error se-run-error" title="From the run log — click the run link above for the full log">
               {runError}
+            </p>
+          )}
+          {diffNote && (
+            <p className="muted se-run-error">
+              {diffNote.link ? <Link to="/diffs">{diffNote.text}</Link> : diffNote.text}
             </p>
           )}
           <PreviewStream session={SESSION} active={previewActive} />
