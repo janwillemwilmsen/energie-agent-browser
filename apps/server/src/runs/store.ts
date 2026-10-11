@@ -43,6 +43,17 @@ export type RunDayRow = Omit<RunListRow, 'log_text'> & {
   day: string;
 };
 
+/**
+ * What the Runs page filters on. Brands and types are the Scenario's tags;
+ * an empty list means "any". All conditions combine with AND.
+ */
+export interface RunFilter {
+  scenarioId?: number;
+  brands?: string[];
+  types?: string[];
+  statuses?: string[];
+}
+
 export interface LatestRun {
   id: number;
   started_at: string;
@@ -67,8 +78,11 @@ export interface RunStore {
 
   get(id: number): RunRow | undefined;
   getWithScenario(id: number): RunListRow | undefined;
-  /** Newest first, joined with the Scenario; optionally one Scenario's only. */
-  list(opts?: { limit?: number; scenarioId?: number }): RunListRow[];
+  /**
+   * Newest first, joined with the Scenario. The filter applies BEFORE the
+   * window, so `limit` is "this many of the matching runs".
+   */
+  list(opts?: RunFilter & { limit?: number }): RunListRow[];
   /** Every Run of one Scenario, oldest first. */
   listForScenario(scenarioId: number): RunRow[];
   /**
@@ -77,8 +91,8 @@ export interface RunStore {
    * day a Scenario ran, so it stays small where list() would carry every Run.
    */
   listLatestPerDay(): RunDayRow[];
-  /** How many Runs exist in total (the Runs page shows a window of them). */
-  count(): number;
+  /** How many Runs match the filter (all of them when none), however old. */
+  count(opts?: RunFilter): number;
   /** Runs started within a sqlite datetime window such as '-1 day', newest first. */
   listStartedSince(window: string): RunListRow[];
   latestFinishedForScenario(scenarioId: number): LatestRun | undefined;
@@ -109,6 +123,26 @@ export function parseScreenshots(json: string | null | undefined): string[] {
   }
 }
 
+// The WHERE clause for a RunFilter, with its positional params. Lists become
+// `IN (?, ?, …)`; an empty list adds no condition.
+function filterSql(f: RunFilter): { where: string; params: unknown[] } {
+  const conds: string[] = [];
+  const params: unknown[] = [];
+  const inList = (column: string, values: string[] | undefined) => {
+    if (!values || values.length === 0) return;
+    conds.push(`${column} IN (${values.map(() => '?').join(', ')})`);
+    params.push(...values);
+  };
+  if (f.scenarioId != null) {
+    conds.push('runs.scenario_id = ?');
+    params.push(f.scenarioId);
+  }
+  inList('scenarios.brand', f.brands);
+  inList('scenarios.type', f.types);
+  inList('runs.status', f.statuses);
+  return { where: conds.length ? `WHERE ${conds.join(' AND ')}` : '', params };
+}
+
 export function createRunStore(deps: { db: Database; dataDir: string }): RunStore {
   const { db, dataDir } = deps;
   const root = path.join(dataDir, 'screenshots');
@@ -128,12 +162,6 @@ export function createRunStore(deps: { db: Database; dataDir: string }): RunStor
       `SELECT runs.*, scenarios.name AS scenario_name, scenarios.brand, scenarios.type
        FROM runs LEFT JOIN scenarios ON scenarios.id = runs.scenario_id
        WHERE runs.id = ?`,
-    ),
-    list: db.prepare(
-      `SELECT runs.*, scenarios.name AS scenario_name, scenarios.brand, scenarios.type
-       FROM runs LEFT JOIN scenarios ON scenarios.id = runs.scenario_id
-       WHERE (? IS NULL OR runs.scenario_id = ?)
-       ORDER BY runs.id DESC LIMIT ?`,
     ),
     listForScenario: db.prepare(
       'SELECT * FROM runs WHERE scenario_id = ? ORDER BY started_at ASC, id ASC',
@@ -162,7 +190,6 @@ export function createRunStore(deps: { db: Database; dataDir: string }): RunStor
        LIMIT 1`,
     ),
     ids: db.prepare('SELECT id FROM runs'),
-    count: db.prepare('SELECT COUNT(*) AS n FROM runs'),
     inFlight: db.prepare("SELECT id FROM runs WHERE status IN ('running', 'queued')"),
     delete: db.prepare('DELETE FROM runs WHERE id = ?'),
   };
@@ -212,10 +239,26 @@ export function createRunStore(deps: { db: Database; dataDir: string }): RunStor
 
     get: (id) => q.get.get(id) as RunRow | undefined,
     getWithScenario: (id) => q.getWithScenario.get(id) as RunListRow | undefined,
-    list: (opts = {}) => q.list.all(opts.scenarioId ?? null, opts.scenarioId ?? null, opts.limit ?? 100) as RunListRow[],
+    list: (opts = {}) => {
+      const { where, params } = filterSql(opts);
+      return db
+        .prepare(
+          `SELECT runs.*, scenarios.name AS scenario_name, scenarios.brand, scenarios.type
+           FROM runs LEFT JOIN scenarios ON scenarios.id = runs.scenario_id
+           ${where}
+           ORDER BY runs.id DESC LIMIT ?`,
+        )
+        .all(...params, opts.limit ?? 100) as RunListRow[];
+    },
+    count: (opts = {}) => {
+      const { where, params } = filterSql(opts);
+      const row = db
+        .prepare(`SELECT COUNT(*) AS n FROM runs LEFT JOIN scenarios ON scenarios.id = runs.scenario_id ${where}`)
+        .get(...params) as { n: number };
+      return row.n;
+    },
     listForScenario: (scenarioId) => q.listForScenario.all(scenarioId) as RunRow[],
     listLatestPerDay: () => q.listLatestPerDay.all() as RunDayRow[],
-    count: () => (q.count.get() as { n: number }).n,
     listStartedSince: (window) => q.listSince.all(window) as RunListRow[],
     latestFinishedForScenario(scenarioId) {
       const row = q.latestFinished.get(scenarioId) as

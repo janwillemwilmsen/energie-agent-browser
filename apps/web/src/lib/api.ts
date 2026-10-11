@@ -454,6 +454,28 @@ export type StorageCleanupAction =
   | 'orphan-diffs'
   | 'missing-recordings'
   | 'vacuum';
+
+/** The Runs page filter, shared by the list and its count. */
+export interface RunQuery {
+  scenarioId?: number;
+  brands?: Iterable<string>;
+  types?: Iterable<string>;
+  statuses?: Iterable<string>;
+}
+
+function runQuery(opts: RunQuery): URLSearchParams {
+  const q = new URLSearchParams();
+  if (opts.scenarioId) q.set('scenarioId', String(opts.scenarioId));
+  const csv = (key: string, values?: Iterable<string>) => {
+    const list = values ? Array.from(values) : [];
+    if (list.length) q.set(key, list.join(','));
+  };
+  csv('brand', opts.brands);
+  csv('type', opts.types);
+  csv('status', opts.statuses);
+  return q;
+}
+
 export const api = {
   listScenarios: () => req<Scenario[]>('/api/scenarios'),
   listScenarioCards: () => req<ScenarioCard[]>('/api/scenarios/cards'),
@@ -468,18 +490,23 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ reset: opts.reset ?? false, testOnly: opts.testOnly ?? false }),
     }),
-  /** Newest first; `limit` reaches further back, `scenarioId` narrows to one scenario. */
-  listRuns: (opts: { limit?: number; scenarioId?: number } = {}) => {
-    const q = new URLSearchParams();
+  /**
+   * Newest first. The filter (one scenario, brands, types, statuses) applies
+   * before the window, so `limit` is "this many of the matching runs".
+   */
+  listRuns: (opts: RunQuery & { limit?: number } = {}) => {
+    const q = runQuery(opts);
     if (opts.limit) q.set('limit', String(opts.limit));
-    if (opts.scenarioId) q.set('scenarioId', String(opts.scenarioId));
     const qs = q.toString();
     return req<Run[]>(`/api/runs${qs ? `?${qs}` : ''}`);
   },
+  /** How many runs match the same filter, however old. */
+  countRuns: (opts: RunQuery = {}) => {
+    const qs = runQuery(opts).toString();
+    return req<{ total: number }>(`/api/runs/count${qs ? `?${qs}` : ''}`);
+  },
   /** Latest run per scenario per day, whole history, no log text (the Screenshots gallery). */
   listRunsDaily: () => req<RunDay[]>('/api/runs/daily'),
-  /** Total number of runs, however old. */
-  countRuns: () => req<{ total: number }>('/api/runs/count'),
   getRun: (id: number) => req<Run & { pause: PausedRun | null }>(`/api/runs/${id}`),
   pausedRuns: () => req<PausedRun[]>('/api/runs/paused'),
   resumeRun: (id: number) => req<{ ok: true }>(`/api/runs/${id}/resume`, { method: 'POST' }),

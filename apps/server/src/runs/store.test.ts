@@ -71,6 +71,25 @@ describe('Run store', () => {
     expect(store.listStartedSince('-1 day')).toHaveLength(2);
   });
 
+  it('filters by brand / type / status before the window, and counts the same way', () => {
+    const blog = Number(
+      db.prepare(`INSERT INTO scenarios (name, url, brand, type) VALUES ('Blog', 'https://blog.test/', 'other', 'content')`).run().lastInsertRowid,
+    );
+    // Three newer Blog runs, then one older Shop (brand acme) run. A window of
+    // 2 over everything never reaches the Shop run; the filter must.
+    const shop = store.create(scenarioId).runId;
+    store.finish(shop, 'failed', '', []);
+    const blogs = [store.create(blog).runId, store.create(blog).runId, store.create(blog).runId];
+    expect(store.list({ limit: 2 }).map((r) => r.id)).toEqual([blogs[2], blogs[1]]);
+    expect(store.list({ limit: 2, brands: ['acme'] }).map((r) => r.id)).toEqual([shop]);
+    expect(store.list({ brands: ['acme', 'other'], statuses: ['running'] }).map((r) => r.id)).toEqual([blogs[2], blogs[1], blogs[0]]);
+    expect(store.list({ types: ['content'], limit: 1 })).toHaveLength(1);
+    expect(store.count()).toBe(4);
+    expect(store.count({ brands: ['acme'] })).toBe(1);
+    expect(store.count({ statuses: ['failed'] })).toBe(1);
+    expect(store.count({ scenarioId: blog, statuses: ['failed'] })).toBe(0);
+  });
+
   it('lists the latest Run per Scenario per day over the whole history, without the log', () => {
     const other = Number(
       db.prepare(`INSERT INTO scenarios (name, url, type) VALUES ('Blog', 'https://blog.test/', 'content')`).run().lastInsertRowid,

@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { api, type PausedRun, type Run } from '../lib/api.js';
+import { api, type PausedRun, type Run, type Scenario } from '../lib/api.js';
 import { GroupBySwitch, GroupLabel, groupKey, sortByGroup, type GroupBy } from '../lib/tagGrouping.js';
 import { useResource, usePolling } from '../lib/resource.js';
 
@@ -33,21 +33,30 @@ export function Runs() {
   // editor's play status). Applied once, so the 4s refresh won't fight clicks.
   const appliedRunParam = useRef(false);
 
-  // The list is a window on the newest runs (the "Show" dropdown sets how
-  // many); /runs?scenario=<id> instead shows one scenario's whole history,
-  // however old — the way to find a run that fell out of the window.
+  // The list is a window on the newest MATCHING runs: the Brand / Type /
+  // status chips go to the server with the request, so "show 100" with the
+  // Essent chip on is the 100 newest Essent runs. /runs?scenario=<id> instead
+  // shows one scenario's whole history, however old — the way to find a run
+  // that fell out of the window.
   const scenarioParam = Number(searchParams.get('scenario')) || null;
   const [limit, setLimit] = useState<number>(PAGE);
+  // The sets are state, so a joined key is what the resource deps watch.
+  const filterKey = [...selectedBrands].join(',') + '|' + [...selectedTypes].join(',') + '|' + [...selectedStatuses].join(',');
+  const filter = scenarioParam
+    ? { scenarioId: scenarioParam }
+    : { brands: selectedBrands, types: selectedTypes, statuses: selectedStatuses };
   const { data: runs, error: err, setError: setErr, refresh: load, loading } = useResource(
-    () => api.listRuns(scenarioParam ? { scenarioId: scenarioParam, limit: ALL } : { limit }),
-    { initial: [] as Run[], deps: [scenarioParam, limit] },
+    () => api.listRuns({ ...filter, limit: scenarioParam ? ALL : limit }),
+    { initial: [] as Run[], deps: [scenarioParam, limit, filterKey] },
   );
-  // How many runs exist in total, so the window reads "100 of 1,187".
-  // Refreshed with the list, so new and deleted runs keep it right.
+  // How many runs match the same filter, however old, so the window reads
+  // "100 of 312". Refreshed with the list, so new and deleted runs keep it right.
   const { data: total, refresh: refreshTotal } = useResource(
-    () => api.countRuns().then((r) => r.total),
-    { initial: null as number | null },
+    () => api.countRuns(filter).then((r) => r.total),
+    { initial: null as number | null, deps: [scenarioParam, filterKey] },
   );
+  // Every tag in use, so a chip is offered even when no loaded run carries it.
+  const { data: allScenarios } = useResource(() => api.listScenarios(), { initial: [] as Scenario[] });
 
   // `selected` captures the run row at click-time, so its log never grew
   // between polls. `liveSelected` re-resolves the same id against the latest
@@ -97,8 +106,8 @@ export function Runs() {
       .catch((e) => setErr(`Run #${raw}: ${e?.message ?? e}`));
   }, [runs, loading, searchParams, scenarioParam, navigate, setErr]);
 
-  const brands = useMemo(() => collectTagValues(runs, 'brand'), [runs]);
-  const types = useMemo(() => collectTagValues(runs, 'type'), [runs]);
+  const brands = useMemo(() => collectTagValues(allScenarios, 'brand'), [allScenarios]);
+  const types = useMemo(() => collectTagValues(allScenarios, 'type'), [allScenarios]);
 
   const visibleRuns = useMemo(() => {
     return runs.filter((r) => {
@@ -337,9 +346,8 @@ export function Runs() {
         </div>
       </details>
 
-      {/* How far back the list reaches. The Brand/Type filter chips above are
-          built from the loaded rows, so a short window also hides tags that
-          only older runs carry — widen it to see them. */}
+      {/* How far back the list reaches, counted over the runs that match the
+          filter chips above. */}
       {!scenarioParam && (
         <div className="runs-window muted" role="group" aria-label="How many of the most recent runs to show">
           Show
@@ -359,11 +367,8 @@ export function Runs() {
           most recent runs
           {total != null && (
             <span>
-              — showing <strong>{visibleRuns.length.toLocaleString()}</strong>
-              {activeFilterCount > 0 && (
-                <> (filtered from {Math.min(runs.length, total).toLocaleString()} loaded)</>
-              )}{' '}
-              of <strong>{total.toLocaleString()}</strong> run{total === 1 ? '' : 's'}
+              — showing <strong>{visibleRuns.length.toLocaleString()}</strong> of{' '}
+              <strong>{total.toLocaleString()}</strong>{activeFilterCount > 0 ? ' matching' : ''} run{total === 1 ? '' : 's'}
             </span>
           )}
         </div>
@@ -642,9 +647,9 @@ function screenshotCount(r: Run): number {
   }
 }
 
-function collectTagValues(runs: Run[], key: 'brand' | 'type'): string[] {
+function collectTagValues(rows: { brand?: string | null; type?: string | null }[], key: 'brand' | 'type'): string[] {
   const set = new Set<string>();
-  for (const r of runs) {
+  for (const r of rows) {
     const v = r[key];
     if (v) set.add(v);
   }

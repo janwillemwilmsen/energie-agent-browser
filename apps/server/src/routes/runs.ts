@@ -36,19 +36,41 @@ export async function runsRoutes(app: FastifyInstance) {
 
   // Newest first. `limit` pages the list back in time; `scenarioId` narrows
   // it to one scenario (its whole history fits the default limit for years).
-  const ListQuery = z.object({
-    limit: z.coerce.number().int().min(1).max(100_000).default(100),
+  // Brand / type / status filters are comma-separated lists; they apply
+  // before the window, so `limit` is "this many of the matching runs".
+  const csv = z
+    .string()
+    .optional()
+    .transform((s) => (s ?? '').split(',').map((v) => v.trim()).filter(Boolean));
+  const FilterQuery = z.object({
     scenarioId: z.coerce.number().int().positive().optional(),
+    brand: csv,
+    type: csv,
+    status: csv,
   });
-  app.get('/api/runs', async (req) => runStore().list(ListQuery.parse(req.query ?? {})));
+  const ListQuery = FilterQuery.extend({
+    limit: z.coerce.number().int().min(1).max(100_000).default(100),
+  });
+  const toFilter = (q: z.infer<typeof FilterQuery>) => ({
+    scenarioId: q.scenarioId,
+    brands: q.brand,
+    types: q.type,
+    statuses: q.status,
+  });
+  app.get('/api/runs', async (req) => {
+    const q = ListQuery.parse(req.query ?? {});
+    return runStore().list({ ...toFilter(q), limit: q.limit });
+  });
 
   // The latest run per scenario per day, all history, no log text. The
   // Screenshots gallery reads this: a window over /api/runs would hide
   // scenarios that have not run recently.
   app.get('/api/runs/daily', async () => runStore().listLatestPerDay());
 
-  // Total number of runs, for the Runs page's "N of M" next to its window.
-  app.get('/api/runs/count', async () => ({ total: runStore().count() }));
+  // Number of runs matching the same filters, for the Runs page's "N of M".
+  app.get('/api/runs/count', async (req) => ({
+    total: runStore().count(toFilter(FilterQuery.parse(req.query ?? {}))),
+  }));
 
   // Runs parked at a `pause` step right now, for the Resume/Abort buttons.
   app.get('/api/runs/paused', async () => listPaused());
