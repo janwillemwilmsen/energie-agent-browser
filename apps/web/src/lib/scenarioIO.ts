@@ -34,6 +34,8 @@ export interface PortableScenario {
   step_settle_ms: number;
   // Free-text notes; absent in older bundles → ''.
   notes: string;
+  // Editor play option; absent in older bundles → off.
+  auto_diff: number;
   // Resolved by name for portability; null when the scenario has no preflight.
   preflight_name: string | null;
   steps: PortableStep[];
@@ -70,6 +72,7 @@ export function toPortableScenario(
     step_scroll_into_view: detail.step_scroll_into_view ?? 0,
     step_settle_ms: detail.step_settle_ms ?? 0,
     notes: detail.notes ?? '',
+    auto_diff: detail.auto_diff ?? 0,
     preflight_name:
       detail.preflight_id != null ? preflightNameById.get(detail.preflight_id) ?? null : null,
     steps: detail.steps
@@ -139,6 +142,7 @@ function validateScenario(s: any, idx: number): PortableScenario {
     step_scroll_into_view: s.step_scroll_into_view ? 1 : 0,
     step_settle_ms: Number(s.step_settle_ms) || 0,
     notes: typeof s.notes === 'string' ? s.notes : '',
+    auto_diff: s.auto_diff ? 1 : 0,
     preflight_name: typeof s.preflight_name === 'string' ? s.preflight_name : null,
     steps: outSteps,
   };
@@ -184,7 +188,7 @@ export async function importPortableScenario(
   // update if any value is non-default.
   if (
     s.retries || s.retry_wait_before_ms || s.retry_wait_after_ms || s.restart_on_failure ||
-    s.step_scroll_into_view || s.step_settle_ms || s.notes
+    s.step_scroll_into_view || s.step_settle_ms || s.notes || s.auto_diff
   ) {
     await api.updateScenario(created.id, {
       retries: s.retries,
@@ -194,6 +198,7 @@ export async function importPortableScenario(
       step_scroll_into_view: s.step_scroll_into_view,
       step_settle_ms: s.step_settle_ms,
       notes: s.notes,
+      auto_diff: s.auto_diff,
     });
   }
 

@@ -25,6 +25,8 @@ export interface Scenario {
   step_settle_ms: number;
   /** Free-text notes for the editor's own reference ('' when none). */
   notes: string;
+  /** 0/1: the editor diffs a successful play against the previous run. */
+  auto_diff: number;
   created_at: string;
   updated_at: string;
 }

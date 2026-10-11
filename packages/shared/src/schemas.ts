@@ -311,6 +311,8 @@ export const ScenarioCreate = z.object({
   step_settle_ms: z.number().int().min(0).max(60_000).optional(),
   // Free-text notes for the editor's own reference; not used by runs.
   notes: z.string().max(20_000).optional(),
+  // Editor play option (0/1): diff a successful play against the previous run.
+  auto_diff: z.number().int().min(0).max(1).optional(),
 });
 export type ScenarioCreate = z.infer<typeof ScenarioCreate>;
 

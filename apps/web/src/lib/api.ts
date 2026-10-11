@@ -519,6 +519,7 @@ export const api = {
         | 'step_scroll_into_view'
         | 'step_settle_ms'
         | 'notes'
+        | 'auto_diff'
       >
     >,
   ) => req<Scenario>(`/api/scenarios/${id}`, { method: 'PUT', body: JSON.stringify(body) }),

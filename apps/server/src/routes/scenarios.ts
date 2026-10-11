@@ -98,8 +98,8 @@ export async function scenariosRoutes(app: FastifyInstance) {
           `INSERT INTO scenarios (name, url, viewport_preset, brand, type,
              retries, retry_wait_before_ms, retry_wait_after_ms, restart_on_failure,
              preflight_id, preflight_mode, record_enabled,
-             step_scroll_into_view, step_settle_ms, notes)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             step_scroll_into_view, step_settle_ms, notes, auto_diff)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           body.name ?? `${src.name} (copy)`,
@@ -117,6 +117,7 @@ export async function scenariosRoutes(app: FastifyInstance) {
           src.step_scroll_into_view,
           src.step_settle_ms,
           src.notes ?? '',
+          src.auto_diff ?? 0,
         );
       db.prepare(
         `INSERT INTO scenario_steps (scenario_id, position, kind, payload_json)
@@ -142,7 +143,7 @@ export async function scenariosRoutes(app: FastifyInstance) {
        SET name = ?, url = ?, viewport_preset = ?, brand = ?, type = ?,
            retries = ?, retry_wait_before_ms = ?, retry_wait_after_ms = ?, restart_on_failure = ?,
            preflight_id = ?, preflight_mode = ?, record_enabled = ?,
-           step_scroll_into_view = ?, step_settle_ms = ?, notes = ?,
+           step_scroll_into_view = ?, step_settle_ms = ?, notes = ?, auto_diff = ?,
            updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
     ).run(
@@ -161,6 +162,7 @@ export async function scenariosRoutes(app: FastifyInstance) {
       next.step_scroll_into_view ? 1 : 0,
       Math.max(0, Number(next.step_settle_ms ?? 0)),
       typeof next.notes === 'string' ? next.notes : '',
+      next.auto_diff ? 1 : 0,
       Number(req.params.id),
     );
 

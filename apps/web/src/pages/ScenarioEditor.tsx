@@ -14,10 +14,6 @@ const SESSION = 'default';
 const COMPACT_STEPS_KEY = 'eab.scenarioEditor.compactSteps';
 const RETRY_OPEN_KEY = 'eab.scenarioEditor.retryOpen';
 const NOTES_OPEN_KEY = 'eab.scenarioEditor.notesOpen';
-// "Auto diff": after a play that saved screenshots, diff them against the
-// scenario's most recent earlier run that has screenshots. A per-browser
-// preference (unlike "test only", which is per visit).
-const AUTO_DIFF_KEY = 'eab.scenarioEditor.autoDiff';
 const COMPACT_HEIGHT_KEY = 'eab.scenarioEditor.compactHeight';
 
 // View filters for the step list (display only; the scenario is unchanged).
@@ -183,20 +179,6 @@ export function ScenarioEditor() {
   const [paused, setPaused] = useState<{ position: number; label: string | null } | null>(null);
   /** Why the last run played from here failed (from its log); cleared on the next play. */
   const [runError, setRunError] = useState<string | null>(null);
-  const [autoDiff, setAutoDiff] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem(AUTO_DIFF_KEY) === '1';
-    } catch {
-      return false;
-    }
-  });
-  useEffect(() => {
-    try {
-      localStorage.setItem(AUTO_DIFF_KEY, autoDiff ? '1' : '0');
-    } catch {
-      /* ignore */
-    }
-  }, [autoDiff]);
   /** The auto diff's outcome for the last play; cleared on the next play. */
   const [diffNote, setDiffNote] = useState<{ text: string; link: boolean } | null>(null);
   const [draft, setDraft] = useState<MetaDraft>(emptyDraft());
@@ -239,6 +221,7 @@ export function ScenarioEditor() {
       step_scroll_into_view: number;
       step_settle_ms: number;
       notes: string;
+      auto_diff: number;
     }>,
   ) {
     try {
@@ -282,7 +265,7 @@ export function ScenarioEditor() {
           setPaused(r2.pause ? { position: r2.pause.position, label: r2.pause.label } : null);
           setPlayStatus(r2.pause ? `${label} paused at step #${r2.pause.position}` : `${label} ${r2.status}`);
           if (r2.status === 'failed') setRunError(failureFromLog(r2.log_text));
-          if (r2.status === 'success' && autoDiff && !testOnly) await autoDiffRun(r2);
+          if (r2.status === 'success' && data?.auto_diff && !testOnly) await autoDiffRun(r2);
           if (r2.status === 'success' || r2.status === 'failed') break;
         } catch {
           /* keep polling */
@@ -515,13 +498,13 @@ export function ScenarioEditor() {
         <div className="scenario-meta-row">
           <label
             className="scenario-meta-check"
-            title="After a successful play, diff its screenshots against this scenario's most recent earlier run that has screenshots. The result appears under the preview and on the Diffs page. Has no effect on test-only plays."
+            title="After a successful play, diff its screenshots against this scenario's most recent earlier run that has screenshots. The result appears under the preview and on the Diffs page. Has no effect on test-only plays. Saved with the scenario."
           >
             <span className="scenario-meta-check-row">
               <input
                 type="checkbox"
-                checked={autoDiff}
-                onChange={(e) => setAutoDiff(e.target.checked)}
+                checked={!!data.auto_diff}
+                onChange={(e) => void saveRetry({ auto_diff: e.target.checked ? 1 : 0 })}
               />
               Auto diff (compare the screenshots with the previous run)
             </span>
