@@ -18,7 +18,7 @@ export function Runs() {
   const [selectedTypes, setSelectedTypes] = useState<Set<string>>(new Set());
   const [selectedStatuses, setSelectedStatuses] = useState<Set<string>>(new Set());
   // Ordered, unbounded selection. Drives both bulk-delete and compare (which
-  // requires exactly two, baseline = first picked). Order is preserved.
+  // requires exactly two; the server makes the older one the baseline).
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [lastIndex, setLastIndex] = useState<number | null>(null);
   const [comparing, setComparing] = useState(false);
@@ -198,7 +198,7 @@ export function Runs() {
     setComparing(true);
     setErr(null);
     try {
-      // First picked run is the baseline.
+      // Any order: the server puts the older run as the baseline.
       const [baseline, target] = selectedRows;
       const res = await api.compareRuns(baseline!.scenario_id, {
         baselineRunId: baseline!.id,

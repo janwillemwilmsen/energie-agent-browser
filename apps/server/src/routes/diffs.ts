@@ -260,8 +260,16 @@ export async function diffsRoutes(app: FastifyInstance) {
   // matching pair. Returns created comparisons plus the unmatched slots.
   app.post<{ Params: { id: string } }>('/api/scenarios/:id/compare-runs', async (req, reply) => {
     const scenarioId = Number(req.params.id);
-    const body = CompareRuns.parse(req.body);
+    const picked = CompareRuns.parse(req.body);
     const db = getDb();
+
+    // The baseline is always the OLDER run, whichever order the caller named
+    // them in: a diff reads "what changed since", never the other way round.
+    const a = runStore().get(picked.baselineRunId);
+    const b = runStore().get(picked.targetRunId);
+    if (!a || !b) return reply.code(404).send({ error: 'run_not_found' });
+    const older = (x: typeof a, y: typeof b) => x.started_at < y.started_at || (x.started_at === y.started_at && x.id < y.id);
+    const body = older(b, a) ? { ...picked, baselineRunId: b.id, targetRunId: a.id } : picked;
 
     const baseSlots = runStore().screenshots(body.baselineRunId);
     const targetSlots = runStore().screenshots(body.targetRunId);

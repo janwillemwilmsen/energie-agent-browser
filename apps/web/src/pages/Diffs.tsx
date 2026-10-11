@@ -6,9 +6,8 @@ import { matchesTags, NO_TAGS, TagFilter, tagsActive, tagValues, type TagSelecti
 
 // One <details> per run pair: the summary line carries scenario, both runs
 // with their dates, and the change figures; the screenshots unfold on demand
-// so a long history stays scannable. Baseline is the run the comparison was
-// made against (the older run when made by Auto diff; the first-picked run
-// on the Runs page) — the dates make that visible.
+// so a long history stays scannable. The baseline is always the older run
+// (the server orders a pair that way however it was picked).
 
 function pct(ratio: number | null): string {
   if (ratio == null) return '—';
@@ -153,8 +152,6 @@ export function Diffs() {
             const scenario = g.scenarioId != null ? scenarios.get(g.scenarioId) : undefined;
             const scenarioLabel =
               g.scenarioId != null ? scenario?.name ?? `Scenario #${g.scenarioId}` : 'ad-hoc';
-            const newerBaseline =
-              g.baselineRun && g.targetRun && g.baselineRun.started_at > g.targetRun.started_at;
             return (
               // all closed by default; the rest unfold on click.
               <details key={g.key} className="diff-group">
@@ -177,9 +174,6 @@ export function Diffs() {
                 </summary>
 
                 <div className="diff-group-actions">
-                  {newerBaseline && (
-                    <span className="muted">baseline is the newer run here (compared the other way round)</span>
-                  )}
                   <span className="diff-group-actions-right">
                     <RunDeleteButton kind="baseline" id={g.baselineRunId} run={g.baselineRun} onDelete={deleteRun} />
                     <RunDeleteButton kind="target" id={g.targetRunId} run={g.targetRun} onDelete={deleteRun} />
