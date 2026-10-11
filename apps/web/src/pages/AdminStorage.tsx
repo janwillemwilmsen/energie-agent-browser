@@ -160,7 +160,7 @@ export function AdminStorage() {
       .reduce((n, r) => n + r.bytes + r.thumbBytes, 0);
     if (
       !confirm(
-        `Delete ${label} (${fmtSize(total)} of screenshots)?\n\nThis removes the run row(s) and their screenshot folder(s). Video recordings are kept and stay listed on the Recordings page.`,
+        `Delete ${label} (${fmtSize(total)} of screenshots)?\n\nThis removes the run row(s), their screenshot folder(s) and their video recordings.`,
       )
     ) {
       return;
@@ -725,8 +725,8 @@ export function AdminStorage() {
       {/* ---- Runs by size ---- */}
       <h2>Runs by disk usage</h2>
       <p className="muted">
-        Screenshot folders per run, largest first. Deleting a run removes its row and screenshots;
-        recordings are kept (delete them below).
+        Screenshot folders per run, largest first. Deleting a run removes its row, its screenshots
+        and its video recordings.
         {activeFilterCount > 0 && (
           <>
             {' '}Showing <strong>{fmtInt(filteredRuns.length)}</strong> of {fmtInt(runs.length)} runs
@@ -815,7 +815,7 @@ export function AdminStorage() {
                       <button
                         className="btn-danger"
                         disabled={busy != null || live}
-                        title={live ? 'Run is still in progress' : 'Delete this run and its screenshots'}
+                        title={live ? 'Run is still in progress' : 'Delete this run with its screenshots and video recordings'}
                         onClick={() => void deleteRunIds([r.runId], `run #${r.runId}`)}
                       >
                         Delete

@@ -90,7 +90,7 @@ export function Diffs() {
   );
 
   async function deleteRun(runId: number) {
-    if (!confirm(`Delete run #${runId} and its screenshots?\n\nThe diffs keep their own copies and stay viewable.`)) return;
+    if (!confirm(`Delete run #${runId} with its screenshots, texts and video recording?\n\nThe diffs keep their own copies and stay viewable.`)) return;
     try {
       await api.deleteRun(runId);
       await load();
@@ -246,7 +246,7 @@ function RunDeleteButton({
   return (
     <button
       className="diff-del-run"
-      title={`Delete the ${kind} run #${id} (${run.started_at}) and its screenshots — these diffs stay`}
+      title={`Delete the ${kind} run #${id} (${run.started_at}) with its screenshots, texts and video recording — these diffs stay`}
       onClick={() => onDelete(id)}
     >
       Delete {kind} run #{id}

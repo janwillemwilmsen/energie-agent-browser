@@ -219,7 +219,7 @@ export function Runs() {
 
   async function deleteSelected() {
     if (selectedIds.length === 0) return;
-    if (!confirm(`Delete ${selectedIds.length} run(s) and their screenshots?`)) return;
+    if (!confirm(`Delete ${selectedIds.length} run(s) with their screenshots, texts and video recordings?`)) return;
     setDeleting(true);
     setErr(null);
     try {
@@ -235,7 +235,7 @@ export function Runs() {
   }
 
   async function removeOne(id: number) {
-    if (!confirm(`Delete run #${id} and its screenshots?`)) return;
+    if (!confirm(`Delete run #${id} with its screenshots, texts and video recording?`)) return;
     try {
       await api.deleteRun(id);
       if (selected?.id === id) setSelected(null);

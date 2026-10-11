@@ -108,7 +108,10 @@ export interface RunStore {
   /** Absolute path of one screenshot; null if `name` is not a plain filename. Existence is not checked. */
   screenshotPath(runId: number, name: string): string | null;
 
-  /** Delete rows and directories together. Orphan directories (no row) go too. In-flight Runs are skipped. */
+  /**
+   * Delete rows and directories together, and the Runs' video recordings
+   * (rows + files). Orphan directories (no row) go too. In-flight Runs are skipped.
+   */
   deleteRuns(ids: number[]): DeleteResult;
   deleteAll(): DeleteResult;
 }
@@ -190,6 +193,10 @@ export function createRunStore(deps: { db: Database; dataDir: string }): RunStor
        LIMIT 1`,
     ),
     ids: db.prepare('SELECT id FROM runs'),
+    // A run's video recordings go with the run (soft reference: no FK, so
+    // this is the one place that keeps rows and files in step).
+    recordingsOf: db.prepare('SELECT id, file_path FROM recordings WHERE run_id = ?'),
+    deleteRecording: db.prepare('DELETE FROM recordings WHERE id = ?'),
     inFlight: db.prepare("SELECT id FROM runs WHERE status IN ('running', 'queued')"),
     delete: db.prepare('DELETE FROM runs WHERE id = ?'),
   };
@@ -204,18 +211,31 @@ export function createRunStore(deps: { db: Database; dataDir: string }): RunStor
     }
   }
 
-  const deleteIds = db.transaction((ids: number[]): number => {
-    let n = 0;
-    for (const id of ids) n += q.delete.run(id).changes;
-    return n;
+  // Rows first (runs and their recordings, one transaction), files after:
+  // a file that fails to go is an orphan the storage admin can sweep, a row
+  // that outlives its file is a broken link on a page.
+  const deleteIds = db.transaction((ids: number[]): { deleted: number; recordingFiles: string[] } => {
+    let deleted = 0;
+    const recordingFiles: string[] = [];
+    for (const id of ids) {
+      for (const rec of q.recordingsOf.all(id) as { id: number; file_path: string }[]) {
+        q.deleteRecording.run(rec.id);
+        recordingFiles.push(rec.file_path);
+      }
+      deleted += q.delete.run(id).changes;
+    }
+    return { deleted, recordingFiles };
   });
 
   function deleteRuns(ids: number[]): DeleteResult {
     const inFlight = inFlightIds();
     const skipped = ids.filter((id) => inFlight.has(id));
     const target = ids.filter((id) => !inFlight.has(id));
-    const deleted = deleteIds(target);
+    const { deleted, recordingFiles } = deleteIds(target);
     for (const id of target) removeDir(id);
+    for (const rel of recordingFiles) {
+      try { fs.rmSync(path.join(dataDir, rel), { force: true }); } catch { /* orphan, swept by the storage admin */ }
+    }
     return { deleted, skipped };
   }
 

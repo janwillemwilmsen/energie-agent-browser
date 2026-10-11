@@ -138,6 +138,29 @@ describe('Run store', () => {
     expect(fs.existsSync(path.join(dataDir, 'screenshots', '777'))).toBe(false);
   });
 
+  it('deletes a Run\'s video recordings with it — rows and files — and nothing else\'s', () => {
+    const gone = store.create(scenarioId).runId;
+    store.finish(gone, 'success', '', []);
+    const kept = store.create(scenarioId).runId;
+    store.finish(kept, 'success', '', []);
+    const video = (runId: number, name: string) => {
+      const rel = path.join('recordings', String(scenarioId), name);
+      fs.mkdirSync(path.join(dataDir, 'recordings', String(scenarioId)), { recursive: true });
+      fs.writeFileSync(path.join(dataDir, rel), 'webm');
+      db.prepare('INSERT INTO recordings (scenario_id, run_id, file_path, size_bytes) VALUES (?, ?, ?, 4)').run(scenarioId, runId, rel);
+      return rel;
+    };
+    const a = video(gone, 'a.webm');
+    const b = video(gone, 'b.webm');
+    const c = video(kept, 'c.webm');
+
+    expect(store.deleteRuns([gone])).toEqual({ deleted: 1, skipped: [] });
+    expect(fs.existsSync(path.join(dataDir, a))).toBe(false);
+    expect(fs.existsSync(path.join(dataDir, b))).toBe(false);
+    expect(fs.existsSync(path.join(dataDir, c))).toBe(true);
+    expect(db.prepare('SELECT run_id FROM recordings ORDER BY id').all()).toEqual([{ run_id: kept }]);
+  });
+
   it('deleteAll leaves only in-flight Runs', () => {
     const a = store.create(scenarioId).runId;
     store.finish(a, 'success', '', []);

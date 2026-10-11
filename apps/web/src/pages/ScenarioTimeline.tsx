@@ -11,7 +11,7 @@ export function ScenarioTimeline() {
   const [err, setErr] = useState<string | null>(null);
 
   async function removeRun(runId: number) {
-    if (!confirm(`Delete run #${runId} and its screenshots?`)) return;
+    if (!confirm(`Delete run #${runId} with its screenshots, texts and video recording?`)) return;
     setErr(null);
     try {
       await api.deleteRun(runId);
