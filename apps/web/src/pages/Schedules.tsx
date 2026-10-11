@@ -260,8 +260,9 @@ export function Schedules() {
       <ServerClock />
       {err && <p className="error">{err}</p>}
 
-      <form onSubmit={create} className="card">
-        <h3>New schedule</h3>
+      <details className="card">
+        <summary><h3>New schedule</h3></summary>
+        <form onSubmit={create}>
         <label>
           Scenarios (run in order, one after another)
           <select
@@ -506,7 +507,8 @@ export function Schedules() {
           Cron: <code>{cronExpr}</code> &mdash; {humanized}
         </p>
         <button type="submit">Add</button>
-      </form>
+        </form>
+      </details>
 
       <table className="table schedules-table">
         <thead>
