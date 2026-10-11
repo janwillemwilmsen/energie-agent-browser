@@ -99,6 +99,15 @@ export interface Comparison {
   baseline: Artifact | null;
   target: Artifact | null;
   diff: Artifact | null;
+  /** The run each side was captured in; null once that run is deleted. */
+  baseline_run: ComparisonRun | null;
+  target_run: ComparisonRun | null;
+}
+
+export interface ComparisonRun {
+  id: number;
+  started_at: string;
+  status: string;
 }
 
 export type ArtifactRef = { artifactId: number } | { runId: number; slot: string };

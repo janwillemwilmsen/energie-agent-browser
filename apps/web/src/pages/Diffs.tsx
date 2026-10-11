@@ -1,6 +1,13 @@
 import { useMemo, useState } from 'react';
-import { api, type Artifact, type Comparison } from '../lib/api.js';
+import { Link } from 'react-router-dom';
+import { api, type Artifact, type Comparison, type ComparisonRun } from '../lib/api.js';
 import { useResource } from '../lib/resource.js';
+
+// One <details> per run pair: the summary line carries scenario, both runs
+// with their dates, and the change figures; the screenshots unfold on demand
+// so a long history stays scannable. Baseline is the run the comparison was
+// made against (the older run when made by Auto diff; the first-picked run
+// on the Runs page) — the dates make that visible.
 
 function pct(ratio: number | null): string {
   if (ratio == null) return '—';
@@ -25,31 +32,23 @@ interface DiffGroup {
   scenarioId: number | null;
   baselineRunId: number | null;
   targetRunId: number | null;
+  /** The runs as they are now; null when deleted since. */
+  baselineRun: ComparisonRun | null;
+  targetRun: ComparisonRun | null;
   comparisons: Comparison[];
 }
 
 export function Diffs() {
   const [busy, setBusy] = useState(false);
-  // Up to two artifacts staged for a new (re-)comparison.
-  const [selection, setSelection] = useState<Artifact[]>([]);
-  // Source runs that still exist, so we know whether "Delete run" is offered.
 
-  const { data, setData, error: err, setError: setErr, refresh: load } = useResource(
+  const { data, error: err, setError: setErr, refresh: load } = useResource(
     async () => {
-      const [comparisons, runs, scenarios] = await Promise.all([
-        api.listComparisons(),
-        api.listRuns(),
-        api.listScenarios(),
-      ]);
-      return {
-        items: comparisons,
-        liveRunIds: new Set(runs.map((r) => r.id)),
-        scenarioNames: new Map(scenarios.map((s) => [s.id, s.name])),
-      };
+      const [comparisons, scenarios] = await Promise.all([api.listComparisons(), api.listScenarios()]);
+      return { items: comparisons, scenarioNames: new Map(scenarios.map((s) => [s.id, s.name])) };
     },
-    { initial: { items: [] as Comparison[], liveRunIds: new Set<number>(), scenarioNames: new Map<number, string>() } },
+    { initial: { items: [] as Comparison[], scenarioNames: new Map<number, string>() } },
   );
-  const { items, liveRunIds, scenarioNames } = data;
+  const { items, scenarioNames } = data;
 
   // Group comparisons that share the same (baseline run -> target run) pair.
   // Comparisons without a clean run pair (e.g. a diff-of-diffs) stand alone.
@@ -61,7 +60,10 @@ export function Diffs() {
       const key = b != null && t != null ? `pair:${b}->${t}` : `solo:${c.id}`;
       let g = map.get(key);
       if (!g) {
-        g = { key, scenarioId: c.scenario_id, baselineRunId: b, targetRunId: t, comparisons: [] };
+        g = {
+          key, scenarioId: c.scenario_id, baselineRunId: b, targetRunId: t,
+          baselineRun: c.baseline_run, targetRun: c.target_run, comparisons: [],
+        };
         map.set(key, g);
       }
       g.comparisons.push(c);
@@ -74,56 +76,17 @@ export function Diffs() {
   }, [items]);
 
   async function deleteRun(runId: number) {
-    if (
-      !confirm(
-        `Delete run #${runId} and its screenshots? Existing diffs keep their own copies and stay viewable.`,
-      )
-    )
-      return;
+    if (!confirm(`Delete run #${runId} and its screenshots?\n\nThe diffs keep their own copies and stay viewable.`)) return;
     try {
       await api.deleteRun(runId);
-      setData((cur) => {
-        const next = new Set(cur.liveRunIds);
-        next.delete(runId);
-        return { ...cur, liveRunIds: next };
-      });
-    } catch (e: any) {
-      setErr(e.message);
-    }
-  }
-
-  function toggleSelect(a: Artifact) {
-    setSelection((cur) => {
-      if (cur.some((x) => x.id === a.id)) return cur.filter((x) => x.id !== a.id);
-      if (cur.length >= 2) return [cur[1]!, a];
-      return [...cur, a];
-    });
-  }
-
-  const isSelected = (id: number) => selection.some((x) => x.id === id);
-
-  async function compareSelected() {
-    if (selection.length !== 2) return;
-    setBusy(true);
-    setErr(null);
-    try {
-      const [baseline, target] = selection;
-      await api.createComparison({
-        scenarioId: baseline!.scenario_id ?? undefined,
-        baseline: { artifactId: baseline!.id },
-        target: { artifactId: target!.id },
-      });
-      setSelection([]);
       await load();
     } catch (e: any) {
       setErr(e.message);
-    } finally {
-      setBusy(false);
     }
   }
 
-  async function remove(id: number) {
-    if (!confirm(`Delete comparison #${id}?`)) return;
+  async function removeOne(id: number) {
+    if (!confirm(`Delete this diff (#${id})?\n\nThe runs and their screenshots are not touched.`)) return;
     try {
       await api.deleteComparison(id);
       await load();
@@ -132,78 +95,77 @@ export function Diffs() {
     }
   }
 
-  function deleteRunButton(kind: 'baseline' | 'target', runId: number | null) {
-    if (runId == null) return null;
-    if (!liveRunIds.has(runId)) {
-      return <span className="muted diff-run-deleted">{kind} run #{runId} deleted</span>;
+  async function removeGroup(g: DiffGroup) {
+    const n = g.comparisons.length;
+    if (!confirm(`Delete ${n === 1 ? 'this diff result' : `these ${n} diff results`}?\n\nThe runs and their screenshots are not touched.`)) return;
+    setBusy(true);
+    try {
+      for (const c of g.comparisons) await api.deleteComparison(c.id);
+      await load();
+    } catch (e: any) {
+      setErr(e.message);
+    } finally {
+      setBusy(false);
     }
-    return (
-      <button
-        className="diff-del-run"
-        title={`Delete the ${kind} run + its screenshots (these diffs are kept)`}
-        onClick={() => deleteRun(runId)}
-      >
-        Delete {kind} run #{runId}
-      </button>
-    );
   }
 
   return (
     <section>
       <h1>Diffs</h1>
       <p className="muted">
-        Visual comparisons of run screenshots, grouped per run pair. Select two images (baseline,
-        target, or a previous diff) to compare them — diffs can themselves be diffed again.
+        Select two runs to compare screenshots on the <Link to="/runs">Runs</Link> page, or turn on
+        Auto diff in the scenario settings. Newest pair first; the baseline is the run the other was
+        compared against — the older run for an Auto diff. Open a pair to see its screenshots.
       </p>
       {err && <p className="error">{err}</p>}
 
-      {selection.length > 0 && (
-        <div className="diff-tray">
-          <span>
-            {selection.length === 1 ? '1 image selected — pick one more.' : '2 images selected.'}
-          </span>
-          {selection.map((a) => (
-            <img key={a.id} className="diff-tray-thumb" src={api.artifactImageUrl(a.id)} alt="" />
-          ))}
-          <button onClick={compareSelected} disabled={selection.length !== 2 || busy}>
-            {busy ? 'Comparing…' : 'Compare these 2'}
-          </button>
-          <button className="diff-tray-clear" onClick={() => setSelection([])}>
-            Clear
-          </button>
-        </div>
-      )}
-
       {items.length === 0 ? (
-        <p className="muted">
-          No comparisons yet. Go to the Runs page, select two runs of the same scenario, and click
-          “Compare runs”.
-        </p>
+        <p className="muted">No comparisons yet.</p>
       ) : (
         <div className="diff-groups">
-          {groups.map((g) => {
+          {groups.map((g, i) => {
             const total = g.comparisons.length;
             const changed = g.comparisons.filter((c) => (c.mismatch_ratio ?? 0) > 0).length;
             const maxRatio = Math.max(0, ...g.comparisons.map((c) => c.mismatch_ratio ?? 0));
             const isPair = g.baselineRunId != null && g.targetRunId != null;
             const scenarioLabel =
-              g.scenarioId != null
-                ? scenarioNames.get(g.scenarioId) ?? `Scenario #${g.scenarioId}`
-                : null;
+              g.scenarioId != null ? scenarioNames.get(g.scenarioId) ?? `Scenario #${g.scenarioId}` : 'ad-hoc';
+            const newerBaseline =
+              g.baselineRun && g.targetRun && g.baselineRun.started_at > g.targetRun.started_at;
             return (
-              <div key={g.key} className="diff-group">
-                <div className="diff-group-head">
-                  {scenarioLabel && <strong>{scenarioLabel}</strong>}
-                  <span className="diff-group-pair">
-                    {isPair ? `run #${g.baselineRunId} → run #${g.targetRunId}` : 'ad-hoc comparison'}
+              // Only the newest pair starts open; the rest unfold on click.
+              <details key={g.key} className="diff-group" open={i === 0}>
+                <summary className="diff-group-summary">
+                  <strong>{scenarioLabel}</strong>
+                  {isPair ? (
+                    <span className="diff-group-pair">
+                      <RunRef kind="baseline" id={g.baselineRunId!} run={g.baselineRun} />
+                      <span className="muted"> → </span>
+                      <RunRef kind="target" id={g.targetRunId!} run={g.targetRun} />
+                    </span>
+                  ) : (
+                    <span className="diff-group-pair">ad-hoc comparison</span>
+                  )}
+                  <span className={changed > 0 ? 'diff-group-changed' : 'muted'}>
+                    {total} screenshot{total === 1 ? '' : 's'} · {changed === 0 ? 'no changes' : `${changed} changed`} · max {pct(maxRatio)}
                   </span>
-                  <span className="muted">
-                    {total} screenshot{total === 1 ? '' : 's'} · {changed} changed · max{' '}
-                    {pct(maxRatio)}
-                  </span>
-                  <span className="diff-group-actions">
-                    {deleteRunButton('baseline', g.baselineRunId)}
-                    {deleteRunButton('target', g.targetRunId)}
+                </summary>
+
+                <div className="diff-group-actions">
+                  {newerBaseline && (
+                    <span className="muted">baseline is the newer run here (compared the other way round)</span>
+                  )}
+                  <span className="diff-group-actions-right">
+                    <RunDeleteButton kind="baseline" id={g.baselineRunId} run={g.baselineRun} onDelete={deleteRun} />
+                    <RunDeleteButton kind="target" id={g.targetRunId} run={g.targetRun} onDelete={deleteRun} />
+                    <button
+                      className="diff-del-group"
+                      disabled={busy}
+                      title="Remove these diff results (the runs and their screenshots stay)"
+                      onClick={() => void removeGroup(g)}
+                    >
+                      Delete diff results
+                    </button>
                   </span>
                 </div>
 
@@ -215,39 +177,20 @@ export function Diffs() {
                         <strong>{pct(c.mismatch_ratio)} changed</strong>
                         {c.baseline?.label && <code>{c.baseline.label}</code>}
                         <span className="muted">#{c.id}</span>
-                        <button
-                          className="step-del"
-                          title="Delete comparison"
-                          onClick={() => remove(c.id)}
-                        >
+                        <button className="step-del" title="Delete this diff" onClick={() => void removeOne(c.id)}>
                           ×
                         </button>
                       </div>
                       {c.note && <p className="muted diff-note">{c.note}</p>}
                       <div className="diff-images">
-                        <DiffImage
-                          title="Baseline"
-                          artifact={c.baseline}
-                          selected={c.baseline ? isSelected(c.baseline.id) : false}
-                          onToggle={toggleSelect}
-                        />
-                        <DiffImage
-                          title="Target"
-                          artifact={c.target}
-                          selected={c.target ? isSelected(c.target.id) : false}
-                          onToggle={toggleSelect}
-                        />
-                        <DiffImage
-                          title="Diff"
-                          artifact={c.diff}
-                          selected={c.diff ? isSelected(c.diff.id) : false}
-                          onToggle={toggleSelect}
-                        />
+                        <DiffImage title={`Baseline · run #${g.baselineRunId ?? '?'}`} artifact={c.baseline} />
+                        <DiffImage title={`Target · run #${g.targetRunId ?? '?'}`} artifact={c.target} />
+                        <DiffImage title="Diff" artifact={c.diff} />
                       </div>
                     </div>
                   ))}
                 </div>
-              </div>
+              </details>
             );
           })}
         </div>
@@ -260,29 +203,39 @@ function maxId(comparisons: Comparison[]): number {
   return comparisons.reduce((m, c) => Math.max(m, c.id), 0);
 }
 
-function DiffImage({
-  title,
-  artifact,
-  selected,
-  onToggle,
-}: {
-  title: string;
-  artifact: Artifact | null;
-  selected: boolean;
-  onToggle: (a: Artifact) => void;
-}) {
+// "baseline run #12 · 2026-10-07 07:00" — or "(deleted)" when the run is gone.
+function RunRef({ kind, id, run }: { kind: 'baseline' | 'target'; id: number; run: ComparisonRun | null }) {
   return (
-    <figure className={`diff-figure${selected ? ' selected' : ''}`}>
-      <figcaption>
-        {title}
-        {artifact && (
-          <button className="diff-pick" onClick={() => onToggle(artifact)}>
-            {selected ? '✓ selected' : 'select'}
-          </button>
-        )}
-      </figcaption>
+    <span title={run ? `${kind} run #${id}, started ${run.started_at} (${run.status})` : `${kind} run #${id} has been deleted; the diff keeps its copy`}>
+      <span className="muted">{kind} </span>run #{id}
+      {run ? <span className="muted"> · {run.started_at.slice(0, 16)}</span> : <span className="muted"> (deleted)</span>}
+    </span>
+  );
+}
+
+function RunDeleteButton({
+  kind, id, run, onDelete,
+}: { kind: 'baseline' | 'target'; id: number | null; run: ComparisonRun | null; onDelete: (id: number) => void }) {
+  if (id == null || !run) return null;
+  return (
+    <button
+      className="diff-del-run"
+      title={`Delete the ${kind} run #${id} (${run.started_at}) and its screenshots — these diffs stay`}
+      onClick={() => onDelete(id)}
+    >
+      Delete {kind} run #{id}
+    </button>
+  );
+}
+
+function DiffImage({ title, artifact }: { title: string; artifact: Artifact | null }) {
+  return (
+    <figure className="diff-figure">
+      <figcaption>{title}</figcaption>
       {artifact ? (
-        <img src={api.artifactImageUrl(artifact.id)} alt={title} />
+        <a href={api.artifactImageUrl(artifact.id)} target="_blank" rel="noreferrer" title="Open full size">
+          <img src={api.artifactImageUrl(artifact.id)} alt={title} loading="lazy" />
+        </a>
       ) : (
         <div className="diff-missing">missing</div>
       )}

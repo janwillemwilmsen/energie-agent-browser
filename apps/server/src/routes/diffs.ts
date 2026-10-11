@@ -173,12 +173,24 @@ async function createComparison(
   return Number(cmpInfo.lastInsertRowid);
 }
 
+// The run an artifact was captured in, if it still exists: lets the Diffs page
+// show dates and offer "delete run" without listing every run.
+function sourceRun(a: ArtifactRow | undefined): { id: number; started_at: string; status: string } | null {
+  if (!a?.source_run_id) return null;
+  const r = runStore().get(a.source_run_id);
+  return r ? { id: r.id, started_at: r.started_at, status: r.status } : null;
+}
+
 function enrichComparison(c: ComparisonRow) {
+  const baseline = getArtifact(c.baseline_artifact_id);
+  const target = getArtifact(c.target_artifact_id);
   return {
     ...c,
-    baseline: getArtifact(c.baseline_artifact_id) ?? null,
-    target: getArtifact(c.target_artifact_id) ?? null,
+    baseline: baseline ?? null,
+    target: target ?? null,
     diff: c.diff_artifact_id != null ? getArtifact(c.diff_artifact_id) ?? null : null,
+    baseline_run: sourceRun(baseline),
+    target_run: sourceRun(target),
   };
 }
 
