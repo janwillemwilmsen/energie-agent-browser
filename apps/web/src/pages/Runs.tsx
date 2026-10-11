@@ -359,8 +359,11 @@ export function Runs() {
           most recent runs
           {total != null && (
             <span>
-              — showing <strong>{Math.min(runs.length, total).toLocaleString()}</strong> of{' '}
-              <strong>{total.toLocaleString()}</strong> run{total === 1 ? '' : 's'}
+              — showing <strong>{visibleRuns.length.toLocaleString()}</strong>
+              {activeFilterCount > 0 && (
+                <> (filtered from {Math.min(runs.length, total).toLocaleString()} loaded)</>
+              )}{' '}
+              of <strong>{total.toLocaleString()}</strong> run{total === 1 ? '' : 's'}
             </span>
           )}
         </div>
