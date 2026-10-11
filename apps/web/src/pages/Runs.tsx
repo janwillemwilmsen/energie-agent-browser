@@ -334,15 +334,23 @@ export function Runs() {
           built from the loaded rows, so a short window also hides tags that
           only older runs carry — widen it to see them. */}
       {!scenarioParam && (
-        <label className="runs-window muted">
+        <div className="runs-window muted" role="group" aria-label="How many of the most recent runs to show">
           Show
-          <select value={limit} onChange={(e) => setLimit(Number(e.target.value))}>
+          <span className="chip-row">
             {WINDOWS.map((n) => (
-              <option key={n} value={n}>{n === ALL ? 'all' : n}</option>
+              <button
+                key={n}
+                type="button"
+                className={`chip${limit === n ? ' chip-on' : ''}`}
+                aria-pressed={limit === n}
+                onClick={() => setLimit(n)}
+              >
+                {n === ALL ? 'all' : n}
+              </button>
             ))}
-          </select>
+          </span>
           most recent runs{runs.length >= limit ? '' : ` (${runs.length} in total)`}
-        </label>
+        </div>
       )}
 
       <div className="compare-bar">
