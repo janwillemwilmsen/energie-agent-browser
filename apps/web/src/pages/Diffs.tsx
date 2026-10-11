@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api, type Artifact, type Comparison, type ComparisonRun } from '../lib/api.js';
+import { api, type Artifact, type Comparison, type ComparisonRun, type Scenario } from '../lib/api.js';
 import { useResource } from '../lib/resource.js';
+import { matchesTags, NO_TAGS, TagFilter, tagsActive, tagValues, type TagSelection } from '../lib/TagFilter.js';
 
 // One <details> per run pair: the summary line carries scenario, both runs
 // with their dates, and the change figures; the screenshots unfold on demand
@@ -40,15 +41,20 @@ interface DiffGroup {
 
 export function Diffs() {
   const [busy, setBusy] = useState(false);
+  // Brand / Type of the scenario behind each pair.
+  const [tags, setTags] = useState<TagSelection>(NO_TAGS);
 
   const { data, error: err, setError: setErr, refresh: load } = useResource(
     async () => {
       const [comparisons, scenarios] = await Promise.all([api.listComparisons(), api.listScenarios()]);
-      return { items: comparisons, scenarioNames: new Map(scenarios.map((s) => [s.id, s.name])) };
+      return { items: comparisons, scenarios: new Map(scenarios.map((s) => [s.id, s])) };
     },
-    { initial: { items: [] as Comparison[], scenarioNames: new Map<number, string>() } },
+    { initial: { items: [] as Comparison[], scenarios: new Map<number, Scenario>() } },
   );
-  const { items, scenarioNames } = data;
+  const { items, scenarios } = data;
+  const allScenarios = useMemo(() => Array.from(scenarios.values()), [scenarios]);
+  const brands = useMemo(() => tagValues(allScenarios, 'brand'), [allScenarios]);
+  const types = useMemo(() => tagValues(allScenarios, 'type'), [allScenarios]);
 
   // Group comparisons that share the same (baseline run -> target run) pair.
   // Comparisons without a clean run pair (e.g. a diff-of-diffs) stand alone.
@@ -74,6 +80,14 @@ export function Diffs() {
     out.sort((a, b) => maxId(b.comparisons) - maxId(a.comparisons));
     return out;
   }, [items]);
+  // The tag filter works on the pair's scenario; an ad-hoc pair without one
+  // only shows while no filter is active.
+  const shown = useMemo(
+    () => tagsActive(tags) === 0
+      ? groups
+      : groups.filter((g) => g.scenarioId != null && matchesTags(scenarios.get(g.scenarioId) ?? {}, tags)),
+    [groups, scenarios, tags],
+  );
 
   async function deleteRun(runId: number) {
     if (!confirm(`Delete run #${runId} and its screenshots?\n\nThe diffs keep their own copies and stay viewable.`)) return;
@@ -119,17 +133,27 @@ export function Diffs() {
       </p>
       {err && <p className="error">{err}</p>}
 
+      {items.length > 0 && <TagFilter brands={brands} types={types} selection={tags} onChange={setTags} />}
+      {items.length > 0 && tagsActive(tags) > 0 && (
+        <p className="muted" aria-live="polite">
+          {shown.length} of {groups.length} run pair{groups.length === 1 ? '' : 's'} match the filter.
+        </p>
+      )}
+
       {items.length === 0 ? (
         <p className="muted">No comparisons yet.</p>
+      ) : shown.length === 0 ? (
+        <p className="muted">No run pairs match the current filters.</p>
       ) : (
         <div className="diff-groups">
-          {groups.map((g, i) => {
+          {shown.map((g, i) => {
             const total = g.comparisons.length;
             const changed = g.comparisons.filter((c) => (c.mismatch_ratio ?? 0) > 0).length;
             const maxRatio = Math.max(0, ...g.comparisons.map((c) => c.mismatch_ratio ?? 0));
             const isPair = g.baselineRunId != null && g.targetRunId != null;
+            const scenario = g.scenarioId != null ? scenarios.get(g.scenarioId) : undefined;
             const scenarioLabel =
-              g.scenarioId != null ? scenarioNames.get(g.scenarioId) ?? `Scenario #${g.scenarioId}` : 'ad-hoc';
+              g.scenarioId != null ? scenario?.name ?? `Scenario #${g.scenarioId}` : 'ad-hoc';
             const newerBaseline =
               g.baselineRun && g.targetRun && g.baselineRun.started_at > g.targetRun.started_at;
             return (
@@ -137,6 +161,8 @@ export function Diffs() {
               <details key={g.key} className="diff-group" open={i === 0}>
                 <summary className="diff-group-summary">
                   <strong>{scenarioLabel}</strong>
+                  {scenario?.brand && <span className="tag tag-brand">{scenario.brand}</span>}
+                  {scenario?.type && <span className="tag tag-type">{scenario.type}</span>}
                   {isPair ? (
                     <span className="diff-group-pair">
                       <RunRef kind="baseline" id={g.baselineRunId!} run={g.baselineRun} />

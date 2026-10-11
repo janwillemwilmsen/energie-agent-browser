@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, type RunDay, type Scenario } from '../lib/api.js';
 import { useResource, usePolling } from '../lib/resource.js';
+import { matchesTags, NO_TAGS, TagFilter, tagsActive, tagValues, type TagSelection } from '../lib/TagFilter.js';
 
 // Per-scenario gallery: one section per scenario that has runs (after the
 // global Brand/Type filter), and each section carries its OWN day dropdown
@@ -16,15 +17,6 @@ import { useResource, usePolling } from '../lib/resource.js';
 // from the scenarios themselves, so every tag in use is offered — even one
 // whose scenarios have no runs yet.
 
-function collectTagValues(scenarios: Scenario[], key: 'brand' | 'type'): string[] {
-  const set = new Set<string>();
-  for (const s of scenarios) {
-    const v = s[key];
-    if (v) set.add(v);
-  }
-  return Array.from(set).sort((a, b) => a.localeCompare(b));
-}
-
 interface ScenarioData {
   scenario_id: number;
   scenario_name: string;
@@ -38,8 +30,7 @@ interface ScenarioData {
 }
 
 export function Screenshots() {
-  const [selectedBrands, setSelectedBrands] = useState<Set<string>>(new Set());
-  const [selectedTypes, setSelectedTypes] = useState<Set<string>>(new Set());
+  const [tags, setTags] = useState<TagSelection>(NO_TAGS);
   // Per-scenario date selection. Absent → use the scenario's latest day.
   const [dayByScenario, setDayByScenario] = useState<Record<number, string>>({});
 
@@ -51,9 +42,11 @@ export function Screenshots() {
   // Polling keeps the page live while a scheduled run completes.
   usePolling(load, 6000);
 
-  const brands = useMemo(() => collectTagValues(allScenarios, 'brand'), [allScenarios]);
-  const types = useMemo(() => collectTagValues(allScenarios, 'type'), [allScenarios]);
-  const activeFilterCount = selectedBrands.size + selectedTypes.size;
+  const brands = useMemo(() => tagValues(allScenarios, 'brand'), [allScenarios]);
+  const types = useMemo(() => tagValues(allScenarios, 'type'), [allScenarios]);
+  const activeFilterCount = tagsActive(tags);
+  const selectedBrands = tags.brands;
+  const selectedTypes = tags.types;
 
   // Group the daily rows by scenario: one run per (scenario, day) already,
   // plus the sorted list of days that have any runs for that scenario.
@@ -61,9 +54,7 @@ export function Screenshots() {
     const map = new Map<number, ScenarioData>();
     for (const r of runs) {
       // Apply chip filters here so empty scenarios drop out of the list.
-      const brandOk = selectedBrands.size === 0 || (r.brand != null && selectedBrands.has(r.brand));
-      const typeOk = selectedTypes.size === 0 || (r.type != null && selectedTypes.has(r.type));
-      if (!brandOk || !typeOk) continue;
+      if (!matchesTags(r, tags)) continue;
 
       const day = r.day;
       if (!day) continue;
@@ -92,14 +83,7 @@ export function Screenshots() {
     return Array.from(map.values()).sort((a, b) =>
       a.scenario_name.localeCompare(b.scenario_name),
     );
-  }, [runs, selectedBrands, selectedTypes]);
-
-  function toggle(set: Set<string>, value: string, setter: (next: Set<string>) => void) {
-    const next = new Set(set);
-    if (next.has(value)) next.delete(value);
-    else next.add(value);
-    setter(next);
-  }
+  }, [runs, tags]);
 
   function setDay(scenarioId: number, day: string | null) {
     setDayByScenario((prev) => {
@@ -185,10 +169,7 @@ export function Screenshots() {
               type="button"
               className="filter-clear"
               style={{ display: 'inline-block' }}
-              onClick={() => {
-                setSelectedBrands(new Set());
-                setSelectedTypes(new Set());
-              }}
+              onClick={() => setTags(NO_TAGS)}
             >
               Clear filters
             </button>{' '}
@@ -214,64 +195,7 @@ export function Screenshots() {
         </button>
       </div>
 
-      <details className="filter-panel" open={activeFilterCount > 0}>
-        <summary>
-          Filter{' '}
-          {activeFilterCount > 0 && <span className="filter-count">{activeFilterCount} active</span>}
-        </summary>
-        <div className="filter-body">
-          <div className="filter-group">
-            <div className="filter-group-label">Brand</div>
-            {brands.length === 0 ? (
-              <span className="muted">No brands yet</span>
-            ) : (
-              <div className="chip-row">
-                {brands.map((b) => (
-                  <button
-                    key={b}
-                    type="button"
-                    className={`chip${selectedBrands.has(b) ? ' chip-on' : ''}`}
-                    onClick={() => toggle(selectedBrands, b, setSelectedBrands)}
-                  >
-                    {b}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-          <div className="filter-group">
-            <div className="filter-group-label">Type</div>
-            {types.length === 0 ? (
-              <span className="muted">No types yet</span>
-            ) : (
-              <div className="chip-row">
-                {types.map((t) => (
-                  <button
-                    key={t}
-                    type="button"
-                    className={`chip${selectedTypes.has(t) ? ' chip-on' : ''}`}
-                    onClick={() => toggle(selectedTypes, t, setSelectedTypes)}
-                  >
-                    {t}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-          {activeFilterCount > 0 && (
-            <button
-              type="button"
-              className="filter-clear"
-              onClick={() => {
-                setSelectedBrands(new Set());
-                setSelectedTypes(new Set());
-              }}
-            >
-              Clear filters
-            </button>
-          )}
-        </div>
-      </details>
+      <TagFilter brands={brands} types={types} selection={tags} onChange={setTags} />
 
       <div className="screenshots-toolbar">
         <span className="muted">
