@@ -375,6 +375,16 @@ button:hover { filter: brightness(1.1); }
 
 .error { color: var(--error); }
 .muted { color: var(--muted); font-size: 13px; }
+/* An inline link in running text (intro paragraphs, hints): accent-coloured
+   with a quiet underline, so it reads as a link inside muted copy too. */
+.link {
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-color: rgba(56, 189, 248, 0.4);
+  text-underline-offset: 2px;
+}
+.link:hover,
+.link:focus-visible { text-decoration-color: var(--accent); outline: none; }
 /* The failed play's error line under the Preview heading (scenario editor). */
 .se-run-error { margin: 0 0 8px; font-size: 13px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; }
 code { background: rgba(255,255,255,0.06); padding: 2px 4px; border-radius: 3px; }

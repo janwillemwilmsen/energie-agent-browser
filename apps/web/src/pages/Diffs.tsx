@@ -127,9 +127,8 @@ export function Diffs() {
     <section>
       <h1>Diffs</h1>
       <p className="muted">
-        Select two runs to compare screenshots on the <Link to="/runs">Runs</Link> page, or turn on
-        Auto diff in the scenario settings. Newest pair first; the baseline is the run the other was
-        compared against — the older run for an Auto diff. Open a pair to see its screenshots.
+        Select two runs to compare screenshots on the <Link className="link" to="/runs">Runs</Link> page, or turn on
+        Auto diff in the scenario settings.
       </p>
       {err && <p className="error">{err}</p>}
 
@@ -157,8 +156,8 @@ export function Diffs() {
             const newerBaseline =
               g.baselineRun && g.targetRun && g.baselineRun.started_at > g.targetRun.started_at;
             return (
-              // Only the newest pair starts open; the rest unfold on click.
-              <details key={g.key} className="diff-group" open={i === 0}>
+              // all closed by default; the rest unfold on click.
+              <details key={g.key} className="diff-group">
                 <summary className="diff-group-summary">
                   <strong>{scenarioLabel}</strong>
                   {scenario?.brand && <span className="tag tag-brand">{scenario.brand}</span>}
