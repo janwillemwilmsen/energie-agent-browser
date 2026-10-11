@@ -681,6 +681,14 @@ function diagnoseFailure(
 // A snapshot that keeps FAILING is a different problem (the daemon stopped
 // answering after the load — seen with remote browsers on heavy pages), so
 // the log names that instead of pretending the URL was blank.
+//
+// A second failure mode looks worse but is benign: `open` returns "Invalid
+// response: EOF … daemon may be busy or unresponsive" while the daemon
+// stays alive and the page HAS navigated (seen on nextenergy.nl once its
+// consent cookie is set and the full tag stack loads — the daemon's open
+// handler drops the connection after the navigation). The command's outcome
+// is unknown, not failed, so verify the page instead: it must be on the
+// requested site, not merely off about:blank.
 const NAV_ATTEMPTS = 3;
 async function navigate(ctx: StepContext, timing: Timing, url: string): Promise<void> {
   let lastUrl = '';
@@ -692,14 +700,23 @@ async function navigate(ctx: StepContext, timing: Timing, url: string): Promise<
       : `URL still "${lastUrl || 'about:blank'}"`;
   for (let attempt = 1; attempt <= NAV_ATTEMPTS; attempt++) {
     const r = await ctx.browser.run(['open', url], { timeoutMs: 60_000 });
-    if (r.exitCode !== 0) throw new Error(`navigate failed: ${r.stderr || r.stdout}`);
+    let unknownOutcome = false;
+    if (r.exitCode !== 0) {
+      if (!isResponseLost(r)) throw new Error(`navigate failed: ${r.stderr || r.stdout}`);
+      unknownOutcome = true;
+      ctx.log(`navigate: open gave no response (${failureText(r).split('\n')[0]}) — checking whether the page is there`);
+    }
     const deadline = Date.now() + timing.navSettleMs;
     do {
       try {
         const tree = await ctx.browser.snapshot();
         snapshotsOk++;
         lastUrl = tree.url || '';
-        if (lastUrl && lastUrl !== 'about:blank' && !lastUrl.startsWith('chrome://')) return;
+        const landed = unknownOutcome ? sameSite(lastUrl, url) : lastUrl && lastUrl !== 'about:blank' && !lastUrl.startsWith('chrome://');
+        if (landed) {
+          if (unknownOutcome) ctx.log(`navigate: page is at ${lastUrl} — continuing`);
+          return;
+        }
       } catch (e: any) {
         lastSnapshotErr = (e?.message ?? String(e)).slice(0, 200);
       }
@@ -708,6 +725,24 @@ async function navigate(ctx: StepContext, timing: Timing, url: string): Promise<
     if (attempt < NAV_ATTEMPTS) ctx.log(`navigate: ${state()} — re-issuing open (${attempt}/${NAV_ATTEMPTS})`);
   }
   throw new Error(`navigate did not stick: tried open(${url}) ${NAV_ATTEMPTS}×; ${state()}.`);
+}
+
+// The CLI reached the daemon but read no reply (EOF) or was told the outcome
+// is unknown: the command may well have run.
+function isResponseLost(r: RunResult): boolean {
+  const s = `${r.stderr}\n${r.stdout}`;
+  return /Invalid response: EOF|outcome_unknown|no response came back|daemon may be busy or unresponsive/i.test(s);
+}
+
+// Same site = same host, ignoring a leading "www." (nextenergy.nl redirects
+// to www.nextenergy.nl). A cross-site redirect does not count: the next open
+// attempt, or the failure, says so.
+function sameSite(actual: string, requested: string): boolean {
+  const host = (u: string) => {
+    try { return new URL(u).hostname.replace(/^www\./, '').toLowerCase(); } catch { return ''; }
+  };
+  const a = host(actual);
+  return !!a && a === host(requested);
 }
 
 // Best-effort `wait --load load`: returns as soon as the current document has

@@ -280,6 +280,40 @@ describe('Step executor', () => {
     });
   });
 
+  // `open` sometimes gets no reply from the daemon although the page did
+  // navigate (consented nextenergy.nl). The outcome is unknown, so the page
+  // is checked rather than the Step failed.
+  describe('navigate when open gets no response', () => {
+    const LOST: RunResult = {
+      stdout: '',
+      stderr: '✗ Invalid response: EOF while parsing a value at line 1 column 0 (after 5 retries - daemon may be busy or unresponsive)\n',
+      exitCode: 1,
+    };
+    const lostOpen = (a: string[]) => (a[0] === 'open' ? LOST : undefined);
+
+    it('continues when the page is on the requested site', async () => {
+      const b = fakeBrowser([tree('', 'https://www.nextenergy.nl/')], [lostOpen]);
+      const ctx = context(b);
+      await executeStep(ctx, parseStep('navigate', { url: 'https://nextenergy.nl' }));
+      expect(ran(b, 'open')).toHaveLength(1);
+      expect(ctx.lines.some((l) => /open gave no response/.test(l))).toBe(true);
+      expect(ctx.lines.some((l) => /page is at https:\/\/www\.nextenergy\.nl\/ — continuing/.test(l))).toBe(true);
+    });
+
+    it('re-issues open and finally fails when the page is somewhere else', async () => {
+      const b = fakeBrowser([tree('', 'https://other.test/')], [lostOpen]);
+      const ctx = context(b, { timing: { selectorWaitMs: 50, selectorPollMs: 1, navSettleMs: 2, navPollMs: 1, sleep: async () => {} } });
+      await expect(executeStep(ctx, parseStep('navigate', { url: 'https://nextenergy.nl' }))).rejects.toThrow(/navigate did not stick/);
+      expect(ran(b, 'open')).toHaveLength(3);
+    });
+
+    it('still fails right away on a real open error', async () => {
+      const b = fakeBrowser([], [(a) => (a[0] === 'open' ? { stdout: '', stderr: 'net::ERR_NAME_NOT_RESOLVED', exitCode: 1 } : undefined)]);
+      await expect(executeStep(context(b), parseStep('navigate', { url: 'https://nope.test' }))).rejects.toThrow(/navigate failed: net::ERR_NAME_NOT_RESOLVED/);
+      expect(b.snapshots).toBe(0);
+    });
+  });
+
   it('presses a key on the focused element and lets a navigation settle', async () => {
     const b = fakeBrowser([]);
     await executeStep(context(b), parseStep('press', { key: ' Enter ' }));
