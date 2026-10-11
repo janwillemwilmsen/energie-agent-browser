@@ -42,6 +42,12 @@ export function Runs() {
     () => api.listRuns(scenarioParam ? { scenarioId: scenarioParam, limit: ALL } : { limit }),
     { initial: [] as Run[], deps: [scenarioParam, limit] },
   );
+  // How many runs exist in total, so the window reads "100 of 1,187".
+  // Refreshed with the list, so new and deleted runs keep it right.
+  const { data: total, refresh: refreshTotal } = useResource(
+    () => api.countRuns().then((r) => r.total),
+    { initial: null as number | null },
+  );
 
   // `selected` captures the run row at click-time, so its log never grew
   // between polls. `liveSelected` re-resolves the same id against the latest
@@ -69,6 +75,7 @@ export function Runs() {
   // Poll faster while you're staring at a not-yet-finished run, slower
   // otherwise — keeps idle pages cheap but the log feels live when it matters.
   usePolling(load, watching ? 1500 : 4000);
+  usePolling(refreshTotal, 4000);
 
   useEffect(() => {
     if (appliedRunParam.current || loading) return;
@@ -210,7 +217,7 @@ export function Runs() {
       await api.deleteRuns(selectedIds);
       if (selected && selectedIds.includes(selected.id)) setSelected(null);
       setSelectedIds([]);
-      await load();
+      await Promise.all([load(), refreshTotal()]);
     } catch (e: any) {
       setErr(e.message);
     } finally {
@@ -223,7 +230,7 @@ export function Runs() {
     try {
       await api.deleteRun(id);
       if (selected?.id === id) setSelected(null);
-      await load();
+      await Promise.all([load(), refreshTotal()]);
     } catch (e: any) {
       setErr(e.message);
     }
@@ -349,7 +356,13 @@ export function Runs() {
               </button>
             ))}
           </span>
-          most recent runs{runs.length >= limit ? '' : ` (${runs.length} in total)`}
+          most recent runs
+          {total != null && (
+            <span>
+              — showing <strong>{Math.min(runs.length, total).toLocaleString()}</strong> of{' '}
+              <strong>{total.toLocaleString()}</strong> run{total === 1 ? '' : 's'}
+            </span>
+          )}
         </div>
       )}
 

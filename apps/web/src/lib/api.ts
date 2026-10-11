@@ -478,6 +478,8 @@ export const api = {
   },
   /** Latest run per scenario per day, whole history, no log text (the Screenshots gallery). */
   listRunsDaily: () => req<RunDay[]>('/api/runs/daily'),
+  /** Total number of runs, however old. */
+  countRuns: () => req<{ total: number }>('/api/runs/count'),
   getRun: (id: number) => req<Run & { pause: PausedRun | null }>(`/api/runs/${id}`),
   pausedRuns: () => req<PausedRun[]>('/api/runs/paused'),
   resumeRun: (id: number) => req<{ ok: true }>(`/api/runs/${id}/resume`, { method: 'POST' }),

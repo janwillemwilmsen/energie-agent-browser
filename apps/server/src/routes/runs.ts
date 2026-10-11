@@ -47,6 +47,9 @@ export async function runsRoutes(app: FastifyInstance) {
   // scenarios that have not run recently.
   app.get('/api/runs/daily', async () => runStore().listLatestPerDay());
 
+  // Total number of runs, for the Runs page's "N of M" next to its window.
+  app.get('/api/runs/count', async () => ({ total: runStore().count() }));
+
   // Runs parked at a `pause` step right now, for the Resume/Abort buttons.
   app.get('/api/runs/paused', async () => listPaused());
 

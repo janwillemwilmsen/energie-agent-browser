@@ -77,6 +77,8 @@ export interface RunStore {
    * day a Scenario ran, so it stays small where list() would carry every Run.
    */
   listLatestPerDay(): RunDayRow[];
+  /** How many Runs exist in total (the Runs page shows a window of them). */
+  count(): number;
   /** Runs started within a sqlite datetime window such as '-1 day', newest first. */
   listStartedSince(window: string): RunListRow[];
   latestFinishedForScenario(scenarioId: number): LatestRun | undefined;
@@ -160,6 +162,7 @@ export function createRunStore(deps: { db: Database; dataDir: string }): RunStor
        LIMIT 1`,
     ),
     ids: db.prepare('SELECT id FROM runs'),
+    count: db.prepare('SELECT COUNT(*) AS n FROM runs'),
     inFlight: db.prepare("SELECT id FROM runs WHERE status IN ('running', 'queued')"),
     delete: db.prepare('DELETE FROM runs WHERE id = ?'),
   };
@@ -212,6 +215,7 @@ export function createRunStore(deps: { db: Database; dataDir: string }): RunStor
     list: (opts = {}) => q.list.all(opts.scenarioId ?? null, opts.scenarioId ?? null, opts.limit ?? 100) as RunListRow[],
     listForScenario: (scenarioId) => q.listForScenario.all(scenarioId) as RunRow[],
     listLatestPerDay: () => q.listLatestPerDay.all() as RunDayRow[],
+    count: () => (q.count.get() as { n: number }).n,
     listStartedSince: (window) => q.listSince.all(window) as RunListRow[],
     latestFinishedForScenario(scenarioId) {
       const row = q.latestFinished.get(scenarioId) as
