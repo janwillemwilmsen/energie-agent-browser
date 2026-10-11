@@ -39,6 +39,7 @@ interface MetaDraft {
   type: string;
   preflight_id: number | null;
   preflight_mode: 'steps' | 'cookies';
+  auto_diff: boolean;
 }
 
 function emptyDraft(): MetaDraft {
@@ -50,6 +51,7 @@ function emptyDraft(): MetaDraft {
     type: '',
     preflight_id: null,
     preflight_mode: 'steps',
+    auto_diff: false,
   };
 }
 
@@ -62,6 +64,7 @@ function draftFrom(d: ScenarioDetail): MetaDraft {
     type: d.type ?? '',
     preflight_id: d.preflight_id ?? null,
     preflight_mode: d.preflight_mode ?? 'steps',
+    auto_diff: !!d.auto_diff,
   };
 }
 
@@ -73,7 +76,8 @@ function draftsEqual(a: MetaDraft, b: MetaDraft): boolean {
     a.brand === b.brand &&
     a.type === b.type &&
     a.preflight_id === b.preflight_id &&
-    a.preflight_mode === b.preflight_mode
+    a.preflight_mode === b.preflight_mode &&
+    a.auto_diff === b.auto_diff
   );
 }
 
@@ -221,7 +225,6 @@ export function ScenarioEditor() {
       step_scroll_into_view: number;
       step_settle_ms: number;
       notes: string;
-      auto_diff: number;
     }>,
   ) {
     try {
@@ -343,6 +346,7 @@ export function ScenarioEditor() {
         type: draft.type.trim() || null,
         preflight_id: draft.preflight_id,
         preflight_mode: draft.preflight_mode,
+        auto_diff: draft.auto_diff ? 1 : 0,
       });
       const next = { ...data, ...updated };
       setData(next);
@@ -498,13 +502,13 @@ export function ScenarioEditor() {
         <div className="scenario-meta-row">
           <label
             className="scenario-meta-check"
-            title="After a successful play, diff its screenshots against this scenario's most recent earlier run that has screenshots. The result appears under the preview and on the Diffs page. Has no effect on test-only plays. Saved with the scenario."
+            title="After a successful play, diff its screenshots against this scenario's most recent earlier run that has screenshots. The result appears under the preview and on the Diffs page. Has no effect on test-only plays. Saved with the scenario (Save scenario)."
           >
             <span className="scenario-meta-check-row">
               <input
                 type="checkbox"
-                checked={!!data.auto_diff}
-                onChange={(e) => void saveRetry({ auto_diff: e.target.checked ? 1 : 0 })}
+                checked={draft.auto_diff}
+                onChange={(e) => setDraft({ ...draft, auto_diff: e.target.checked })}
               />
               Auto diff (compare the screenshots with the previous run)
             </span>
