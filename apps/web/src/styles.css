@@ -678,6 +678,19 @@ code { background: rgba(255,255,255,0.06); padding: 2px 4px; border-radius: 3px;
 .actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
 .actions button { padding: 4px 10px; font-size: 12px; }
 
+/* Filter bar above the snapshot tree: text + role dropdown + count + clear. */
+.a11y-filter { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 8px; }
+.a11y-filter input[type="search"],
+.a11y-filter select {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+.a11y-filter input[type="search"] { flex: 1; min-width: 160px; }
+.a11y-filter .filter-clear { align-self: center; }
 .a11y-tree {
   list-style: none;
   padding: 0;

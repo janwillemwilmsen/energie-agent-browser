@@ -1,7 +1,27 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useDraggable } from '@dnd-kit/core';
 import type { A11yNode, A11yTree, SelectorStrategy } from './api.js';
 import type { PickDragData } from './stepEditor/StepDnd.js';
+
+// Narrowing the tree: a role picked from those the snapshot contains, and
+// free text where every word must appear in the row's role or name (case
+// insensitive). Display only — picks still target the full tree, so an
+// ordinal computed for a hidden sibling stays right.
+export interface TreeFilter {
+  role: string;
+  text: string;
+}
+
+export const NO_FILTER: TreeFilter = { role: '', text: '' };
+
+// (Not TS's Pick<> — this file's own Pick is a step pick.)
+export function matchesFilter(node: { role: string; name: string }, filter: TreeFilter): boolean {
+  if (filter.role && node.role !== filter.role) return false;
+  const words = filter.text.toLowerCase().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return true;
+  const hay = `${node.role} ${node.name ?? ''}`.toLowerCase();
+  return words.every((w) => hay.includes(w));
+}
 
 function flatten(
   node: A11yNode,
@@ -86,11 +106,49 @@ export function SnapshotPicker(props: SnapshotPickerProps) {
   const { tree, kinds, selectorWait, buildPayload, onPick } = props;
   const flat = useMemo(() => flatten(tree.root, 0, []), [tree]);
   const allNodes = useMemo(() => flat.map((x) => x.node), [flat]);
+  // Kept across re-snapshots on purpose: narrow once, snapshot again, same view.
+  const [filter, setFilter] = useState<TreeFilter>(NO_FILTER);
+  const roles = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const { node } of flat) counts.set(node.role, (counts.get(node.role) ?? 0) + 1);
+    return Array.from(counts.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+  }, [flat]);
+  const active = filter.role !== '' || filter.text.trim() !== '';
+  const shown = active ? flat.filter(({ node }) => matchesFilter(node, filter)).length : flat.length;
 
   return (
+    <>
+    <div className="a11y-filter">
+      <input
+        type="search"
+        value={filter.text}
+        placeholder="Filter by name or role…"
+        title="Every word must appear in the element's role or name"
+        onChange={(e) => setFilter({ ...filter, text: e.target.value })}
+        onKeyDown={(e) => { if (e.key === 'Escape') setFilter(NO_FILTER); }}
+      />
+      <select
+        value={filter.role}
+        title="Only elements of this role"
+        onChange={(e) => setFilter({ ...filter, role: e.target.value })}
+      >
+        <option value="">all roles</option>
+        {roles.map(([role, n]) => (
+          <option key={role} value={role}>{role} ({n})</option>
+        ))}
+      </select>
+      <span className="muted">{active ? `${shown} of ${flat.length}` : `${flat.length} elements`}</span>
+      {active && (
+        <button type="button" className="filter-clear" onClick={() => setFilter(NO_FILTER)} title="Show the whole tree again">
+          Clear
+        </button>
+      )}
+    </div>
     <ul className="a11y-tree">
+      {shown === 0 && <li className="muted">No elements match the filter.</li>}
       {flat.map((entry, idx) => {
         const { node, depth, ancestors } = entry;
+        if (active && !matchesFilter(node, filter)) return null;
         const strategy = node.ref ? buildStrategy(node, ancestors, allNodes) : null;
         const label = `${node.role}${node.name ? ` "${node.name}"` : ''}`;
         // The buttons this row offers, in display order.
@@ -152,6 +210,7 @@ export function SnapshotPicker(props: SnapshotPickerProps) {
         );
       })}
     </ul>
+    </>
   );
 }
 
