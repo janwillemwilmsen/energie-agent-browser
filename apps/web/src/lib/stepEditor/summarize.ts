@@ -94,7 +94,7 @@ export function summarizeStep(kind: string, p: Record<string, unknown>): string 
     case 'auth-login':
       return `🔐 auth profile "${p.name ?? ''}"`;
     case 'record_start':
-      return '⏺ start video recording';
+      return `⏺ start video recording${p.cursor === true ? ' (with pointer)' : ''}`;
     case 'record_stop':
       return '⏹ stop video recording';
     case 'close':

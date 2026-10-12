@@ -4,9 +4,10 @@ import type { EditableStep } from './store.js';
 
 // Modal for the ✎ button on a step row. Screenshot steps get friendly fields —
 // label, full page, mobile, annotate, plus output format and quality (smaller
-// files with jpeg/webp) — while every other kind exposes the payload JSON
-// directly. Unknown payload keys are preserved on save. The kind itself is not
-// editable here (the admin raw editor does that).
+// files with jpeg/webp) — and record_start gets its pointer checkbox, while
+// every other kind exposes the payload JSON directly. Unknown payload keys are
+// preserved on save. The kind itself is not editable here (the admin raw
+// editor does that).
 export function StepEditModal({
   step,
   onSave,
@@ -19,6 +20,10 @@ export function StepEditModal({
 }) {
   const initial = step.payload;
   const isScreenshot = step.kind === 'screenshot';
+  const isRecordStart = step.kind === 'record_start';
+
+  // record_start: show a pointer in the video.
+  const [cursor, setCursor] = useState(initial.cursor === true);
 
   // Screenshot-friendly fields.
   const [label, setLabel] = useState(String(initial.label ?? ''));
@@ -63,6 +68,10 @@ export function StepEditModal({
         next.format = format;
         next.quality = Math.min(100, Math.max(1, Math.round(quality)));
       }
+      payload = next;
+    } else if (isRecordStart) {
+      const next: Record<string, unknown> = { ...initial };
+      if (cursor) next.cursor = true; else delete next.cursor;
       payload = next;
     } else {
       try {
@@ -215,6 +224,17 @@ export function StepEditModal({
               </label>
             )}
           </>
+        ) : isRecordStart ? (
+          <label style={{ ...row, alignItems: 'flex-start' }}>
+            <input type="checkbox" checked={cursor} onChange={(e) => setCursor(e.target.checked)} style={{ marginTop: 2 }} />
+            <span>
+              Show the mouse pointer in the video
+              <span className="muted" style={{ display: 'block', fontSize: 12 }}>
+                Draws an arrow that follows the mouse, with a ripple on each click, until the
+                recording stops. Screenshots taken while recording include it.
+              </span>
+            </span>
+          </label>
         ) : (
           <label style={col}>
             <span>Payload JSON</span>

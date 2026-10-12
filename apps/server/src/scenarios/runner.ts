@@ -11,12 +11,14 @@ import {
   RunAbortedError,
   type IndexedStep,
   type PauseController,
+  type RecordOptions,
   type RetryPolicy,
   type Settle,
   type StepContext,
 } from './stepExecutor.js';
 import { pauseRun } from './pauseRegistry.js';
 import { StreamRecorder } from './streamRecorder.js';
+import { installCursorOverlay, type CursorOverlay } from './cursorOverlay.js';
 import { runStore, testRuns, type RunStatus } from '../runs/index.js';
 import { notifyRunFinished } from '../notifications.js';
 import { parseStepPayload, slotStamp, type ViewportPreset } from '@eab/shared';
@@ -32,6 +34,8 @@ import { parseStepPayload, slotStamp, type ViewportPreset } from '@eab/shared';
 // each clip's filename unique. Shared across viewports and restart attempts.
 interface RecordingHolder {
   recorder: StreamRecorder | null;
+  /** The in-page pointer, when the record_start step asked for one. */
+  cursor: CursorOverlay | null;
   absPath: string | null;
   relPath: string | null;
   index: number;
@@ -104,7 +108,7 @@ function appendLog(ctx: { runId: number; journal: RunJournal; log: string[] }, l
 // to start logs a warning but never throws, so it can't fail the run. A
 // `record_start` while one is already open is ignored (keeps a single clip
 // across the 'both' viewports and restart re-runs).
-async function startRecordingStep(ctx: RunContext): Promise<void> {
+async function startRecordingStep(ctx: RunContext, opts: RecordOptions): Promise<void> {
   if (ctx.recording.recorder) {
     appendLog(ctx, `record start: already recording — ignoring`);
     return;
@@ -130,6 +134,10 @@ async function startRecordingStep(ctx: RunContext): Promise<void> {
       ? `recording started (screencast) → ${ctx.recording.relPath}`
       : `recording start failed (non-fatal)`,
   );
+  if (ctx.recording.recorder && opts.cursor) {
+    ctx.recording.cursor = await installCursorOverlay(ctx.session, (m) => appendLog(ctx, m));
+    if (ctx.recording.cursor) appendLog(ctx, `recording: pointer overlay on`);
+  }
 }
 
 // Stop the open recording (if any) and register the saved webm. Used by the
@@ -138,6 +146,11 @@ async function stopRecordingStep(ctx: RunContext): Promise<void> {
   const rec = ctx.recording.recorder;
   if (!rec) return;
   ctx.recording.recorder = null;
+  // The pointer goes before the last frames are taken, so the saved page
+  // state (and any screenshot after this step) is clean again.
+  const cursor = ctx.recording.cursor;
+  ctx.recording.cursor = null;
+  if (cursor) await cursor.remove();
   const frames = rec.frameCount;
   const saved = await rec.stop().catch(() => false);
   const { absPath, relPath } = ctx.recording;
@@ -278,7 +291,7 @@ export function startRun(scenarioId: number, opts: StartRunOptions = {}): Starte
   // this holder is shared across viewports and restart attempts so a recording
   // started in one survives into the next.
   const recording: RecordingHolder = {
-    recorder: null, absPath: null, relPath: null, index: 0, fileStamp: runFileStamp,
+    recorder: null, cursor: null, absPath: null, relPath: null, index: 0, fileStamp: runFileStamp,
   };
   const ctx: RunContext = { runId, journal, session, scenario, log, recording };
   if (testOnly) appendLog(ctx, 'test run — nothing is saved (no run, screenshots, texts or recordings)');
@@ -508,6 +521,9 @@ export function startRun(scenarioId: number, opts: StartRunOptions = {}): Starte
             authSelectors: getAuthSelectors,
             pause,
             settle,
+            // The recording's pointer overlay lives in the page; a navigation
+            // drops it, so it is put back after every Step while recording.
+            afterStep: async () => { await ctx.recording.cursor?.refresh(); },
             // A test run has nowhere to put artifacts; the executor logs and
             // skips the resource steps instead of failing on the missing dir.
             ...(screenshotDir === null
@@ -515,7 +531,7 @@ export function startRun(scenarioId: number, opts: StartRunOptions = {}): Starte
               : {
                   artifacts: { screenshotDir, viewport, screenshots, texts },
                   recorder: {
-                    start: () => startRecordingStep(ctx),
+                    start: (opts) => startRecordingStep(ctx, opts),
                     stop: () => stopRecordingStep(ctx),
                   },
                 }),

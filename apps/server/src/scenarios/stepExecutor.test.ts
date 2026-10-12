@@ -314,6 +314,25 @@ describe('Step executor', () => {
     });
   });
 
+  it('passes the record_start options to the recorder and runs afterStep after each Step', async () => {
+    const b = fakeBrowser([]);
+    const started: unknown[] = [];
+    const after: number[] = [];
+    const ctx = context(b, {
+      recorder: { start: async (o) => { started.push(o); }, stop: async () => {} },
+      afterStep: async (s) => { after.push(s.position); if (s.position === 2) throw new Error('hook hiccup'); },
+    });
+    await executeSteps(ctx, [
+      { position: 1, step: parseStep('record_start', { cursor: true }) },
+      { position: 2, step: parseStep('press', { key: 'Tab' }) },
+      { position: 3, step: parseStep('record_start', {}) },
+    ]);
+    expect(started).toEqual([{ cursor: true }, { cursor: false }]);
+    // A failing hook is logged, never fatal.
+    expect(after).toEqual([1, 2, 3]);
+    expect(ctx.lines.some((l) => /after step #2: hook hiccup \(ignored\)/.test(l))).toBe(true);
+  });
+
   it('presses a key on the focused element and lets a navigation settle', async () => {
     const b = fakeBrowser([]);
     await executeStep(context(b), parseStep('press', { key: ' Enter ' }));

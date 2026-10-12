@@ -77,8 +77,13 @@ export interface Artifacts {
 
 /** Video recording hooks for record_start / record_stop. */
 export interface Recorder {
-  start(): Promise<void>;
+  start(opts: RecordOptions): Promise<void>;
   stop(): Promise<void>;
+}
+
+export interface RecordOptions {
+  /** Show an animated pointer in the page for the duration of the recording. */
+  cursor: boolean;
 }
 
 /**
@@ -129,6 +134,12 @@ export interface StepContext {
   timing?: Partial<Timing>;
   /** Care around interactive Steps; absent means none (see Settle). */
   settle?: Settle;
+  /**
+   * Runs after every Step of executeSteps that completed (after its retries).
+   * The runner uses it to keep the recording's pointer overlay in the page
+   * across navigations. Never fails the run.
+   */
+  afterStep?: (step: IndexedStep) => Promise<void>;
   artifacts?: Artifacts;
   recorder?: Recorder;
   pause?: PauseController;
@@ -238,8 +249,11 @@ export async function executeSteps(
   steps: IndexedStep[],
   policy: RetryPolicy = NO_RETRY,
 ): Promise<void> {
-  for (const { position, step } of steps) {
-    await executeStepWithRetries(ctx, step, position, policy);
+  for (const indexed of steps) {
+    await executeStepWithRetries(ctx, indexed.step, indexed.position, policy);
+    if (ctx.afterStep) {
+      try { await ctx.afterStep(indexed); } catch (e: any) { ctx.log(`after step #${indexed.position}: ${e?.message ?? e} (ignored)`); }
+    }
   }
 }
 
@@ -290,7 +304,7 @@ export async function executeStep(ctx: StepContext, step: StepPayload, position 
 
   switch (step.kind) {
     case 'record_start':
-      await requireRecorder(ctx, step.kind).start();
+      await requireRecorder(ctx, step.kind).start({ cursor: step.cursor === true });
       return;
     case 'save_text':
       await saveText(ctx, step, position);

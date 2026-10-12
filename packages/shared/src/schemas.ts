@@ -231,7 +231,12 @@ const StepWait = z.object({
   selector: SelectorStrategy.optional(),
 });
 const StepEvaluate = z.object({ kind: z.literal('evaluate'), js: z.string() });
-const StepRecordStart = z.object({ kind: z.literal('record_start') });
+const StepRecordStart = z.object({
+  kind: z.literal('record_start'),
+  // Draw an animated pointer (and click ripple) in the page while recording,
+  // so the video shows where the mouse is. Removed at record_stop.
+  cursor: z.boolean().optional(),
+});
 const StepRecordStop = z.object({ kind: z.literal('record_stop') });
 const StepClose = z.object({ kind: z.literal('close') });
 // Key names follow agent-browser / Playwright: "Enter", "Tab", "Escape",
