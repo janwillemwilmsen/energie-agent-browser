@@ -271,6 +271,21 @@ describe('Step executor', () => {
       expect(ctx.slept).toEqual([150]);
     });
 
+    it('humanPointer adds --human to ref and locator clicks only', async () => {
+      const b = fakeBrowser([WITH_BUTTON]);
+      const ctx = context(b, { settle: { scrollIntoView: false, afterMs: 0, humanPointer: true } });
+      await executeStep(ctx, parseStep('click', { selector: { role: 'button', name: 'Go' } }));
+      await executeStep(ctx, parseStep('click', { selector: { role: '', name: '', locator: '#go' } }));
+      await executeStep(ctx, parseStep('check', { selector: { role: '', name: '', locator: '#terms' } }));
+      await executeStep(ctx, parseStep('click', { selector: { role: '', name: '', find: { by: 'text', value: 'Go' } } }));
+      expect(b.calls.filter((c) => c[0] === 'click' || c[0] === 'check' || c[0] === 'find')).toEqual([
+        ['click', '@e1', '--human'],
+        ['click', '#go', '--human'],
+        ['check', '#terms'],
+        ['find', 'text', 'Go', 'click'],
+      ]);
+    });
+
     it('is a no-op at zero / off', async () => {
       const b = fakeBrowser([WITH_BUTTON]);
       const ctx = context(b, { settle: { scrollIntoView: false, afterMs: 0 } });

@@ -123,6 +123,14 @@ export interface Settle {
   scrollIntoView: boolean;
   /** Pause this long after every interactive Step; 0 means none. */
   afterMs: number;
+  /**
+   * Move the pointer to each click target along an eased curve from the
+   * previous interaction (agent-browser `click --human`, ~0.8 s), instead of
+   * teleporting — so a recording shows the mouse travelling between
+   * elements. Not available for `find` clicks (the subcommand has no such
+   * flag) nor for check/uncheck.
+   */
+  humanPointer?: boolean;
 }
 
 export const NO_SETTLE: Settle = { scrollIntoView: false, afterMs: 0 };
@@ -529,7 +537,10 @@ async function interact(ctx: StepContext, timing: Timing, step: InteractiveStep)
   // 'select' picks an option in a native <select> by label/value — the
   // selector targets the combobox itself (options have no box model).
   if (value !== undefined) args.push(value);
-  log(`${step.kind} ${ref}`);
+  const human = step.kind === 'click' && ctx.settle?.humanPointer === true;
+  if (human) args.push('--human');
+  // Values stay out of the log (a typed text may be a secret).
+  log(`${step.kind} ${ref}${human ? ' --human' : ''}`);
   let r = await browser.run(args, { timeoutMs: 30_000 });
   // Refs are bound to one snapshot; if the DOM re-rendered between our
   // snapshot and the click (a cookie banner still hydrating — wider window

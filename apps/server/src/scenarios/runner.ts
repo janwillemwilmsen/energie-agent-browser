@@ -67,6 +67,7 @@ interface ScenarioRow {
   preflight_mode: string;
   step_scroll_into_view: number;
   step_settle_ms: number;
+  human_pointer: number;
 }
 
 /**
@@ -209,7 +210,7 @@ export function startRun(scenarioId: number, opts: StartRunOptions = {}): Starte
     .prepare(
       `SELECT id, name, url, viewport_preset,
               retries, retry_wait_before_ms, retry_wait_after_ms, restart_on_failure,
-              preflight_id, preflight_mode, step_scroll_into_view, step_settle_ms
+              preflight_id, preflight_mode, step_scroll_into_view, step_settle_ms, human_pointer
        FROM scenarios WHERE id = ?`,
     )
     .get(scenarioId) as ScenarioRow | undefined;
@@ -305,9 +306,10 @@ export function startRun(scenarioId: number, opts: StartRunOptions = {}): Starte
   const settle: Settle = {
     scrollIntoView: !!scenario.step_scroll_into_view,
     afterMs: Math.max(0, scenario.step_settle_ms ?? 0),
+    humanPointer: !!scenario.human_pointer,
   };
-  if (settle.scrollIntoView || settle.afterMs > 0) {
-    appendLog(ctx, `settle policy: ${settle.scrollIntoView ? 'scroll into view before' : 'no scroll'}, ${settle.afterMs}ms after each interactive step`);
+  if (settle.scrollIntoView || settle.afterMs > 0 || settle.humanPointer) {
+    appendLog(ctx, `settle policy: ${settle.scrollIntoView ? 'scroll into view before' : 'no scroll'}, ${settle.afterMs}ms after each interactive step${settle.humanPointer ? ', human pointer movement on clicks' : ''}`);
   }
 
   // Finish the run as failed before any Step ran (bad step data, preflight

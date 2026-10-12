@@ -23,6 +23,8 @@ export interface Scenario {
   /** Settle policy for interactive Steps: scroll into view first (0/1), pause after (ms). */
   step_scroll_into_view: number;
   step_settle_ms: number;
+  /** 0/1: clicks move the pointer along a curve from the previous interaction. */
+  human_pointer: number;
   /** Free-text notes for the editor's own reference ('' when none). */
   notes: string;
   /** 0/1: the editor diffs a successful play against the previous run. */
