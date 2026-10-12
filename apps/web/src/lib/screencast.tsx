@@ -1,5 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 
+// The frame grab (`agent-browser screenshot`) fails like this while the
+// browser has no page to capture — a navigation is committing, or a `close`
+// step ended the session. Transient, never a broken preview.
+export function isBetweenPages(message: string): boolean {
+  return /Not attached to an active page|Target closed|no active page|Session closed|browser (has been |was )?closed/i.test(message);
+}
+
 export function PreviewStream({
   session,
   active,
@@ -8,7 +15,7 @@ export function PreviewStream({
   active: boolean;
 }) {
   const imgRef = useRef<HTMLImageElement | null>(null);
-  const [status, setStatus] = useState<'idle' | 'connecting' | 'live' | 'error' | 'closed'>(
+  const [status, setStatus] = useState<'idle' | 'connecting' | 'live' | 'waiting' | 'error' | 'closed'>(
     'idle',
   );
   const [hasFrame, setHasFrame] = useState(false);
@@ -85,10 +92,17 @@ export function PreviewStream({
           setFrameSrc(src);
           setHasFrame(true);
           setInfo(null);
+          setError(null);
           setStatus('live');
         } else if (msg.type === 'status') {
           // Server-side progress (e.g. "Starting browser session…") — not an error.
           setInfo(msg.message);
+        } else if (msg.type === 'error' && isBetweenPages(msg.message)) {
+          // A frame could not be taken because the browser has no page right
+          // now: mid-navigation, or after a `close` step. The last frame stays
+          // up and the next frame clears this; it is not a failure.
+          setInfo('No page to show right now (navigating, or the session was closed).');
+          setStatus('waiting');
         } else if (msg.type === 'error') {
           setError(msg.message);
           setStatus('error');
@@ -129,6 +143,7 @@ export function PreviewStream({
         </button>
       </div>
       {error && <pre className="preview-help">{error}</pre>}
+      {hasFrame && status === 'waiting' && info && <p className="muted preview-info">{info}</p>}
       <div
         className="preview-frame-wrap"
         style={{ display: hasFrame ? 'block' : 'none' }}
@@ -158,7 +173,7 @@ export function PreviewStream({
       </div>
       {!hasFrame && !error && (
         <div className="preview-frame preview-frame-empty">
-          {status === 'connecting'
+          {status === 'connecting' || status === 'waiting'
             ? info ?? 'Connecting to preview…'
             : 'Preview is off — click start.'}
         </div>
