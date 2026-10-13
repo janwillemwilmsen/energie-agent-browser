@@ -8,6 +8,7 @@ import {
   encodeSlot,
   slotStamp,
   zoomedViewport,
+  type DeviceName,
   type ViewportSize,
 } from '@eab/shared';
 import type { A11yNode, A11yTree, FindLocator, SelectorStrategy, StepPayload } from '@eab/shared';
@@ -810,6 +811,24 @@ async function setViewport(browser: Browser, v: ViewportSize, log: (line: string
   log(`< set viewport ok`);
 }
 
+// Chrome's capture surface is capped at this many device pixels per side; a
+// taller full-page capture wraps back to the top of the page past this row.
+export const CHROME_CAPTURE_MAX_PX = 16_384;
+
+// Say so in the log when a full-page capture crossed the cap, so a wrapped
+// image never passes silently. Best-effort (the file may be unreadable).
+async function warnIfOversize(file: string, log: (line: string) => void): Promise<void> {
+  try {
+    const { width = 0, height = 0 } = await sharp(file).metadata();
+    if (height > CHROME_CAPTURE_MAX_PX || width > CHROME_CAPTURE_MAX_PX) {
+      log(
+        `WARNING: capture is ${width}×${height} px, above Chrome's ${CHROME_CAPTURE_MAX_PX} px limit — ` +
+        `the image repeats the top of the page past row ${CHROME_CAPTURE_MAX_PX}. Use a viewport capture, or a lower zoom.`,
+      );
+    }
+  } catch { /* not an image we can read; nothing to warn about */ }
+}
+
 // Chrome's CDP error for "the frame has no layout yet" — seen when a screenshot
 // is requested while a navigation is still committing / before first paint.
 function isPageNotReadyError(stderr: string, stdout: string): boolean {
@@ -886,10 +905,22 @@ async function screenshot(
   // legend (label [N] -> @eN role/name) to stdout.
   const annotate = step.annotate === true;
 
-  // The capture may change the viewport (another device, zoom); whatever
-  // happens, the run's viewport is restored afterwards so the following
-  // steps see the site as the run does.
-  const switched = mobileShot || zoom != null;
+  // The device the capture happens on, if any: the step's own, or the run's
+  // mobile device. Null for a desktop capture.
+  const deviceInUse: DeviceName | null = mobileShot ? device : artifacts.viewport === 'mobile' ? MOBILE_DEVICE : null;
+  // Chrome renders a full-page capture into one surface capped at 16384
+  // device pixels; beyond that the image wraps back to the top of the page.
+  // A phone profile at scale 3 hits that at ~5500 CSS px of page, so a
+  // full-page capture on a device keeps the device's CSS viewport (same
+  // layout, same breakpoints) but renders at scale 1. Always, not only when
+  // the page is tall: the slot must keep one resolution across runs for the
+  // diff. Viewport-only shots keep the device's scale (they cannot wrap).
+  const lowScale = fullPage && deviceInUse != null;
+
+  // The capture may change the viewport (another device, zoom, the scale
+  // above); whatever happens, the run's viewport is restored afterwards so
+  // the following steps see the site as the run does.
+  const switched = mobileShot || zoom != null || lowScale;
   if (mobileShot) {
     // Let the current layout settle, switch to the mobile device, let the
     // responsive reflow happen, then capture.
@@ -899,13 +930,14 @@ async function screenshot(
     await timing.sleep(50);
   }
   try {
-    if (zoom != null) {
+    if (zoom != null || lowScale) {
       // Zoom on top of whatever is being captured: the step's device, or the
       // run's own viewport (desktop, or its mobile device).
-      const base: ViewportSize = mobileShot
-        ? DEVICE_PROFILES[device]
-        : artifacts.viewport === 'mobile' ? DEVICE_PROFILES[MOBILE_DEVICE] : DESKTOP_VIEWPORT;
-      await setViewport(browser, zoomedViewport(base, zoom), (l) => log(`${l} (zoom ${zoom}%)`));
+      const base: ViewportSize = deviceInUse ? DEVICE_PROFILES[deviceInUse] : DESKTOP_VIEWPORT;
+      const zoomed = zoom != null ? zoomedViewport(base, zoom) : base;
+      const target: ViewportSize = lowScale ? { ...zoomed, scale: 1 } : zoomed;
+      const note = [zoom != null ? `zoom ${zoom}%` : '', lowScale ? 'scale 1 for the full-page capture' : ''].filter(Boolean).join(', ');
+      await setViewport(browser, target, (l) => log(`${l} (${note})`));
       await timing.sleep(50);
     }
 
@@ -943,6 +975,7 @@ async function screenshot(
       if (expand) await restoreScrollers(browser).catch(() => {});
     }
     if (r.exitCode !== 0) throw new Error(`screenshot failed: ${r.stderr || r.stdout}`);
+    if (fullPage) await warnIfOversize(capturePath, log);
     if (format === 'webp') {
       // agent-browser can't emit webp — convert the png capture and drop it.
       await sharp(capturePath).webp({ quality }).toFile(filepath);

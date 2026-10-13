@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { DEFAULT_MOBILE_DEVICE, DEVICE_NAMES, DEVICE_PROFILES, DESKTOP_VIEWPORT, ZOOM_LEVELS, zoomedViewport } from '@eab/shared';
+import { DEFAULT_MOBILE_DEVICE, DEVICE_NAMES, DESKTOP_VIEWPORT, ZOOM_LEVELS, zoomedViewport } from '@eab/shared';
 import type { EditableStep } from './store.js';
 
 // Modal for the ✎ button on a step row. Screenshot steps get friendly fields —
@@ -59,7 +59,9 @@ export function StepEditModal({
       if (fullPage && expandScrollers) next.expandScrollers = true; else delete next.expandScrollers;
       if (mobile) next.viewport = 'mobile'; else delete next.viewport;
       if (mobile && device) next.device = device; else delete next.device;
-      if (zoom) next.zoom = zoom; else delete next.zoom;
+      // Zoom is a desktop test (reflow at 720/480/360 px); a phone is already
+      // at that width, so a mobile shot saves without one.
+      if (zoom && !mobile) next.zoom = zoom; else delete next.zoom;
       if (annotate) next.annotate = true; else delete next.annotate;
       if (format === 'png') {
         delete next.format;
@@ -179,23 +181,26 @@ export function StepEditModal({
                 </span>
               </label>
             )}
-            <label style={col}>
-              <span>Browser zoom</span>
-              <select value={zoom} onChange={(e) => setZoom(Number(e.target.value))}>
-                <option value={0}>None (100%)</option>
-                {ZOOM_LEVELS.map((z) => {
-                  // Preview what the page will see at that zoom.
-                  const base = mobile ? DEVICE_PROFILES[(device || DEFAULT_MOBILE_DEVICE) as keyof typeof DEVICE_PROFILES] : DESKTOP_VIEWPORT;
-                  const v = zoomedViewport(base, z);
-                  return <option key={z} value={z}>{z}% — page sees {v.width}×{v.height} CSS px</option>;
-                })}
-              </select>
-              <span className="muted" style={{ fontSize: 12 }}>
-                Emulates a user with browser/display zoom (accessibility): the layout width shrinks and every
-                breakpoint reacts as it would for them; the image stays the same size. Saved as a separate slot
-                (<code>label-zoom200</code>) so it diffs against other runs&apos; zoomed shots. 200–400% are the WCAG reflow test points.
-              </span>
-            </label>
+            {/* Desktop only: zoom emulates reflow at 720/480/360 px, which a
+                phone viewport already is; a mobile shot has no zoom. */}
+            {!mobile && (
+              <label style={col}>
+                <span>Browser zoom</span>
+                <select value={zoom} onChange={(e) => setZoom(Number(e.target.value))}>
+                  <option value={0}>None (100%)</option>
+                  {ZOOM_LEVELS.map((z) => {
+                    // Preview what the page will see at that zoom.
+                    const v = zoomedViewport(DESKTOP_VIEWPORT, z);
+                    return <option key={z} value={z}>{z}% — page sees {v.width}×{v.height} CSS px</option>;
+                  })}
+                </select>
+                <span className="muted" style={{ fontSize: 12 }}>
+                  Emulates a user with browser/display zoom (accessibility): the layout width shrinks and every
+                  breakpoint reacts as it would for them; the image stays the same size. Saved as a separate slot
+                  (<code>label-zoom200</code>) so it diffs against other runs&apos; zoomed shots. 200–400% are the WCAG reflow test points.
+                </span>
+              </label>
+            )}
             <label style={row}>
               <input type="checkbox" checked={annotate} onChange={(e) => setAnnotate(e.target.checked)} />
               Annotate interactive elements

@@ -435,6 +435,51 @@ describe('Step executor', () => {
     }
   });
 
+  // Chrome caps a capture at 16384 device px; a phone profile at scale 3 wraps
+  // on any page over ~5500 CSS px. Full-page captures on a device therefore
+  // render at scale 1 (same CSS layout); viewport-only captures keep the scale.
+  it('renders a full-page capture on a device at scale 1, and restores the run viewport', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'eab-shot-'));
+    const b = fakeBrowser([], [
+      (a) => { if (a[0] === 'screenshot') { fs.writeFileSync(a[a.length - 1]!, ''); return OK; } return undefined; },
+    ]);
+    const artifacts = { screenshotDir: dir, viewport: 'desktop' as const, screenshots: [], texts: [] };
+    const ctx = context(b, { artifacts });
+    try {
+      await executeStep(ctx, parseStep('screenshot', { label: 'home', viewport: 'mobile', device: 'iPhone 14' }), 1);
+      expect(b.calls.filter((c) => c[0] === 'set')).toEqual([
+        ['set', 'device', 'iPhone 14'],
+        ['set', 'viewport', '390', '844', '1'],
+        ['set', 'viewport', '1440', '900', '1'],
+      ]);
+      expect(ctx.lines.some((l) => /scale 1 for the full-page capture/.test(l))).toBe(true);
+
+      // Viewport-only: the device's own scale, nothing to cap.
+      b.calls.length = 0;
+      await executeStep(ctx, parseStep('screenshot', { label: 'home', viewport: 'mobile', device: 'iPhone 14', fullPage: false }), 2);
+      expect(b.calls.filter((c) => c[0] === 'set')).toEqual([
+        ['set', 'device', 'iPhone 14'],
+        ['set', 'viewport', '1440', '900', '1'],
+      ]);
+
+      // A run whose own viewport is mobile: full-page shots drop to scale 1
+      // too, and the device is restored afterwards.
+      b.calls.length = 0;
+      const mobileRun = context(b, { artifacts: { ...artifacts, viewport: 'mobile' as const } });
+      await executeStep(mobileRun, parseStep('screenshot', { label: 'home' }), 3);
+      expect(b.calls.filter((c) => c[0] === 'set')).toEqual([
+        ['set', 'viewport', '390', '844', '1'],
+        ['set', 'device', 'iPhone 14'],
+      ]);
+      // Desktop full page: untouched.
+      b.calls.length = 0;
+      await executeStep(ctx, parseStep('screenshot', { label: 'home' }), 4);
+      expect(b.calls.filter((c) => c[0] === 'set')).toEqual([]);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('passes auth selector overrides through to auth login', async () => {
     const b = fakeBrowser([]);
     const ctx = context(b, { authSelectors: () => ({ usernameSelector: '#user', submitSelector: 'button[type=submit]' }) });
