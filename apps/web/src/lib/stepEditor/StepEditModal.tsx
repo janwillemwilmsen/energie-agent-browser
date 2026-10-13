@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { DEFAULT_MOBILE_DEVICE, DEVICE_NAMES, DESKTOP_VIEWPORT, ZOOM_LEVELS, zoomedViewport } from '@eab/shared';
 import type { EditableStep } from './store.js';
 
@@ -97,6 +97,23 @@ export function StepEditModal({
     }
   }
 
+  // Keyboard: Escape cancels, Ctrl/⌘+Enter saves — from anywhere in the
+  // modal, including the JSON textarea (where plain Enter is a newline).
+  // Listened on the window so it works before anything inside has focus.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !busy) {
+        e.preventDefault();
+        onClose();
+      } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !busy) {
+        e.preventDefault();
+        void save();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
+
   const col: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: 4, fontSize: 13 };
   const row: React.CSSProperties = { display: 'flex', gap: 6, alignItems: 'center', fontSize: 13 };
 
@@ -128,7 +145,7 @@ export function StepEditModal({
           <>
             <label style={col}>
               <span>Label</span>
-              <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="screenshot" />
+              <input autoFocus value={label} onChange={(e) => setLabel(e.target.value)} placeholder="screenshot" />
             </label>
             {/* An explicit choice rather than a lone "Full page" checkbox: it
                 was not obvious that unchecking it meant "viewport", and the
@@ -259,6 +276,7 @@ export function StepEditModal({
           <label style={col}>
             <span>Payload JSON</span>
             <textarea
+              autoFocus
               value={json}
               onChange={(e) => setJson(e.target.value)}
               rows={10}
@@ -272,9 +290,10 @@ export function StepEditModal({
           </label>
         )}
         {error && <p className="error" style={{ margin: 0 }}>{error}</p>}
-        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-          <button onClick={onClose} disabled={busy}>Cancel</button>
-          <button onClick={() => void save()} disabled={busy}>
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', alignItems: 'center' }}>
+          <span className="muted" style={{ marginRight: 'auto', fontSize: 12 }}>Esc to cancel · Ctrl+Enter to save</span>
+          <button onClick={onClose} disabled={busy} title="Escape">Cancel</button>
+          <button onClick={() => void save()} disabled={busy} title="Ctrl+Enter (⌘+Enter on a Mac)">
             {busy ? 'Saving…' : '💾 Save'}
           </button>
         </div>
