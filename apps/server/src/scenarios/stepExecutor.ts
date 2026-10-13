@@ -85,6 +85,8 @@ export interface Recorder {
 export interface RecordOptions {
   /** Show an animated pointer in the page for the duration of the recording. */
   cursor: boolean;
+  /** Clicks move the pointer like a person for the duration of the recording (see Settle.humanPointer). */
+  human: boolean;
 }
 
 /**
@@ -128,8 +130,10 @@ export interface Settle {
    * Move the pointer to each click target along an eased curve from the
    * previous interaction (agent-browser `click --human`, ~0.8 s), instead of
    * teleporting — so a recording shows the mouse travelling between
-   * elements. Not available for `find` clicks (the subcommand has no such
-   * flag) nor for check/uncheck.
+   * elements. Read at every click, so a caller may switch it on and off
+   * mid-sequence (the runner does, for a record_start … record_stop span).
+   * Not available for `find` clicks (the subcommand has no such flag) nor
+   * for check/uncheck.
    */
   humanPointer?: boolean;
 }
@@ -313,7 +317,7 @@ export async function executeStep(ctx: StepContext, step: StepPayload, position 
 
   switch (step.kind) {
     case 'record_start':
-      await requireRecorder(ctx, step.kind).start({ cursor: step.cursor === true });
+      await requireRecorder(ctx, step.kind).start({ cursor: step.cursor === true, human: step.human === true });
       return;
     case 'save_text':
       await saveText(ctx, step, position);

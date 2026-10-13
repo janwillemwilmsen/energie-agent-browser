@@ -556,7 +556,6 @@ export const api = {
         | 'record_enabled'
         | 'step_scroll_into_view'
         | 'step_settle_ms'
-        | 'human_pointer'
         | 'notes'
         | 'auto_diff'
       >

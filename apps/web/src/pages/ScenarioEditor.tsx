@@ -231,7 +231,6 @@ export function ScenarioEditor() {
       retry_wait_before_ms: number;
       retry_wait_after_ms: number;
       restart_on_failure: number;
-      human_pointer: number;
       notes: string;
     }>,
   ) {
@@ -685,17 +684,6 @@ export function ScenarioEditor() {
                 onBlur={(e) => saveRetry({ restart_on_failure: clampInt(e.target.value) })}
               />
               <span>times</span>
-            </label>
-          </div>
-          <div className="retry-policy">
-            <span className="muted">Mouse:</span>
-            <label title="Each click moves the pointer along an eased curve from the previous click to the new element (about 0.8 s) instead of jumping — with a recording's pointer on, the video shows the mouse travelling between elements. Not for find-based clicks or check/uncheck.">
-              <input
-                type="checkbox"
-                checked={!!data.human_pointer}
-                onChange={(e) => saveRetry({ human_pointer: e.target.checked ? 1 : 0 })}
-              />
-              <span>move like a person between clicks</span>
             </label>
           </div>
           </>

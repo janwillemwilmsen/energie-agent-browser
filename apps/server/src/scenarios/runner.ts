@@ -67,7 +67,6 @@ interface ScenarioRow {
   preflight_mode: string;
   step_scroll_into_view: number;
   step_settle_ms: number;
-  human_pointer: number;
 }
 
 /**
@@ -87,6 +86,8 @@ interface RunContext {
   scenario: ScenarioRow;
   log: string[];
   recording: RecordingHolder;
+  /** The run's settle policy; the recording toggles its humanPointer. */
+  settle?: Settle;
 }
 
 function nowIso(): string {
@@ -139,6 +140,10 @@ async function startRecordingStep(ctx: RunContext, opts: RecordOptions): Promise
     ctx.recording.cursor = await installCursorOverlay(ctx.session, (m) => appendLog(ctx, m));
     if (ctx.recording.cursor) appendLog(ctx, `recording: pointer overlay on`);
   }
+  if (ctx.recording.recorder && opts.human && ctx.settle) {
+    ctx.settle.humanPointer = true;
+    appendLog(ctx, `recording: clicks move the pointer like a person (--human)`);
+  }
 }
 
 // Stop the open recording (if any) and register the saved webm. Used by the
@@ -152,6 +157,7 @@ async function stopRecordingStep(ctx: RunContext): Promise<void> {
   const cursor = ctx.recording.cursor;
   ctx.recording.cursor = null;
   if (cursor) await cursor.remove();
+  if (ctx.settle) ctx.settle.humanPointer = false;
   const frames = rec.frameCount;
   const saved = await rec.stop().catch(() => false);
   const { absPath, relPath } = ctx.recording;
@@ -210,7 +216,7 @@ export function startRun(scenarioId: number, opts: StartRunOptions = {}): Starte
     .prepare(
       `SELECT id, name, url, viewport_preset,
               retries, retry_wait_before_ms, retry_wait_after_ms, restart_on_failure,
-              preflight_id, preflight_mode, step_scroll_into_view, step_settle_ms, human_pointer
+              preflight_id, preflight_mode, step_scroll_into_view, step_settle_ms
        FROM scenarios WHERE id = ?`,
     )
     .get(scenarioId) as ScenarioRow | undefined;
@@ -303,13 +309,16 @@ export function startRun(scenarioId: number, opts: StartRunOptions = {}): Starte
   };
   // The scenario's own Steps only; an attached preflight's Steps run as the
   // preflight recorded them.
+  // One object for the whole run: a record_start step with `human` switches
+  // humanPointer on, record_stop switches it off (the executor reads it per click).
   const settle: Settle = {
     scrollIntoView: !!scenario.step_scroll_into_view,
     afterMs: Math.max(0, scenario.step_settle_ms ?? 0),
-    humanPointer: !!scenario.human_pointer,
+    humanPointer: false,
   };
-  if (settle.scrollIntoView || settle.afterMs > 0 || settle.humanPointer) {
-    appendLog(ctx, `settle policy: ${settle.scrollIntoView ? 'scroll into view before' : 'no scroll'}, ${settle.afterMs}ms after each interactive step${settle.humanPointer ? ', human pointer movement on clicks' : ''}`);
+  ctx.settle = settle;
+  if (settle.scrollIntoView || settle.afterMs > 0) {
+    appendLog(ctx, `settle policy: ${settle.scrollIntoView ? 'scroll into view before' : 'no scroll'}, ${settle.afterMs}ms after each interactive step`);
   }
 
   // Finish the run as failed before any Step ran (bad step data, preflight

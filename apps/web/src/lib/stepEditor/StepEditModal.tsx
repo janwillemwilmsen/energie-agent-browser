@@ -22,8 +22,9 @@ export function StepEditModal({
   const isScreenshot = step.kind === 'screenshot';
   const isRecordStart = step.kind === 'record_start';
 
-  // record_start: show a pointer in the video.
+  // record_start: show a pointer in the video; move it like a person.
   const [cursor, setCursor] = useState(initial.cursor === true);
+  const [human, setHuman] = useState(initial.human === true);
 
   // Screenshot-friendly fields.
   const [label, setLabel] = useState(String(initial.label ?? ''));
@@ -74,6 +75,7 @@ export function StepEditModal({
     } else if (isRecordStart) {
       const next: Record<string, unknown> = { ...initial };
       if (cursor) next.cursor = true; else delete next.cursor;
+      if (human) next.human = true; else delete next.human;
       payload = next;
     } else {
       try {
@@ -230,16 +232,29 @@ export function StepEditModal({
             )}
           </>
         ) : isRecordStart ? (
-          <label style={{ ...row, alignItems: 'flex-start' }}>
-            <input type="checkbox" checked={cursor} onChange={(e) => setCursor(e.target.checked)} style={{ marginTop: 2 }} />
-            <span>
-              Show the mouse pointer in the video
-              <span className="muted" style={{ display: 'block', fontSize: 12 }}>
-                Draws an arrow that follows the mouse, with a ripple on each click, until the
-                recording stops. Screenshots taken while recording include it.
+          <>
+            <label style={{ ...row, alignItems: 'flex-start' }}>
+              <input type="checkbox" checked={cursor} onChange={(e) => setCursor(e.target.checked)} style={{ marginTop: 2 }} />
+              <span>
+                Show the mouse pointer in the video
+                <span className="muted" style={{ display: 'block', fontSize: 12 }}>
+                  Draws an arrow that follows the mouse, with a ripple on each click, until the
+                  recording stops. Screenshots taken while recording include it.
+                </span>
               </span>
-            </span>
-          </label>
+            </label>
+            <label style={{ ...row, alignItems: 'flex-start' }}>
+              <input type="checkbox" checked={human} onChange={(e) => setHuman(e.target.checked)} style={{ marginTop: 2 }} />
+              <span>
+                Move the mouse like a person between clicks
+                <span className="muted" style={{ display: 'block', fontSize: 12 }}>
+                  While recording, each click travels along an eased curve from the previous click to
+                  the new element (about 0.8 s) instead of jumping. Not for find-based clicks or
+                  check / uncheck.
+                </span>
+              </span>
+            </label>
+          </>
         ) : (
           <label style={col}>
             <span>Payload JSON</span>
