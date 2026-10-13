@@ -517,17 +517,16 @@ export function ScenarioEditor() {
             className="scenario-meta-check"
             title="Scroll the target element into view before acting on it (best-effort; a failed scroll never fails the step)"
           >
-            <span>Around each click / fill / type / select / check</span>
             <span className="scenario-meta-check-row">
               <input
                 type="checkbox"
                 checked={draft.step_scroll_into_view}
                 onChange={(e) => setDraft({ ...draft, step_scroll_into_view: e.target.checked })}
               />
-              scroll into view first
+              scroll into view(before each click, fill, type, select, check) 
             </span>
           </label>
-          <label title="Pause this long after the action so the page can react before the next step (0 = off)">
+          <label className="scenario-meta-narrow" title="Pause this long after the action so the page can react before the next step (0 = off)">
             <span>Then wait (ms)</span>
             <input
               type="number"

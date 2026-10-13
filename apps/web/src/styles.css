@@ -1309,6 +1309,9 @@ code { background: rgba(255,255,255,0.06); padding: 2px 4px; border-radius: 3px;
   color: var(--muted);
   flex: 1;
 }
+/* A short numeric field (the settle wait): a quarter of the row instead of
+   an equal share with its neighbour. */
+.scenario-meta-form label.scenario-meta-narrow { flex: 0 1 25%; }
 .scenario-meta-form label > span {
   text-transform: uppercase;
   letter-spacing: 0.05em;
