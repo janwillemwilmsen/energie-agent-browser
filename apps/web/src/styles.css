@@ -499,6 +499,19 @@ code { background: rgba(255,255,255,0.06); padding: 2px 4px; border-radius: 3px;
   font: inherit;
 }
 .step-list .step-inline-edit .error { font-size: 12px; white-space: nowrap; }
+/* The ↗ right after a navigate step's URL. */
+.step-list .step-open {
+  margin-left: 6px;
+  padding: 0 5px;
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-size: 11px;
+  line-height: 16px;
+  vertical-align: middle;
+}
+.step-list .step-open:hover { color: var(--accent); border-color: var(--accent); }
 /* Colored badge per step kind, so the different action types are
    distinguishable at a glance. */
 .step-kind {

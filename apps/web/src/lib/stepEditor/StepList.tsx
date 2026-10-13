@@ -170,16 +170,16 @@ function StepRow({
         ) : (
           summarizeStep(step.kind, step.payload)
         )}
+        {step.kind === 'navigate' && typeof step.payload.url === 'string' && step.payload.url && (
+          <button
+            className="step-open"
+            title="Open this URL in a small browser window (no tabs or toolbar) to look at the page yourself"
+            onClick={() => openPopup(String(step.payload.url))}
+          >
+            ↗
+          </button>
+        )}
       </span>
-      {step.kind === 'navigate' && typeof step.payload.url === 'string' && step.payload.url && (
-        <button
-          className="step-move"
-          title="Open this URL in a small browser window (no tabs or toolbar) to look at the page yourself"
-          onClick={() => openPopup(String(step.payload.url))}
-        >
-          ↗
-        </button>
-      )}
       <button className="step-move" title="Edit step" onClick={onEdit} disabled={busy}>
         ✎
       </button>
