@@ -34,10 +34,11 @@ export function ScreenshotViewer({
   const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
   useEffect(() => setNatural(null), [item?.runId, item?.name]);
 
-  // The frame is the largest box of the viewport's aspect ratio that fits
-  // the stage — bounded by height for a phone, by width for a desktop shot —
-  // so the ratio holds whatever the window size. Measured, not CSS: with
-  // `height: 100%` plus aspect-ratio the width would overflow a narrow stage.
+  // The frame is the device: the capture viewport at 1:1 CSS pixels, so a
+  // 390×844 phone is a 390×844 box on screen and the page reads at the size
+  // it had on the device. It is never enlarged; it shrinks (ratio kept) only
+  // when the stage is too small for it, as for a 1440×900 desktop capture
+  // in a modest window. Measured with a ResizeObserver so it follows resizes.
   const stageRef = useRef<HTMLDivElement | null>(null);
   const [stage, setStage] = useState<{ w: number; h: number } | null>(null);
   useEffect(() => {
@@ -51,12 +52,13 @@ export function ScreenshotViewer({
   }, []);
   const frameSize = (() => {
     if (!item || !stage) return null;
-    const ratio = item.meta.viewport.width / item.meta.viewport.height;
+    const { width: vw, height: vh } = item.meta.viewport;
+    const ratio = vw / vh;
     const pad = 16; // the stage's padding
     const maxW = Math.max(0, stage.w - pad);
     const maxH = Math.max(0, stage.h - pad);
-    const w = Math.min(maxW, maxH * ratio);
-    return { width: Math.round(w), height: Math.round(w / ratio) };
+    const w = Math.min(vw, maxW, maxH * ratio);
+    return { width: Math.round(w), height: Math.round(w / ratio), pct: Math.round((w / vw) * 100) };
   })();
 
   const prev = () => onIndex(index > 0 ? index - 1 : items.length - 1);
@@ -89,6 +91,7 @@ export function ScreenshotViewer({
             {where} · {vp.width}×{vp.height} CSS px @{vp.scale}×{meta.zoom ? ` · zoom ${meta.zoom}%` : ''}
             {meta.fullPage ? ' · full page' : ' · viewport'}{px ? ` · ${px}` : ''}
             {meta.inferred && <span title="This run predates capture metadata; device and viewport are a guess from the filename"> · (assumed)</span>}
+            {frame && frameSize && <> · frame {frameSize.pct < 100 ? `scaled to ${frameSize.pct}%` : 'at 1:1'}</>}
           </span>
           <span className="ssv-actions">
             <button
@@ -112,7 +115,11 @@ export function ScreenshotViewer({
               // The frame has the capture viewport's aspect ratio, as large
               // as the stage allows; the image fills its width and the rest
               // scrolls, like the page did.
-              <div className="ssv-frame" style={frameSize ?? undefined} title={`${vp.width}×${vp.height} CSS px viewport${frameSize ? ` shown at ${frameSize.width}×${frameSize.height}` : ''}`}>
+              <div
+                className="ssv-frame"
+                style={frameSize ? { width: frameSize.width, height: frameSize.height } : undefined}
+                title={`${vp.width}×${vp.height} CSS px viewport${frameSize && frameSize.pct < 100 ? ` — scaled to ${frameSize.pct}% to fit the window` : ' at 1:1'}`}
+              >
                 <img src={src} alt={item.name} onLoad={(e) => setNatural({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })} />
               </div>
             ) : (
