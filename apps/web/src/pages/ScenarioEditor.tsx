@@ -40,6 +40,9 @@ interface MetaDraft {
   preflight_id: number | null;
   preflight_mode: 'steps' | 'cookies';
   auto_diff: boolean;
+  // Settle policy around interactive steps (see the Step executor's Settle).
+  step_scroll_into_view: boolean;
+  step_settle_ms: number;
 }
 
 function emptyDraft(): MetaDraft {
@@ -52,6 +55,8 @@ function emptyDraft(): MetaDraft {
     preflight_id: null,
     preflight_mode: 'steps',
     auto_diff: false,
+    step_scroll_into_view: false,
+    step_settle_ms: 0,
   };
 }
 
@@ -65,6 +70,8 @@ function draftFrom(d: ScenarioDetail): MetaDraft {
     preflight_id: d.preflight_id ?? null,
     preflight_mode: d.preflight_mode ?? 'steps',
     auto_diff: !!d.auto_diff,
+    step_scroll_into_view: !!d.step_scroll_into_view,
+    step_settle_ms: d.step_settle_ms ?? 0,
   };
 }
 
@@ -77,7 +84,9 @@ function draftsEqual(a: MetaDraft, b: MetaDraft): boolean {
     a.type === b.type &&
     a.preflight_id === b.preflight_id &&
     a.preflight_mode === b.preflight_mode &&
-    a.auto_diff === b.auto_diff
+    a.auto_diff === b.auto_diff &&
+    a.step_scroll_into_view === b.step_scroll_into_view &&
+    a.step_settle_ms === b.step_settle_ms
   );
 }
 
@@ -222,8 +231,6 @@ export function ScenarioEditor() {
       retry_wait_before_ms: number;
       retry_wait_after_ms: number;
       restart_on_failure: number;
-      step_scroll_into_view: number;
-      step_settle_ms: number;
       human_pointer: number;
       notes: string;
     }>,
@@ -348,6 +355,8 @@ export function ScenarioEditor() {
         preflight_id: draft.preflight_id,
         preflight_mode: draft.preflight_mode,
         auto_diff: draft.auto_diff ? 1 : 0,
+        step_scroll_into_view: draft.step_scroll_into_view ? 1 : 0,
+        step_settle_ms: Math.min(60_000, Math.max(0, Math.floor(draft.step_settle_ms) || 0)),
       });
       const next = { ...data, ...updated };
       setData(next);
@@ -500,6 +509,37 @@ export function ScenarioEditor() {
             </span>
           </label>
         </div>
+        {/* Settle policy: extra care around click/type/fill/select/check/
+            uncheck for pages where the browser's own waits aren't enough.
+            Both off by default so existing scenarios run unchanged. Saved
+            with the form like the fields above. */}
+        <div className="scenario-meta-row">
+          <label
+            className="scenario-meta-check"
+            title="Scroll the target element into view before acting on it (best-effort; a failed scroll never fails the step)"
+          >
+            <span>Around each click / fill / type / select / check</span>
+            <span className="scenario-meta-check-row">
+              <input
+                type="checkbox"
+                checked={draft.step_scroll_into_view}
+                onChange={(e) => setDraft({ ...draft, step_scroll_into_view: e.target.checked })}
+              />
+              scroll into view first
+            </span>
+          </label>
+          <label title="Pause this long after the action so the page can react before the next step (0 = off)">
+            <span>Then wait (ms)</span>
+            <input
+              type="number"
+              min={0}
+              max={60000}
+              step={50}
+              value={draft.step_settle_ms}
+              onChange={(e) => setDraft({ ...draft, step_settle_ms: Math.max(0, Math.floor(Number(e.target.value)) || 0) })}
+            />
+          </label>
+        </div>
         <div className="scenario-meta-row">
           <label
             className="scenario-meta-check"
@@ -645,32 +685,6 @@ export function ScenarioEditor() {
                 onBlur={(e) => saveRetry({ restart_on_failure: clampInt(e.target.value) })}
               />
               <span>times</span>
-            </label>
-          </div>
-          {/* Settle policy: extra care around click/type/fill/select/check/
-              uncheck for pages where the browser's own waits aren't enough.
-              Both off by default so existing scenarios run unchanged. */}
-          <div className="retry-policy">
-            <span className="muted">Around each click / fill / type / select / check:</span>
-            <label title="Scroll the target element into view before acting on it (best-effort; a failed scroll never fails the step)">
-              <input
-                type="checkbox"
-                checked={!!data.step_scroll_into_view}
-                onChange={(e) => saveRetry({ step_scroll_into_view: e.target.checked ? 1 : 0 })}
-              />
-              <span>scroll into view first</span>
-            </label>
-            <label title="Pause this long after the action so the page can react before the next step (0 = off)">
-              <span>then wait</span>
-              <input
-                type="number"
-                min={0}
-                max={60000}
-                step={50}
-                defaultValue={data.step_settle_ms}
-                onBlur={(e) => saveRetry({ step_settle_ms: Math.min(60_000, clampInt(e.target.value)) })}
-              />
-              <span>ms</span>
             </label>
           </div>
           <div className="retry-policy">
