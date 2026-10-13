@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { type ScreenshotMeta } from '@eab/shared';
 import { api } from './api.js';
 
@@ -33,6 +33,31 @@ export function ScreenshotViewer({
   }, [frame]);
   const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
   useEffect(() => setNatural(null), [item?.runId, item?.name]);
+
+  // The frame is the largest box of the viewport's aspect ratio that fits
+  // the stage — bounded by height for a phone, by width for a desktop shot —
+  // so the ratio holds whatever the window size. Measured, not CSS: with
+  // `height: 100%` plus aspect-ratio the width would overflow a narrow stage.
+  const stageRef = useRef<HTMLDivElement | null>(null);
+  const [stage, setStage] = useState<{ w: number; h: number } | null>(null);
+  useEffect(() => {
+    const el = stageRef.current;
+    if (!el) return;
+    const measure = () => setStage({ w: el.clientWidth, h: el.clientHeight });
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const frameSize = (() => {
+    if (!item || !stage) return null;
+    const ratio = item.meta.viewport.width / item.meta.viewport.height;
+    const pad = 16; // the stage's padding
+    const maxW = Math.max(0, stage.w - pad);
+    const maxH = Math.max(0, stage.h - pad);
+    const w = Math.min(maxW, maxH * ratio);
+    return { width: Math.round(w), height: Math.round(w / ratio) };
+  })();
 
   const prev = () => onIndex(index > 0 ? index - 1 : items.length - 1);
   const next = () => onIndex(index < items.length - 1 ? index + 1 : 0);
@@ -82,12 +107,12 @@ export function ScreenshotViewer({
 
         <div className="ssv-body">
           <button type="button" className="ssv-nav" onClick={prev} disabled={items.length < 2} title="Previous (←)" aria-label="Previous">‹</button>
-          <div className="ssv-stage">
+          <div className="ssv-stage" ref={stageRef}>
             {frame ? (
-              // The frame has the capture viewport's aspect ratio and is as
-              // wide as the stage allows; the image fills its width and the
-              // rest scrolls, like the page did.
-              <div className="ssv-frame" style={{ aspectRatio: `${vp.width} / ${vp.height}` }}>
+              // The frame has the capture viewport's aspect ratio, as large
+              // as the stage allows; the image fills its width and the rest
+              // scrolls, like the page did.
+              <div className="ssv-frame" style={frameSize ?? undefined} title={`${vp.width}×${vp.height} CSS px viewport${frameSize ? ` shown at ${frameSize.width}×${frameSize.height}` : ''}`}>
                 <img src={src} alt={item.name} onLoad={(e) => setNatural({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })} />
               </div>
             ) : (

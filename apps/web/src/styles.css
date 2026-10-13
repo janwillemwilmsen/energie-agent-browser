@@ -1650,10 +1650,10 @@ code { background: rgba(255,255,255,0.06); padding: 2px 4px; border-radius: 3px;
 /* Whole image, scaled to the stage width, scrolling vertically. */
 .ssv-full { width: 100%; height: 100%; overflow: auto; }
 .ssv-full img { display: block; width: 100%; height: auto; }
-/* The device frame: the capture viewport's aspect ratio (set inline), as
-   tall as the stage; the image fills its width and the rest scrolls. */
+/* The device frame: sized inline to the capture viewport's aspect ratio,
+   fitted to the stage; the image fills its width and the rest scrolls. */
 .ssv-frame {
-  height: 100%; max-width: 100%;
+  box-sizing: border-box;
   overflow: auto; background: #000;
   border: 2px solid var(--border); border-radius: 6px;
   scrollbar-gutter: stable;
