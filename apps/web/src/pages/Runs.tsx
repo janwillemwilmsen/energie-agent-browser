@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { api, type PausedRun, type Run, type Scenario } from '../lib/api.js';
+import { api, type PausedRun, type Recording, type Run, type Scenario } from '../lib/api.js';
 import { GroupBySwitch, GroupLabel, groupKey, sortByGroup, type GroupBy } from '../lib/tagGrouping.js';
 import { useResource, usePolling } from '../lib/resource.js';
 
@@ -57,6 +57,12 @@ export function Runs() {
   );
   // Every tag in use, so a chip is offered even when no loaded run carries it.
   const { data: allScenarios } = useResource(() => api.listScenarios(), { initial: [] as Scenario[] });
+  // Which runs have a video clip, so the row says so next to its screenshots.
+  const { data: clipCounts, refresh: refreshClipCounts } = useResource(
+    () => api.recordingCountsByRun(),
+    { initial: {} as Record<string, number> },
+  );
+  usePolling(refreshClipCounts, 8000);
 
   // `selected` captures the run row at click-time, so its log never grew
   // between polls. `liveSelected` re-resolves the same id against the latest
@@ -479,14 +485,21 @@ export function Runs() {
                   <div>
                     {(() => {
                       const n = screenshotCount(r);
-                      if (n === 0) return <span className="muted">No screenshots</span>;
+                      const clips = clipCounts[String(r.id)] ?? 0;
+                      const shots = n === 0
+                        ? <span className="muted">No screenshots</span>
+                        : (
+                          <Link to={`/screenshots/timeline/${r.scenario_id}`} title="Open the scenario timeline">
+                            {n} screenshot{n === 1 ? '' : 's'}
+                          </Link>
+                        );
                       return (
-                        <Link
-                          to={`/screenshots/timeline/${r.scenario_id}`}
-                          title="Open the scenario timeline"
-                        >
-                          {n} screenshot{n === 1 ? '' : 's'}
-                        </Link>
+                        <>
+                          {shots}
+                          {clips > 0 && (
+                            <span title="This run has a video recording — open the run to play it"> · 🎬 {clips === 1 ? 'video' : `${clips} videos`}</span>
+                          )}
+                        </>
                       );
                     })()}
                   </div>
@@ -567,6 +580,16 @@ function RunDetail({
   let screenshots: string[] = [];
   try { screenshots = JSON.parse(run.screenshot_paths_json); } catch {}
 
+  // The run's video clips (record_start … record_stop). A clip is registered
+  // when it stops, so a live run is re-polled until it finishes.
+  const { data: recordings, refresh: refreshRecordings } = useResource(
+    () => api.listRunRecordings(run.id),
+    { initial: [] as Recording[], deps: [run.id] },
+  );
+  usePolling(refreshRecordings, live ? 3000 : 0);
+  // The finishing poll may land before the last clip is registered.
+  useEffect(() => { if (!live) void refreshRecordings(); }, [live]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Reverse the log so the newest line is on top — the runner appends one
   // stamped line per step, so a simple line-reverse keeps each entry intact.
   const reversedLog = useMemo(() => {
@@ -609,6 +632,29 @@ function RunDetail({
           <pre className="run-log">{reversedLog || '(no log yet)'}</pre>
         </div>
         <div>
+          {recordings.length > 0 && (
+            <>
+              <h3>
+                Video recording{recordings.length === 1 ? '' : `s (${recordings.length})`}{' '}
+                <Link to="/recordings" className="muted" style={{ fontSize: 12, fontWeight: 400 }}>
+                  all recordings
+                </Link>
+              </h3>
+              <div className="run-recordings">
+                {recordings.map((rec) => (
+                  <div key={rec.id} className="run-recording">
+                    <video src={api.recordingVideoUrl(rec.id)} controls preload="metadata" />
+                    <div className="muted">
+                      {rec.file_path.split('/').pop()}
+                      {rec.size_bytes != null && <> · {Math.round(rec.size_bytes / 1024).toLocaleString()} KB</>}
+                      {' · '}
+                      <a href={api.recordingVideoUrl(rec.id)} download title="Download the webm">download</a>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
           <h3>Screenshots ({screenshots.length})</h3>
           <div className="screenshots">
             {screenshots.map((name) => (

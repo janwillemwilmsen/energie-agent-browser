@@ -16,8 +16,22 @@ interface RecordingRow {
 export async function recordingsRoutes(app: FastifyInstance) {
   // List recordings joined with their scenario's name/brand/type so the
   // Recordings page can reuse the same Brand/Type filters as the Runs page.
-  app.get('/api/recordings', async () => {
-    return getDb()
+  // `runId` narrows it to one run's clips (the run panel), however old.
+  app.get<{ Querystring: { runId?: string } }>('/api/recordings', async (req) => {
+    const runId = Number(req.query?.runId);
+    const db = getDb();
+    if (Number.isInteger(runId) && runId > 0) {
+      return db
+        .prepare(
+          `SELECT recordings.*, scenarios.name AS scenario_name, scenarios.brand, scenarios.type
+           FROM recordings
+           LEFT JOIN scenarios ON scenarios.id = recordings.scenario_id
+           WHERE recordings.run_id = ?
+           ORDER BY recordings.id ASC`,
+        )
+        .all(runId);
+    }
+    return db
       .prepare(
         `SELECT recordings.*, scenarios.name AS scenario_name, scenarios.brand, scenarios.type
          FROM recordings
@@ -25,6 +39,15 @@ export async function recordingsRoutes(app: FastifyInstance) {
          ORDER BY recordings.id DESC LIMIT 200`,
       )
       .all();
+  });
+
+  // Run ids that have at least one clip, with the count: the Runs list marks
+  // those rows without fetching every recording row.
+  app.get('/api/recordings/by-run', async () => {
+    const rows = getDb()
+      .prepare('SELECT run_id, COUNT(*) AS n FROM recordings WHERE run_id IS NOT NULL GROUP BY run_id')
+      .all() as { run_id: number; n: number }[];
+    return Object.fromEntries(rows.map((r) => [String(r.run_id), r.n]));
   });
 
   // Stream the webm with HTTP range support — required for seeking in a <video>

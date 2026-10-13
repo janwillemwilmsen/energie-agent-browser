@@ -757,6 +757,10 @@ code { background: rgba(255,255,255,0.06); padding: 2px 4px; border-radius: 3px;
   overflow-wrap: anywhere;
 }
 .screenshots { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+/* A run's video clips in the run panel, above its screenshots. */
+.run-recordings { display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px; }
+.run-recording video { width: 100%; max-height: 420px; background: #000; border: 1px solid var(--border); border-radius: 4px; }
+.run-recording a { color: var(--accent); }
 .shot img { width: 100%; height: auto; border: 1px solid var(--border); border-radius: 4px; }
 .run-tags { display: inline-flex; gap: 4px; flex-wrap: wrap; }
 /* Tag chips in a group header (Dashboard sections, /runs and /scenarios group rows). */

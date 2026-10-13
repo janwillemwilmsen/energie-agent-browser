@@ -519,6 +519,10 @@ export const api = {
       body: JSON.stringify({ ids }),
     }),
   listRecordings: () => req<Recording[]>('/api/recordings'),
+  /** One run's clips, in capture order, however old the run. */
+  listRunRecordings: (runId: number) => req<Recording[]>(`/api/recordings?runId=${runId}`),
+  /** run id → number of clips, for every run that has one. */
+  recordingCountsByRun: () => req<Record<string, number>>('/api/recordings/by-run'),
   deleteRecording: (id: number) =>
     req<void>(`/api/recordings/${id}`, { method: 'DELETE' }),
   recordingVideoUrl: (id: number) => `/api/recordings/${id}/video`,
