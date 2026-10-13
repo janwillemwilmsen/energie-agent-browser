@@ -92,6 +92,15 @@ export function StepList({
   );
 }
 
+// A navigate step's URL in a popup window: Chrome renders `popup` windows
+// without tabs or toolbar, so the page shows as the scenario sees it. Sized
+// like the run's desktop viewport; the browser may clamp it to the screen.
+// One named window, so repeated clicks reuse it instead of stacking.
+// `noopener`: the external page gets no handle on this app's window.
+function openPopup(url: string): void {
+  window.open(url, 'eab-step-preview', 'popup=yes,width=1440,height=900,noopener,noreferrer');
+}
+
 // Where a dragged pick lands to become the LAST step. Only shown mid-drag so
 // it costs no space otherwise; also the only target when the list is empty.
 function EndDropZone({ visible }: { visible: boolean }) {
@@ -162,6 +171,15 @@ function StepRow({
           summarizeStep(step.kind, step.payload)
         )}
       </span>
+      {step.kind === 'navigate' && typeof step.payload.url === 'string' && step.payload.url && (
+        <button
+          className="step-move"
+          title="Open this URL in a small browser window (no tabs or toolbar) to look at the page yourself"
+          onClick={() => openPopup(String(step.payload.url))}
+        >
+          ↗
+        </button>
+      )}
       <button className="step-move" title="Edit step" onClick={onEdit} disabled={busy}>
         ✎
       </button>
