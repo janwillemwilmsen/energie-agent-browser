@@ -35,6 +35,7 @@ export const testRuns = {
       log_text: '',
       screenshot_paths_json: '[]',
       text_paths_json: '[]',
+      screenshot_meta_json: '[]',
     });
     for (const id of [...runs.keys()].slice(0, Math.max(0, runs.size - KEEP))) runs.delete(id);
     return { runId };

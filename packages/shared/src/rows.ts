@@ -80,6 +80,8 @@ export interface Run {
   log_text: string;
   /** JSON array of screenshot slot filenames (see slots.ts). */
   screenshot_paths_json: string;
+  /** JSON array of ScreenshotMeta, one per screenshot (see screenshotMeta.ts); '[]' on older runs. */
+  screenshot_meta_json: string;
   /** Joined from the scenario by the list endpoints; absent on the single-run endpoint. */
   scenario_name?: string | null;
   brand?: string | null;

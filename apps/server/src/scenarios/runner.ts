@@ -21,7 +21,7 @@ import { StreamRecorder } from './streamRecorder.js';
 import { installCursorOverlay, type CursorOverlay } from './cursorOverlay.js';
 import { runStore, testRuns, type RunStatus } from '../runs/index.js';
 import { notifyRunFinished } from '../notifications.js';
-import { parseStepPayload, slotStamp, type ViewportPreset } from '@eab/shared';
+import { parseStepPayload, slotStamp, type ScreenshotMeta, type ViewportPreset } from '@eab/shared';
 
 // Scenario-run orchestration: loads the Scenario and its Preflight, creates the
 // Run row, binds the browser session, applies the Preflight, runs the Steps per
@@ -76,7 +76,14 @@ interface ScenarioRow {
  */
 interface RunJournal {
   appendLog(runId: number, logText: string): void;
-  finish(runId: number, status: 'success' | 'failed', logText: string, screenshots: string[], texts: string[]): void;
+  finish(
+    runId: number,
+    status: 'success' | 'failed',
+    logText: string,
+    screenshots: string[],
+    texts: string[],
+    screenshotMetas: ScreenshotMeta[],
+  ): void;
 }
 
 interface RunContext {
@@ -288,6 +295,7 @@ export function startRun(scenarioId: number, opts: StartRunOptions = {}): Starte
   const log: string[] = [];
   const screenshots: string[] = [];
   const texts: string[] = [];
+  const screenshotMetas: ScreenshotMeta[] = [];
   let status: 'success' | 'failed' = 'success';
   // All work uses the shared session — the user bootstraps it once from any
   // Terminal/Editor tab and every run + the live preview share it.
@@ -324,7 +332,7 @@ export function startRun(scenarioId: number, opts: StartRunOptions = {}): Starte
   // Finish the run as failed before any Step ran (bad step data, preflight
   // failure). The normal path at the bottom handles everything else.
   const finishRun = async (status: 'success' | 'failed'): Promise<RunStatus> => {
-    journal.finish(runId, status, log.join('\n'), screenshots, texts);
+    journal.finish(runId, status, log.join('\n'), screenshots, texts, screenshotMetas);
     if (!testOnly) {
       await notifyRunFinished({ scenario: { id: scenario.id, name: scenario.name }, runId, status });
     }
@@ -540,7 +548,7 @@ export function startRun(scenarioId: number, opts: StartRunOptions = {}): Starte
             ...(screenshotDir === null
               ? { skipResources: true }
               : {
-                  artifacts: { screenshotDir, viewport, screenshots, texts },
+                  artifacts: { screenshotDir, viewport, screenshots, texts, metas: screenshotMetas },
                   recorder: {
                     start: (opts) => startRecordingStep(ctx, opts),
                     stop: () => stopRecordingStep(ctx),

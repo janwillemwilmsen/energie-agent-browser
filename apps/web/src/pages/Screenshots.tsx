@@ -1,7 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { parseScreenshotMetas, screenshotMetaFor } from '@eab/shared';
 import { api, type RunDay, type Scenario } from '../lib/api.js';
 import { useResource, usePolling } from '../lib/resource.js';
+import { ScreenshotViewer } from '../lib/ScreenshotViewer.js';
 import { matchesTags, NO_TAGS, TagFilter, tagsActive, tagValues, type TagSelection } from '../lib/TagFilter.js';
 
 // Per-scenario gallery: one section per scenario that has runs (after the
@@ -259,6 +261,11 @@ function ScenarioBlock({
   if (run) {
     try { screenshots = JSON.parse(run.screenshot_paths_json); } catch { /* malformed */ }
   }
+  const metas = parseScreenshotMetas(run?.screenshot_meta_json);
+  // Index of the screenshot open in the viewer; closed when null or when the
+  // shown run changes.
+  const [viewing, setViewing] = useState<number | null>(null);
+  useEffect(() => setViewing(null), [run?.id]);
 
   const latestDay = data.populatedDays[0] ?? '';
 
@@ -328,14 +335,19 @@ function ScenarioBlock({
             </p>
           ) : (
             <div className="ss-grid">
-              {screenshots.map((name) => (
+              {screenshots.map((name, i) => (
                 <a
                   key={name}
                   href={api.runScreenshotUrl(run.id, name)}
-                  target="_blank"
-                  rel="noreferrer"
                   className="ss-card"
-                  title={name + ' (click to open full size)'}
+                  title={name + ' (click to view; ⌘/Ctrl-click opens the file)'}
+                  onClick={(e) => {
+                    // A plain click opens the viewer; a modified click keeps
+                    // the browser's open-in-new-tab behaviour on the file.
+                    if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+                    e.preventDefault();
+                    setViewing(i);
+                  }}
                 >
                   <img
                     src={api.runScreenshotUrl(run.id, name, { w: 480 })}
@@ -347,6 +359,14 @@ function ScenarioBlock({
                 </a>
               ))}
             </div>
+          )}
+          {viewing != null && (
+            <ScreenshotViewer
+              items={screenshots.map((name) => ({ runId: run.id, name, meta: screenshotMetaFor(name, metas) }))}
+              index={viewing}
+              onIndex={setViewing}
+              onClose={() => setViewing(null)}
+            />
           )}
         </>
       ) : (

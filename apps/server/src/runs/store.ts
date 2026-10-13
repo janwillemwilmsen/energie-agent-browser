@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Database } from 'better-sqlite3';
-import type { RunStatus } from '@eab/shared';
+import type { RunStatus, ScreenshotMeta } from '@eab/shared';
 
 // The Run module: owns the `runs` table, the per-Run screenshot directory
 // (data/screenshots/<run_id>/) and the invariant that binds them — a Run and
@@ -24,6 +24,8 @@ export interface RunRow {
   screenshot_paths_json: string;
   /** Text files saved by save_text steps (filenames under the run's artifact dir). */
   text_paths_json: string;
+  /** Capture metadata per screenshot (JSON array of ScreenshotMeta). */
+  screenshot_meta_json: string;
 }
 
 /** A Run joined with the Scenario it belongs to (null when the Scenario is gone). */
@@ -74,7 +76,14 @@ export interface RunStore {
   create(scenarioId: number): { runId: number; screenshotDir: string };
   /** Persist the whole log so far (the log is small and rewritten per line). */
   appendLog(runId: number, logText: string): void;
-  finish(runId: number, status: 'success' | 'failed', logText: string, screenshots: string[], texts?: string[]): void;
+  finish(
+    runId: number,
+    status: 'success' | 'failed',
+    logText: string,
+    screenshots: string[],
+    texts?: string[],
+    screenshotMetas?: ScreenshotMeta[],
+  ): void;
 
   get(id: number): RunRow | undefined;
   getWithScenario(id: number): RunListRow | undefined;
@@ -157,7 +166,8 @@ export function createRunStore(deps: { db: Database; dataDir: string }): RunStor
     log: db.prepare('UPDATE runs SET log_text = ? WHERE id = ?'),
     finish: db.prepare(
       `UPDATE runs
-       SET status = ?, finished_at = CURRENT_TIMESTAMP, log_text = ?, screenshot_paths_json = ?, text_paths_json = ?
+       SET status = ?, finished_at = CURRENT_TIMESTAMP, log_text = ?, screenshot_paths_json = ?, text_paths_json = ?,
+           screenshot_meta_json = ?
        WHERE id = ?`,
     ),
     get: db.prepare('SELECT * FROM runs WHERE id = ?'),
@@ -173,7 +183,7 @@ export function createRunStore(deps: { db: Database; dataDir: string }): RunStor
     // prefix; the highest id on a day is that day's latest Run.
     listLatestPerDay: db.prepare(
       `SELECT runs.id, runs.scenario_id, runs.started_at, runs.finished_at, runs.status,
-              runs.screenshot_paths_json, runs.text_paths_json, date(runs.started_at) AS day,
+              runs.screenshot_paths_json, runs.text_paths_json, runs.screenshot_meta_json, date(runs.started_at) AS day,
               scenarios.name AS scenario_name, scenarios.brand, scenarios.type
        FROM runs LEFT JOIN scenarios ON scenarios.id = runs.scenario_id
        WHERE runs.id IN (SELECT MAX(id) FROM runs GROUP BY scenario_id, date(started_at))
@@ -253,8 +263,8 @@ export function createRunStore(deps: { db: Database; dataDir: string }): RunStor
     appendLog(runId, logText) {
       q.log.run(logText, runId);
     },
-    finish(runId, status, logText, screenshots, texts = []) {
-      q.finish.run(status, logText, JSON.stringify(screenshots), JSON.stringify(texts), runId);
+    finish(runId, status, logText, screenshots, texts = [], screenshotMetas = []) {
+      q.finish.run(status, logText, JSON.stringify(screenshots), JSON.stringify(texts), JSON.stringify(screenshotMetas), runId);
     },
 
     get: (id) => q.get.get(id) as RunRow | undefined,

@@ -11,7 +11,7 @@ import {
   type DeviceName,
   type ViewportSize,
 } from '@eab/shared';
-import type { A11yNode, A11yTree, FindLocator, SelectorStrategy, StepPayload } from '@eab/shared';
+import type { A11yNode, A11yTree, FindLocator, ScreenshotMeta, SelectorStrategy, StepPayload } from '@eab/shared';
 import type { AuthSelectors } from '../authSelectors.js';
 import { resolveSelector } from './selector.js';
 import { isOptionSelector, execSelectOptionFallback } from './selectFallback.js';
@@ -74,6 +74,8 @@ export interface Artifacts {
   screenshots: string[];
   /** Text files saved so far (save_text steps); the executor appends to it. */
   texts: string[];
+  /** Capture metadata, one entry per screenshot; the executor appends to it. */
+  metas?: ScreenshotMeta[];
 }
 
 /** Video recording hooks for record_start / record_stop. */
@@ -819,18 +821,25 @@ async function setViewport(browser: Browser, v: ViewportSize, log: (line: string
 // taller full-page capture wraps back to the top of the page past this row.
 export const CHROME_CAPTURE_MAX_PX = 16_384;
 
-// Say so in the log when a full-page capture crossed the cap, so a wrapped
-// image never passes silently. Best-effort (the file may be unreadable).
-async function warnIfOversize(file: string, log: (line: string) => void): Promise<void> {
+// The capture's pixel size; null when the file is not a readable image.
+async function imageSize(file: string): Promise<{ width: number; height: number } | null> {
   try {
-    const { width = 0, height = 0 } = await sharp(file).metadata();
-    if (height > CHROME_CAPTURE_MAX_PX || width > CHROME_CAPTURE_MAX_PX) {
-      log(
-        `WARNING: capture is ${width}×${height} px, above Chrome's ${CHROME_CAPTURE_MAX_PX} px limit — ` +
-        `the image repeats the top of the page past row ${CHROME_CAPTURE_MAX_PX}. Use a viewport capture, or a lower zoom.`,
-      );
-    }
-  } catch { /* not an image we can read; nothing to warn about */ }
+    const { width, height } = await sharp(file).metadata();
+    return width && height ? { width, height } : null;
+  } catch {
+    return null;
+  }
+}
+
+// Say so in the log when a full-page capture crossed the cap, so a wrapped
+// image never passes silently.
+function warnIfOversize({ width, height }: { width: number; height: number }, log: (line: string) => void): void {
+  if (height > CHROME_CAPTURE_MAX_PX || width > CHROME_CAPTURE_MAX_PX) {
+    log(
+      `WARNING: capture is ${width}×${height} px, above Chrome's ${CHROME_CAPTURE_MAX_PX} px limit — ` +
+      `the image repeats the top of the page past row ${CHROME_CAPTURE_MAX_PX}. Use a viewport capture, or a lower zoom.`,
+    );
+  }
 }
 
 // Chrome's CDP error for "the frame has no layout yet" — seen when a screenshot
@@ -933,15 +942,18 @@ async function screenshot(
     await browser.run(['set', 'device', device], { timeoutMs: 15_000 });
     await timing.sleep(50);
   }
+  // The CSS viewport (and scale) the page is laid out in for this capture —
+  // recorded with the screenshot so a viewer can frame it like the device.
+  const base: ViewportSize = deviceInUse ? DEVICE_PROFILES[deviceInUse] : DESKTOP_VIEWPORT;
+  let captureViewport: ViewportSize = base;
   try {
     if (zoom != null || lowScale) {
       // Zoom on top of whatever is being captured: the step's device, or the
       // run's own viewport (desktop, or its mobile device).
-      const base: ViewportSize = deviceInUse ? DEVICE_PROFILES[deviceInUse] : DESKTOP_VIEWPORT;
       const zoomed = zoom != null ? zoomedViewport(base, zoom) : base;
-      const target: ViewportSize = lowScale ? { ...zoomed, scale: 1 } : zoomed;
+      captureViewport = lowScale ? { ...zoomed, scale: 1 } : zoomed;
       const note = [zoom != null ? `zoom ${zoom}%` : '', lowScale ? 'scale 1 for the full-page capture' : ''].filter(Boolean).join(', ');
-      await setViewport(browser, target, (l) => log(`${l} (${note})`));
+      await setViewport(browser, captureViewport, (l) => log(`${l} (${note})`));
       await timing.sleep(50);
     }
 
@@ -979,13 +991,23 @@ async function screenshot(
       if (expand) await restoreScrollers(browser).catch(() => {});
     }
     if (r.exitCode !== 0) throw new Error(`screenshot failed: ${r.stderr || r.stdout}`);
-    if (fullPage) await warnIfOversize(capturePath, log);
+    const size = await imageSize(capturePath);
+    if (fullPage && size) warnIfOversize(size, log);
     if (format === 'webp') {
       // agent-browser can't emit webp — convert the png capture and drop it.
       await sharp(capturePath).webp({ quality }).toFile(filepath);
       fs.rmSync(capturePath, { force: true });
     }
     artifacts.screenshots.push(filename);
+    artifacts.metas?.push({
+      name: filename,
+      viewport: captureViewport,
+      device: deviceInUse,
+      zoom,
+      fullPage,
+      width: size?.width ?? null,
+      height: size?.height ?? null,
+    });
     // The annotate legend is on stdout — keep it in the run log so the labels
     // are interpretable later.
     if (annotate && r.stdout.trim()) log(r.stdout.trim());

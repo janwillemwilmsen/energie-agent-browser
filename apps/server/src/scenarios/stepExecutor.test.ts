@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { parseStepPayload as parseStep, safeParseScenarioStepPayload, safeParseStepPayload, type A11yTree } from '@eab/shared';
+import { parseStepPayload as parseStep, safeParseScenarioStepPayload, safeParseStepPayload, type A11yTree, type ScreenshotMeta } from '@eab/shared';
 import { parseSnapshotText } from '../agentBrowser/parser.js';
 import {
   executeStep,
@@ -475,6 +475,30 @@ describe('Step executor', () => {
       b.calls.length = 0;
       await executeStep(ctx, parseStep('screenshot', { label: 'home' }), 4);
       expect(b.calls.filter((c) => c[0] === 'set')).toEqual([]);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('records capture metadata per screenshot: the CSS viewport, device, zoom and size', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'eab-shot-'));
+    // The fake writes a real 1-pixel png so the size can be read back.
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64');
+    const b = fakeBrowser([], [
+      (a) => { if (a[0] === 'screenshot') { fs.writeFileSync(a[a.length - 1]!, png); return OK; } return undefined; },
+    ]);
+    const metas: ScreenshotMeta[] = [];
+    const ctx = context(b, { artifacts: { screenshotDir: dir, viewport: 'desktop', screenshots: [], texts: [], metas } });
+    try {
+      await executeStep(ctx, parseStep('screenshot', { label: 'home' }), 1);
+      await executeStep(ctx, parseStep('screenshot', { label: 'home', zoom: 200 }), 2);
+      await executeStep(ctx, parseStep('screenshot', { label: 'home', viewport: 'mobile', device: 'Pixel 7' }), 3);
+      expect(metas.map((m) => ({ ...m, name: m.name.replace(/^\d{8}-\d{6}-/, '') }))).toEqual([
+        { name: 'home-desktop.png', viewport: { width: 1440, height: 900, scale: 1 }, device: null, zoom: null, fullPage: true, width: 1, height: 1 },
+        { name: 'home-zoom200-desktop.png', viewport: { width: 720, height: 450, scale: 2 }, device: null, zoom: 200, fullPage: true, width: 1, height: 1 },
+        // Full page on a device: the device's CSS viewport at scale 1.
+        { name: 'home-mobile.png', viewport: { width: 412, height: 915, scale: 1 }, device: 'Pixel 7', zoom: null, fullPage: true, width: 1, height: 1 },
+      ]);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
