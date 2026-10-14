@@ -208,9 +208,11 @@ const StepScreenshot = z.object({
   // When 'mobile', the runner temporarily switches to the mobile device,
   // captures, then restores the run's viewport.
   viewport: z.enum(['mobile']).optional(),
-  // Which device the 'mobile' capture emulates (agent-browser `set device`).
+  // Which device the 'mobile' capture emulates: a name from the device list
+  // (admin Devices page; Playwright's descriptors). Resolved at run time, so
+  // a name no longer in the list fails the step with a clear message.
   // Absent → the default mobile device (DEFAULT_MOBILE_DEVICE).
-  device: z.enum(DEVICE_NAMES).optional(),
+  device: z.string().trim().min(1).max(80).optional(),
   // Emulate browser zoom (percent) for this capture: the viewport shrinks and
   // the scale grows accordingly, then the run's viewport is restored. Works
   // on top of the desktop viewport or the (step's or default) mobile device.

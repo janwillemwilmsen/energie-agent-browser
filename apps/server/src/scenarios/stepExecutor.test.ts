@@ -425,8 +425,11 @@ describe('Step executor', () => {
       // Zoom on a mobile shot stacks on the device profile (iPhone 14: 390x844 @3).
       b.calls.length = 0;
       await executeStep(ctx, parseStep('screenshot', { label: 'home', viewport: 'mobile', zoom: 400, fullPage: false }), 4);
+      // A device is applied as `set device` (user agent) + its profile's
+      // viewport; the zoom then overrides the viewport.
       expect(b.calls.filter((c) => c[0] === 'set')).toEqual([
         ['set', 'device', 'iPhone 14'],
+        ['set', 'viewport', '390', '844', '3'],
         ['set', 'viewport', '98', '211', '12'],
         ['set', 'viewport', '1440', '900', '1'],
       ]);
@@ -449,6 +452,7 @@ describe('Step executor', () => {
       await executeStep(ctx, parseStep('screenshot', { label: 'home', viewport: 'mobile', device: 'iPhone 14' }), 1);
       expect(b.calls.filter((c) => c[0] === 'set')).toEqual([
         ['set', 'device', 'iPhone 14'],
+        ['set', 'viewport', '390', '844', '3'],
         ['set', 'viewport', '390', '844', '1'],
         ['set', 'viewport', '1440', '900', '1'],
       ]);
@@ -459,6 +463,7 @@ describe('Step executor', () => {
       await executeStep(ctx, parseStep('screenshot', { label: 'home', viewport: 'mobile', device: 'iPhone 14', fullPage: false }), 2);
       expect(b.calls.filter((c) => c[0] === 'set')).toEqual([
         ['set', 'device', 'iPhone 14'],
+        ['set', 'viewport', '390', '844', '3'],
         ['set', 'viewport', '1440', '900', '1'],
       ]);
 
@@ -470,11 +475,43 @@ describe('Step executor', () => {
       expect(b.calls.filter((c) => c[0] === 'set')).toEqual([
         ['set', 'viewport', '390', '844', '1'],
         ['set', 'device', 'iPhone 14'],
+        ['set', 'viewport', '390', '844', '3'],
       ]);
       // Desktop full page: untouched.
       b.calls.length = 0;
       await executeStep(ctx, parseStep('screenshot', { label: 'home' }), 4);
       expect(b.calls.filter((c) => c[0] === 'set')).toEqual([]);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // A device agent-browser does not know (from the Playwright list) is the
+  // built-in of its family for the user agent, then its own viewport.
+  it('emulates a non-built-in device as the family stand-in plus its viewport, and rejects an unknown name', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'eab-shot-'));
+    const b = fakeBrowser([], [
+      (a) => { if (a[0] === 'screenshot') { fs.writeFileSync(a[a.length - 1]!, ''); return OK; } return undefined; },
+    ]);
+    const fold = { name: 'Galaxy Z Fold 6 Cover', width: 484, height: 1112, scale: 2, mobile: true, userAgent: 'Mozilla/5.0 (Linux; Android 10; SM-F956U)', family: 'android' as const, builtin: false };
+    const artifacts = { screenshotDir: dir, viewport: 'desktop' as const, screenshots: [], texts: [] };
+    const ctx = context(b, { artifacts, devices: (n) => (n === fold.name ? fold : undefined) });
+    try {
+      await executeStep(ctx, parseStep('screenshot', { label: 'home', viewport: 'mobile', device: fold.name, fullPage: false }), 1);
+      expect(b.calls.filter((c) => c[0] === 'set')).toEqual([
+        ['set', 'device', 'Pixel 7'],
+        ['set', 'viewport', '484', '1112', '2'],
+        ['set', 'viewport', '1440', '900', '1'],
+      ]);
+      expect(ctx.lines.some((l) => /set device "Pixel 7" \(user agent for Galaxy Z Fold 6 Cover\)/.test(l))).toBe(true);
+      // A built-in still resolves without the list; an unknown name fails up front.
+      b.calls.length = 0;
+      await executeStep(ctx, parseStep('screenshot', { label: 'home', viewport: 'mobile', device: 'Pixel 5', fullPage: false }), 2);
+      expect(b.calls[0]).toEqual(['set', 'device', 'Pixel 5']);
+      b.calls.length = 0;
+      await expect(executeStep(ctx, parseStep('screenshot', { label: 'home', viewport: 'mobile', device: 'Nokia 3310' }), 3))
+        .rejects.toThrow(/unknown device "Nokia 3310"/);
+      expect(b.calls).toHaveLength(0);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }

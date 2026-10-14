@@ -1,6 +1,18 @@
 import { useEffect, useState } from 'react';
-import { DEFAULT_MOBILE_DEVICE, DEVICE_NAMES, DESKTOP_VIEWPORT, ZOOM_LEVELS, zoomedViewport } from '@eab/shared';
+import { DEFAULT_MOBILE_DEVICE, DEVICE_NAMES, DESKTOP_VIEWPORT, ZOOM_LEVELS, builtinProfile, zoomedViewport, type DeviceProfile } from '@eab/shared';
+import { api } from '../api.js';
 import type { EditableStep } from './store.js';
+
+// The device dropdown grouped by family word (iPhone / iPad / Pixel / …), in
+// the list's own order within a group.
+function groupDevices(list: DeviceProfile[]): [string, DeviceProfile[]][] {
+  const map = new Map<string, DeviceProfile[]>();
+  for (const d of list) {
+    const g = /^(iPhone|iPad|Pixel|Galaxy|Nexus|Moto|Nokia|LG|Kindle|Blackberry|Microsoft|Desktop)/i.exec(d.name)?.[1] ?? 'Other';
+    (map.get(g) ?? map.set(g, []).get(g)!).push(d);
+  }
+  return Array.from(map.entries());
+}
 
 // Modal for the ✎ button on a step row. Screenshot steps get friendly fields —
 // label, full page, mobile, annotate, plus output format and quality (smaller
@@ -31,10 +43,19 @@ export function StepEditModal({
   const [fullPage, setFullPage] = useState(initial.fullPage !== false);
   const [expandScrollers, setExpandScrollers] = useState(initial.expandScrollers === true);
   const [mobile, setMobile] = useState(initial.viewport === 'mobile');
-  // '' = the default mobile device; a name overrides it for this step.
-  const [device, setDevice] = useState<string>(
-    typeof initial.device === 'string' && (DEVICE_NAMES as readonly string[]).includes(initial.device) ? initial.device : '',
-  );
+  // '' = the default mobile device; a name overrides it for this step. Any
+  // stored name is kept (even one no longer in the list — it is shown as such).
+  const [device, setDevice] = useState<string>(typeof initial.device === 'string' ? initial.device : '');
+  // The devices the admin Devices page enables, for the dropdown; the
+  // built-ins until it answers.
+  const [devices, setDevices] = useState<DeviceProfile[] | null>(null);
+  useEffect(() => {
+    if (step.kind !== 'screenshot') return;
+    api.getDevices()
+      .then((r) => { const on = new Set(r.enabled); setDevices(r.devices.filter((d) => on.has(d.name))); })
+      .catch(() => setDevices([]));
+  }, [step.kind]);
+  const deviceOptions = devices && devices.length > 0 ? devices : DEVICE_NAMES.map((n) => builtinProfile(n)!);
   // 0 = no zoom emulation.
   const [zoom, setZoom] = useState<number>(
     (ZOOM_LEVELS as readonly number[]).includes(Number(initial.zoom)) ? Number(initial.zoom) : 0,
@@ -190,13 +211,20 @@ export function StepEditModal({
                 <span>Device</span>
                 <select value={device} onChange={(e) => setDevice(e.target.value)}>
                   <option value="">Default ({DEFAULT_MOBILE_DEVICE})</option>
-                  {DEVICE_NAMES.map((d) => (
-                    <option key={d} value={d}>{d}</option>
+                  {device && !deviceOptions.some((d) => d.name === device) && (
+                    <option value={device}>{device} (not in the device list)</option>
+                  )}
+                  {groupDevices(deviceOptions).map(([group, list]) => (
+                    <optgroup key={group} label={group}>
+                      {list.map((d) => (
+                        <option key={d.name} value={d.name}>{d.name} — {d.width}×{d.height} @{d.scale}×</option>
+                      ))}
+                    </optgroup>
                   ))}
                 </select>
                 <span className="muted" style={{ fontSize: 12 }}>
-                  agent-browser&apos;s built-in profiles: viewport, scale and a matching user agent.
-                  Picking one overrides the default for this step only.
+                  Viewport, scale and a matching user agent. The list is managed on Admin → Devices; picking one
+                  overrides the default for this step only.
                 </span>
               </label>
             )}

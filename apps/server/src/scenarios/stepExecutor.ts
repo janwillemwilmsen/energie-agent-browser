@@ -4,11 +4,13 @@ import sharp from 'sharp';
 import {
   DEFAULT_MOBILE_DEVICE,
   DESKTOP_VIEWPORT,
-  DEVICE_PROFILES,
+  UA_STAND_IN,
+  builtinProfile,
   encodeSlot,
+  profileViewport,
   slotStamp,
   zoomedViewport,
-  type DeviceName,
+  type DeviceProfile,
   type ViewportSize,
 } from '@eab/shared';
 import type { A11yNode, A11yTree, FindLocator, ScreenshotMeta, SelectorStrategy, StepPayload } from '@eab/shared';
@@ -155,6 +157,11 @@ export interface StepContext {
    * across navigations. Never fails the run.
    */
   afterStep?: (step: IndexedStep) => Promise<void>;
+  /**
+   * The device list a screenshot step's `device` (and the run's mobile
+   * viewport) resolve against. Absent: agent-browser's built-ins only.
+   */
+  devices?: (name: string) => DeviceProfile | undefined;
   artifacts?: Artifacts;
   recorder?: Recorder;
   pause?: PauseController;
@@ -800,15 +807,41 @@ export async function applyViewport(
   browser: Browser,
   viewport: 'desktop' | 'mobile',
   log: (line: string) => void,
+  devices?: StepContext['devices'],
 ): Promise<void> {
   if (viewport === 'mobile') {
-    log(`> set device "${MOBILE_DEVICE}"`);
-    await browser.run(['set', 'device', MOBILE_DEVICE], { timeoutMs: 15_000 });
-    log(`< set device ok`);
+    await applyDevice(browser, resolveDevice(devices, MOBILE_DEVICE), log);
   } else {
     // Scale given explicitly so a zoomed capture's scale never lingers.
     await setViewport(browser, DESKTOP_VIEWPORT, log);
   }
+}
+
+/**
+ * The profile for a device name: the run's list first, then agent-browser's
+ * built-ins (a scenario saved against an older list keeps working). An
+ * unknown name fails the step with the name in the message.
+ */
+function resolveDevice(devices: StepContext['devices'], name: string): DeviceProfile {
+  const p = devices?.(name) ?? builtinProfile(name);
+  if (!p) throw new Error(`unknown device "${name}" — pick one on the admin Devices page`);
+  return p;
+}
+
+/**
+ * Emulate a device: agent-browser's `set device` for the user agent (the
+ * device itself when it is a built-in, else the built-in of the same family),
+ * then the profile's viewport and scale. Everything the runtime offers;
+ * touch and a coarse pointer are not emulated for any device.
+ */
+async function applyDevice(browser: Browser, p: DeviceProfile, log: (line: string) => void): Promise<void> {
+  const uaDevice = p.builtin ? p.name : UA_STAND_IN[p.family];
+  if (uaDevice) {
+    log(`> set device "${uaDevice}"${uaDevice !== p.name ? ` (user agent for ${p.name})` : ''}`);
+    await browser.run(['set', 'device', uaDevice], { timeoutMs: 15_000 });
+    log(`< set device ok`);
+  }
+  await setViewport(browser, profileViewport(p), (l) => log(`${l} (${p.name})`));
 }
 
 async function setViewport(browser: Browser, v: ViewportSize, log: (line: string) => void): Promise<void> {
@@ -893,7 +926,8 @@ async function screenshot(
   const mobileShot = step.viewport === 'mobile';
   const suffix = mobileShot ? 'mobile' : artifacts.viewport;
   // The step may name the device; otherwise the run's mobile default.
-  const device = step.device ?? MOBILE_DEVICE;
+  // Resolved up front so an unknown name fails before anything is captured.
+  const device = mobileShot ? resolveDevice(ctx.devices, step.device ?? MOBILE_DEVICE) : null;
   // Browser zoom: a zoomed shot is its own slot (`home-zoom200`), so it pairs
   // with other runs' zoomed shots, never with the unzoomed one.
   const zoom = step.zoom ?? null;
@@ -920,7 +954,8 @@ async function screenshot(
 
   // The device the capture happens on, if any: the step's own, or the run's
   // mobile device. Null for a desktop capture.
-  const deviceInUse: DeviceName | null = mobileShot ? device : artifacts.viewport === 'mobile' ? MOBILE_DEVICE : null;
+  const deviceInUse: DeviceProfile | null =
+    device ?? (artifacts.viewport === 'mobile' ? resolveDevice(ctx.devices, MOBILE_DEVICE) : null);
   // Chrome renders a full-page capture into one surface capped at 16384
   // device pixels; beyond that the image wraps back to the top of the page.
   // A phone profile at scale 3 hits that at ~5500 CSS px of page, so a
@@ -934,17 +969,16 @@ async function screenshot(
   // above); whatever happens, the run's viewport is restored afterwards so
   // the following steps see the site as the run does.
   const switched = mobileShot || zoom != null || lowScale;
-  if (mobileShot) {
+  if (device) {
     // Let the current layout settle, switch to the mobile device, let the
     // responsive reflow happen, then capture.
     await timing.sleep(50);
-    log(`> set device "${device}" (mobile screenshot)`);
-    await browser.run(['set', 'device', device], { timeoutMs: 15_000 });
+    await applyDevice(browser, device, (l) => log(`${l} (mobile screenshot)`));
     await timing.sleep(50);
   }
   // The CSS viewport (and scale) the page is laid out in for this capture —
   // recorded with the screenshot so a viewer can frame it like the device.
-  const base: ViewportSize = deviceInUse ? DEVICE_PROFILES[deviceInUse] : DESKTOP_VIEWPORT;
+  const base: ViewportSize = deviceInUse ? profileViewport(deviceInUse) : DESKTOP_VIEWPORT;
   let captureViewport: ViewportSize = base;
   try {
     if (zoom != null || lowScale) {
@@ -965,7 +999,7 @@ async function screenshot(
     if (annotate) args.push('--annotate');
     args.push(capturePath);
     log(
-      `screenshot${fullPage ? ' (full)' : ' (viewport)'}${expand ? ' (expanded)' : ''}${mobileShot ? ` (mobile: ${device})` : ''}${zoom ? ` (zoom ${zoom}%)` : ''}${annotate ? ' (annotated)' : ''}${format !== 'png' ? ` (${format} q${quality})` : ''} → ${filename}`,
+      `screenshot${fullPage ? ' (full)' : ' (viewport)'}${expand ? ' (expanded)' : ''}${device ? ` (mobile: ${device.name})` : ''}${zoom ? ` (zoom ${zoom}%)` : ''}${annotate ? ' (annotated)' : ''}${format !== 'png' ? ` (${format} q${quality})` : ''} → ${filename}`,
     );
     if (expand) {
       log(`expand scrollers: ${await expandScrollers(browser)}`);
@@ -1002,7 +1036,7 @@ async function screenshot(
     artifacts.metas?.push({
       name: filename,
       viewport: captureViewport,
-      device: deviceInUse,
+      device: deviceInUse?.name ?? null,
       zoom,
       fullPage,
       width: size?.width ?? null,
@@ -1015,7 +1049,7 @@ async function screenshot(
     if (switched) {
       // Restore the run's viewport so following steps run as before.
       await timing.sleep(50);
-      await applyViewport(browser, artifacts.viewport, log).catch((e: any) => log(`restore viewport failed: ${e?.message ?? e}`));
+      await applyViewport(browser, artifacts.viewport, log, ctx.devices).catch((e: any) => log(`restore viewport failed: ${e?.message ?? e}`));
     }
   }
 }

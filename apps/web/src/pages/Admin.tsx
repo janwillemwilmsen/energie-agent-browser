@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { AppWindow, ArrowRightLeft, Braces, Cookie, FileCog, HardDrive, KeyRound, Network, Sparkles, Terminal as TerminalIcon } from 'lucide-react';
+import { AppWindow, ArrowRightLeft, Braces, Cookie, FileCog, HardDrive, KeyRound, Network, Smartphone, Sparkles, Terminal as TerminalIcon } from 'lucide-react';
 
 // Admin landing page. Gathers lower-level / operational tools that don't belong
 // in the main navigation. The Terminal lives here now instead of the top menu.
@@ -71,6 +71,13 @@ export function Admin() {
           <span>
             <strong>Environment variables</strong>
             <span className="muted"> — view and edit the server's .env file (most changes need a restart)</span>
+          </span>
+        </Link>
+        <Link to="/admin/devices" className="admin-link">
+          <Smartphone size={18} aria-hidden />
+          <span>
+            <strong>Devices</strong>
+            <span className="muted"> — which phones and tablets the screenshot step can emulate (Playwright's device list; paste a newer one)</span>
           </span>
         </Link>
         <Link to="/admin/ai" className="admin-link">

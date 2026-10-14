@@ -19,6 +19,7 @@ import {
 import { pauseRun } from './pauseRegistry.js';
 import { StreamRecorder } from './streamRecorder.js';
 import { installCursorOverlay, type CursorOverlay } from './cursorOverlay.js';
+import { deviceResolver } from '../devices.js';
 import { runStore, testRuns, type RunStatus } from '../runs/index.js';
 import { notifyRunFinished } from '../notifications.js';
 import { parseStepPayload, slotStamp, type ScreenshotMeta, type ViewportPreset } from '@eab/shared';
@@ -319,6 +320,8 @@ export function startRun(scenarioId: number, opts: StartRunOptions = {}): Starte
   // preflight recorded them.
   // One object for the whole run: a record_start step with `human` switches
   // humanPointer on, record_stop switches it off (the executor reads it per click).
+  // The device list as it is now; a step's device name resolves against it.
+  const devices = deviceResolver();
   const settle: Settle = {
     scrollIntoView: !!scenario.step_scroll_into_view,
     afterMs: Math.max(0, scenario.step_settle_ms ?? 0),
@@ -445,7 +448,7 @@ export function startRun(scenarioId: number, opts: StartRunOptions = {}): Starte
                 // page the scenario will see. A fresh daemon starts at agent-
                 // browser's default (1280×720), and a consent dialog can render
                 // differently — or with a different button — across that breakpoint.
-                await applyViewport(browser, viewports[0] ?? 'desktop', preflightCtx.log);
+                await applyViewport(browser, viewports[0] ?? 'desktop', preflightCtx.log, devices);
                 await executeSteps(preflightCtx, preflightSteps, preflightPolicy);
                 appendLog(ctx, `preflight "${name}": ok`);
               }
@@ -557,7 +560,7 @@ export function startRun(scenarioId: number, opts: StartRunOptions = {}): Starte
           };
           appendLog(ctx, `=== viewport: ${viewport} ===`);
           try {
-            await applyViewport(browser, viewport, stepCtx.log);
+            await applyViewport(browser, viewport, stepCtx.log, devices);
             await executeSteps(stepCtx, steps, scenarioPolicy);
           } catch (e: any) {
             status = 'failed';

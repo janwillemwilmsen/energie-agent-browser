@@ -1,4 +1,4 @@
-import { DEFAULT_MOBILE_DEVICE, DESKTOP_VIEWPORT, DEVICE_PROFILES, zoomedViewport, type DeviceName, type ViewportSize } from './schemas.js';
+import { DEFAULT_MOBILE_DEVICE, DESKTOP_VIEWPORT, DEVICE_PROFILES, zoomedViewport, type ViewportSize } from './schemas.js';
 import { parseSlot } from './slots.js';
 
 // What a screenshot was captured with: the CSS viewport the page was laid out
@@ -13,8 +13,8 @@ export interface ScreenshotMeta {
   name: string;
   /** The CSS viewport the page was laid out in, and the capture's scale. */
   viewport: ViewportSize;
-  /** The emulated device; null for a desktop capture. */
-  device: DeviceName | null;
+  /** The emulated device name (see devices.ts); null for a desktop capture. */
+  device: string | null;
   /** Browser zoom in percent, when emulated. */
   zoom: number | null;
   fullPage: boolean;
@@ -37,7 +37,7 @@ export function inferScreenshotMeta(name: string): ScreenshotMeta {
   const parts = parseSlot(name);
   const mobile = parts?.viewport === 'mobile';
   const zoom = parts ? Number(ZOOM_RE.exec(parts.label)?.[1] ?? 0) || null : null;
-  const device: DeviceName | null = mobile ? DEFAULT_MOBILE_DEVICE : null;
+  const device = mobile ? DEFAULT_MOBILE_DEVICE : null;
   const base = device ? DEVICE_PROFILES[device] : DESKTOP_VIEWPORT;
   return {
     name,

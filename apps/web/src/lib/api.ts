@@ -1,4 +1,4 @@
-import type { A11yTree, AuthProfile, Preflight, PreflightStep, Run, RunDay, Scenario, Schedule, ScenarioStep } from '@eab/shared';
+import type { A11yTree, AuthProfile, DeviceProfile, Preflight, PreflightStep, Run, RunDay, Scenario, Schedule, ScenarioStep } from '@eab/shared';
 import { request as req, requestRaw } from './request.js';
 
 export { ApiError, errorMessage, onUnauthenticated } from './request.js';
@@ -455,6 +455,15 @@ export type StorageCleanupAction =
   | 'missing-recordings'
   | 'vacuum';
 
+/** GET /api/devices. */
+export interface DeviceSettings {
+  devices: DeviceProfile[];
+  /** Names offered in the screenshot step's device dropdown. */
+  enabled: string[];
+  /** A pasted source is in use rather than the vendored Playwright list. */
+  customSource: boolean;
+}
+
 /** The Runs page filter, shared by the list and its count. */
 export interface RunQuery {
   scenarioId?: number;
@@ -625,6 +634,11 @@ export const api = {
       body: JSON.stringify({ username, password }),
     }),
   authLogout: () => req<{ ok: true }>('/api/auth/logout', { method: 'POST' }),
+  /** The device list (admin Devices page) and which names the screenshot dropdown offers. */
+  getDevices: () => req<DeviceSettings>('/api/devices'),
+  getDeviceSource: () => req<{ source: string }>('/api/devices/source'),
+  updateDevices: (body: { source?: string; enabled?: string[] }) =>
+    req<DeviceSettings>('/api/devices', { method: 'PUT', body: JSON.stringify(body) }),
   agentAvailability: () =>
     req<{ available: boolean; busy: boolean }>('/api/agent-tasks/availability'),
   startAgentTask: (scenarioId: number, prompt: string) =>
