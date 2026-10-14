@@ -51,6 +51,18 @@ export function ScreenshotViewer({
   }, [scale]);
   const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
   useEffect(() => setNatural(null), [item?.runId, item?.name]);
+  // Whether the capture's device has a full-screen viewport: from the meta
+  // when it was recorded (captures since the flag exists), else looked up in
+  // the device list by name (older captures).
+  const [fullScreenDevices, setFullScreenDevices] = useState<Set<string> | null>(null);
+  useEffect(() => {
+    api.getDevices()
+      .then((r) => setFullScreenDevices(new Set(r.devices.filter((d) => d.fullScreenViewport).map((d) => d.name))))
+      .catch(() => setFullScreenDevices(new Set()));
+  }, []);
+  const viewportIsScreen = item
+    ? item.meta.viewportIsScreen ?? (item.meta.device != null && (fullScreenDevices?.has(item.meta.device) ?? false))
+    : false;
   // The fold: a line across a full-page capture where the first paint ended
   // — the viewport height in image pixels (CSS height × capture scale), as
   // a fraction of the image height so it scales with however the image is
@@ -73,7 +85,7 @@ export function ScreenshotViewer({
   // Playwright's modern entries of the same family subtract (iPhone 844→664,
   // iPad 1180→1106, Pixel 915→839). An estimate, and labelled as one.
   const estimate = (() => {
-    if (!item || foldPct == null || !item.meta.viewportIsScreen) return null;
+    if (!item || foldPct == null || !viewportIsScreen) return null;
     const imgH = natural?.h ?? item.meta.height;
     if (!imgH) return null;
     const name = item.meta.device ?? '';
@@ -135,7 +147,7 @@ export function ScreenshotViewer({
         <div className="ssv-fold" style={{ top: `${foldPct}%` }} aria-hidden>
           <span>
             fold · {vp.height} CSS px
-            {meta.viewportIsScreen ? ' · descriptor viewport = full screen' : ''}
+            {viewportIsScreen ? ' · descriptor viewport = full screen' : ''}
           </span>
         </div>
       )}
