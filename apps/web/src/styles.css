@@ -1635,6 +1635,8 @@ code { background: rgba(255,255,255,0.06); padding: 2px 4px; border-radius: 3px;
 .ssv-meta { font-size: 12px; }
 .ssv-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
 .ssv-actions .chip { font-size: 12px; padding: 2px 10px; text-decoration: none; }
+.ssv-scale { display: inline-flex; gap: 4px; }
+.ssv-scale .chip { padding: 2px 8px; }
 .ssv-close {
   background: transparent; color: var(--muted); border: 1px solid var(--border); border-radius: 4px;
   font-size: 18px; line-height: 1; padding: 2px 9px;
