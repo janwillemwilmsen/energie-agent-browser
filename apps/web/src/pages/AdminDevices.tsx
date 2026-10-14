@@ -115,6 +115,54 @@ export function AdminDevices() {
       {error && <p className="error">{error}</p>}
       {note && <p className="muted">{note}</p>}
 
+      <details className="card devices-help">
+        <summary><h3>Screen vs. viewport, the fold line, and fixing a device</h3></summary>
+        <p>
+          A phone's <strong>screen</strong> is not what a page gets. The browser's address bar and toolbar take a
+          slice of it, so the <strong>viewport</strong> — the area the page is laid out in — is smaller: an iPhone 14
+          has a 390×844 screen but gives a page 390×664 on first paint. Each entry in Playwright's list can carry
+          both sizes, and the executor lays the page out in the entry's <code>viewport</code>.
+        </p>
+        <p>
+          Older entries in the list (the ones marked <span className="devices-warn">viewport = full screen</span>)
+          have no separate <code>screen</code>: their <code>viewport</code> is the whole screen. Captures on those
+          devices are a little taller than reality, and the viewer's <strong>fold line</strong> — the line across a
+          full-page screenshot where the first paint ended — sits too low for them. The viewer then also draws a
+          dashed <em>estimated real fold</em> (screen minus typical browser bars: 180 px on an iPhone, 74 on an
+          iPad, 76 on Android), labelled as the estimate it is.
+        </p>
+        <p>
+          <strong>To make such a device exact</strong>, give it the modern shape under “Edit source”: keep the
+          physical size as <code>screen</code> and set <code>viewport</code> to the page area. The simplest way is
+          to copy the numbers from a modern entry of the same size class. For example, iPhone X as it ships:
+        </p>
+        <pre className="devices-example">{`"iPhone X": {
+  "userAgent": "…",
+  "viewport": { "width": 375, "height": 812 },
+  "deviceScaleFactor": 3, "isMobile": true, "hasTouch": true, "defaultBrowserType": "webkit"
+}`}</pre>
+        <p>becomes</p>
+        <pre className="devices-example">{`"iPhone X": {
+  "userAgent": "…",
+  "screen":   { "width": 375, "height": 812 },
+  "viewport": { "width": 375, "height": 635 },
+  "deviceScaleFactor": 3, "isMobile": true, "hasTouch": true, "defaultBrowserType": "webkit"
+}`}</pre>
+        <p>
+          Save the source and the marker disappears, new captures use the corrected viewport, and the viewer draws a
+          single, accurate fold line. The same edit works for a device that is not in the list at all: add an entry
+          with a unique name, a <code>userAgent</code> (copy one from the same family — it only decides whether the
+          iPhone or the Android user agent is used), <code>screen</code>, <code>viewport</code> and{' '}
+          <code>deviceScaleFactor</code>, then tick it above. Landscape entries are separate devices; add one with
+          the width and height swapped if you need it.
+        </p>
+        <p className="muted">
+          Where the page-area numbers come from: measure on the device (Safari → Web Inspector, or{' '}
+          <code>window.innerHeight</code> on first load), or take them from Playwright's modern entries of the same
+          family. Mobile browser bars collapse on scroll, so the first-paint value is the conservative one.
+        </p>
+      </details>
+
       <div className="devices-toolbar">
         <input
           type="search"

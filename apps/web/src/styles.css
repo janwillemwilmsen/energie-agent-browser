@@ -1631,6 +1631,12 @@ code { background: rgba(255,255,255,0.06); padding: 2px 4px; border-radius: 3px;
 .devices-name { white-space: nowrap; }
 .devices-props { font-size: 12px; }
 .devices-warn { color: #fbbf24; cursor: help; }
+.devices-help { margin: 12px 0; max-width: 860px; }
+.devices-help p { font-size: 13px; line-height: 1.5; margin: 8px 0; }
+.devices-example {
+  background: rgba(0,0,0,0.3); border: 1px solid var(--border); border-radius: 6px;
+  padding: 8px 10px; font-size: 12px; line-height: 1.45; overflow-x: auto; margin: 4px 0;
+}
 .devices-save { display: flex; gap: 8px; align-items: center; margin: 12px 0 20px; }
 .devices-source {
   width: 100%; box-sizing: border-box; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
