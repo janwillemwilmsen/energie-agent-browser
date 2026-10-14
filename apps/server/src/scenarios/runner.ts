@@ -543,6 +543,7 @@ export function startRun(scenarioId: number, opts: StartRunOptions = {}): Starte
             authSelectors: getAuthSelectors,
             pause,
             settle,
+            devices,
             // The recording's pointer overlay lives in the page; a navigation
             // drops it, so it is put back after every Step while recording.
             afterStep: async () => { await ctx.recording.cursor?.refresh(); },
