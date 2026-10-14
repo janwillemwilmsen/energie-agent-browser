@@ -143,6 +143,11 @@ export function AdminDevices() {
                   <span className="devices-name">{d.name}</span>
                   <span className="muted devices-props">
                     {d.width}×{d.height} @{d.scale}× · {d.family}{d.mobile ? '' : ' · desktop-class'}{d.builtin ? ' · agent-browser built-in' : ''}
+                    {d.fullScreenViewport && (
+                      <span className="devices-warn" title="This descriptor has no separate screen size, so its viewport is the whole screen; the page area under the browser's address bar and toolbar is smaller. The fold line sits too low for it — paste a corrected viewport in the source to fix.">
+                        {' '}· viewport = full screen
+                      </span>
+                    )}
                   </span>
                 </label>
               </li>

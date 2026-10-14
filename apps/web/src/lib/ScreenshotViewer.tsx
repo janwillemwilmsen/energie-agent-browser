@@ -16,6 +16,7 @@ export interface ViewerItem {
 }
 
 const FRAME_KEY = 'eab.screenshotViewer.frame';
+const FOLD_KEY = 'eab.screenshotViewer.fold';
 const SCALE_KEY = 'eab.screenshotViewer.scale';
 // Display scales for the frame: the device's visible area shrunk as a whole
 // (box and content alike), so a 1440×900 desktop frame fits a laptop screen
@@ -50,6 +51,23 @@ export function ScreenshotViewer({
   }, [scale]);
   const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
   useEffect(() => setNatural(null), [item?.runId, item?.name]);
+  // The fold: a line across a full-page capture where the first paint ended
+  // — the viewport height in image pixels (CSS height × capture scale), as
+  // a fraction of the image height so it scales with however the image is
+  // shown. Drawn by the viewer, never in the file.
+  const [fold, setFold] = useState<boolean>(() => {
+    try { return localStorage.getItem(FOLD_KEY) === '1'; } catch { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem(FOLD_KEY, fold ? '1' : '0'); } catch { /* ignore */ }
+  }, [fold]);
+  const foldPct = (() => {
+    if (!item || !item.meta.fullPage) return null;
+    const imgH = natural?.h ?? item.meta.height;
+    if (!imgH) return null;
+    const px = item.meta.viewport.height * item.meta.viewport.scale;
+    return px < imgH ? (px / imgH) * 100 : null; // no line when the page fits the viewport
+  })();
 
   // The frame is exactly what was visible on the device, in screen pixels,
   // never fitted to the window: a 390×844 phone is a 390×844 box, a
@@ -77,6 +95,7 @@ export function ScreenshotViewer({
       else if (e.key === 'ArrowLeft') { e.preventDefault(); prev(); }
       else if (e.key === 'ArrowRight') { e.preventDefault(); next(); }
       else if (e.key === 'f' || e.key === 'F') setFrame((v) => !v);
+      else if (e.key === 'l' || e.key === 'L') setFold((v) => !v);
       // 1 / 2 / 3 pick the display scale (100 / 75 / 50).
       else if (e.key === '1') setScale(100);
       else if (e.key === '2') setScale(75);
@@ -92,6 +111,22 @@ export function ScreenshotViewer({
   const vp = meta.viewport;
   const where = meta.device ?? 'desktop';
   const px = natural ? `${natural.w}×${natural.h} px` : meta.width && meta.height ? `${meta.width}×${meta.height} px` : '';
+  // The image with the fold line laid over it; the wrapper is exactly the
+  // image's box, so a percentage offset lands on the same pixel row in the
+  // full view and inside the frame.
+  const picture = (
+    <div className="ssv-picture">
+      <img src={src} alt={item.name} onLoad={(e) => setNatural({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })} />
+      {fold && foldPct != null && (
+        <div className="ssv-fold" style={{ top: `${foldPct}%` }} aria-hidden>
+          <span>
+            fold · {vp.height} CSS px
+            {meta.viewportIsScreen ? ' · descriptor viewport = full screen; the real page area is smaller' : ''}
+          </span>
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <div className="ssv-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
@@ -114,6 +149,17 @@ export function ScreenshotViewer({
             >
               device frame
             </button>
+            {foldPct != null && (
+              <button
+                type="button"
+                className={`chip${fold ? ' chip-on' : ''}`}
+                aria-pressed={fold}
+                onClick={() => setFold((v) => !v)}
+                title={`Draw a line where the first paint ended: ${vp.height} CSS px down, the viewport height (L)`}
+              >
+                fold line
+              </button>
+            )}
             {frame && (
               <span className="ssv-scale" role="group" aria-label="Frame display scale">
                 {SCALES.map((s) => (
@@ -146,19 +192,17 @@ export function ScreenshotViewer({
                 style={frameSize ? { width: frameSize.width, height: frameSize.height } : undefined}
                 title={`${frameSize?.realWidth}×${frameSize?.realHeight} px — the ${where}'s visible area${meta.zoom ? ` at ${meta.zoom}% zoom (${vp.width}×${vp.height} CSS px)` : ''}${scale !== 100 ? `, shown at ${scale}%` : ''}`}
               >
-                <img src={src} alt={item.name} onLoad={(e) => setNatural({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })} />
+                {picture}
               </div>
             ) : (
-              <div className="ssv-full">
-                <img src={src} alt={item.name} onLoad={(e) => setNatural({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })} />
-              </div>
+              <div className="ssv-full">{picture}</div>
             )}
           </div>
           <button type="button" className="ssv-nav" onClick={next} disabled={items.length < 2} title="Next (→)" aria-label="Next">›</button>
         </div>
 
         <footer className="ssv-foot muted">
-          {index + 1} of {items.length} · ← → to move · F toggles the frame · 1 / 2 / 3 = 100 / 75 / 50 % · Esc closes
+          {index + 1} of {items.length} · ← → to move · F frame · L fold line · 1 / 2 / 3 = 100 / 75 / 50 % · Esc closes
         </footer>
       </div>
     </div>

@@ -493,7 +493,7 @@ describe('Step executor', () => {
     const b = fakeBrowser([], [
       (a) => { if (a[0] === 'screenshot') { fs.writeFileSync(a[a.length - 1]!, ''); return OK; } return undefined; },
     ]);
-    const fold = { name: 'Galaxy Z Fold 6 Cover', width: 484, height: 1112, scale: 2, mobile: true, userAgent: 'Mozilla/5.0 (Linux; Android 10; SM-F956U)', family: 'android' as const, builtin: false };
+    const fold = { name: 'Galaxy Z Fold 6 Cover', width: 484, height: 1112, scale: 2, mobile: true, userAgent: 'Mozilla/5.0 (Linux; Android 10; SM-F956U)', family: 'android' as const, builtin: false, fullScreenViewport: false };
     const artifacts = { screenshotDir: dir, viewport: 'desktop' as const, screenshots: [], texts: [] };
     const ctx = context(b, { artifacts, devices: (n) => (n === fold.name ? fold : undefined) });
     try {
@@ -533,8 +533,9 @@ describe('Step executor', () => {
       expect(metas.map((m) => ({ ...m, name: m.name.replace(/^\d{8}-\d{6}-/, '') }))).toEqual([
         { name: 'home-desktop.png', viewport: { width: 1440, height: 900, scale: 1 }, device: null, zoom: null, fullPage: true, width: 1, height: 1 },
         { name: 'home-zoom200-desktop.png', viewport: { width: 720, height: 450, scale: 2 }, device: null, zoom: 200, fullPage: true, width: 1, height: 1 },
-        // Full page on a device: the device's CSS viewport at scale 1.
-        { name: 'home-mobile.png', viewport: { width: 412, height: 915, scale: 1 }, device: 'Pixel 7', zoom: null, fullPage: true, width: 1, height: 1 },
+        // Full page on a device: the device's CSS viewport at scale 1. A
+        // built-in profile is a screen size, which the meta says.
+        { name: 'home-mobile.png', viewport: { width: 412, height: 915, scale: 1 }, device: 'Pixel 7', zoom: null, fullPage: true, width: 1, height: 1, viewportIsScreen: true },
       ]);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });

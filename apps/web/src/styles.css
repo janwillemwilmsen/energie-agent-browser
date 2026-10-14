@@ -1630,6 +1630,7 @@ code { background: rgba(255,255,255,0.06); padding: 2px 4px; border-radius: 3px;
 .devices-list input[type="checkbox"] { width: auto; margin: 0; position: relative; top: 2px; }
 .devices-name { white-space: nowrap; }
 .devices-props { font-size: 12px; }
+.devices-warn { color: #fbbf24; cursor: help; }
 .devices-save { display: flex; gap: 8px; align-items: center; margin: 12px 0 20px; }
 .devices-source {
   width: 100%; box-sizing: border-box; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -1679,6 +1680,20 @@ code { background: rgba(255,255,255,0.06); padding: 2px 4px; border-radius: 3px;
 /* Whole image, scaled to the stage width, scrolling vertically. */
 .ssv-full { width: 100%; height: 100%; overflow: auto; }
 .ssv-full img { display: block; width: 100%; height: auto; }
+/* The image with overlays: the wrapper is exactly the image's box. */
+.ssv-picture { position: relative; width: 100%; }
+.ssv-picture img { display: block; width: 100%; height: auto; }
+/* The fold line: where the first paint ended (viewport height), as a
+   percentage of the image so it stays on the same pixel row at any size. */
+.ssv-fold {
+  position: absolute; left: 0; right: 0; height: 0;
+  border-top: 2px solid #38bdf8; pointer-events: none;
+}
+.ssv-fold span {
+  position: absolute; left: 0; bottom: 2px;
+  background: #38bdf8; color: #000; font-size: 11px; line-height: 16px; padding: 0 6px;
+  white-space: nowrap;
+}
 /* The device frame: sized inline to the capture viewport's aspect ratio,
    fitted to the stage; the image fills its width and the rest scrolls. */
 .ssv-frame {

@@ -26,6 +26,13 @@ export interface DeviceProfile {
   family: 'ios' | 'android' | 'desktop';
   /** True when agent-browser itself knows the name (`set device` works directly). */
   builtin: boolean;
+  /**
+   * The descriptor has no separate `screen` size (Playwright's older entries:
+   * iPhone X/8/SE, Pixel 2–4, Galaxy S24, …), so its viewport is the whole
+   * screen — the real page area under the browser chrome is smaller. A fold
+   * line at this viewport sits too low; paste a corrected viewport to fix.
+   */
+  fullScreenViewport: boolean;
 }
 
 interface Descriptor {
@@ -82,6 +89,7 @@ export function parseDeviceSource(json: string): DeviceProfile[] {
       userAgent: ua,
       family: familyOf(ua),
       builtin: BUILTIN.has(name),
+      fullScreenViewport: d.isMobile === true && !(Number(d?.screen?.width) > 0 && Number(d?.screen?.height) > 0),
     });
   }
   if (out.length === 0) throw new Error('no devices with a viewport found');
@@ -102,7 +110,8 @@ export function builtinProfile(name: string): DeviceProfile | undefined {
   if (!BUILTIN.has(name)) return undefined;
   const v: ViewportSize = DEVICE_PROFILES[name as DeviceName];
   const family: DeviceProfile['family'] = /iPhone|iPad/.test(name) ? 'ios' : 'android';
-  return { name, width: v.width, height: v.height, scale: v.scale, mobile: true, userAgent: '', family, builtin: true };
+  // agent-browser's own profiles are screen sizes too.
+  return { name, width: v.width, height: v.height, scale: v.scale, mobile: true, userAgent: '', family, builtin: true, fullScreenViewport: true };
 }
 
 /** The viewport (CSS px + scale) a profile lays the page out in. */

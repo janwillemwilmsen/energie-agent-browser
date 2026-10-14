@@ -1041,6 +1041,7 @@ async function screenshot(
       fullPage,
       width: size?.width ?? null,
       height: size?.height ?? null,
+      ...(deviceInUse?.fullScreenViewport ? { viewportIsScreen: true } : {}),
     });
     // The annotate legend is on stdout — keep it in the run log so the labels
     // are interpretable later.
