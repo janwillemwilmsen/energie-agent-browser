@@ -1694,6 +1694,9 @@ code { background: rgba(255,255,255,0.06); padding: 2px 4px; border-radius: 3px;
   background: #38bdf8; color: #000; font-size: 11px; line-height: 16px; padding: 0 6px;
   white-space: nowrap;
 }
+/* The estimated fold for a full-screen-viewport descriptor: dashed amber. */
+.ssv-fold-estimate { border-top: 2px dashed #fbbf24; }
+.ssv-fold-estimate span { background: #fbbf24; }
 /* The device frame: sized inline to the capture viewport's aspect ratio,
    fitted to the stage; the image fills its width and the rest scrolls. */
 .ssv-frame {

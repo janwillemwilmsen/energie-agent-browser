@@ -68,6 +68,20 @@ export function ScreenshotViewer({
     const px = item.meta.viewport.height * item.meta.viewport.scale;
     return px < imgH ? (px / imgH) * 100 : null; // no line when the page fits the viewport
   })();
+  // For a capture whose descriptor viewport is the whole screen, a second,
+  // estimated fold: screen height minus the browser's bars, using what
+  // Playwright's modern entries of the same family subtract (iPhone 844→664,
+  // iPad 1180→1106, Pixel 915→839). An estimate, and labelled as one.
+  const estimate = (() => {
+    if (!item || foldPct == null || !item.meta.viewportIsScreen) return null;
+    const imgH = natural?.h ?? item.meta.height;
+    if (!imgH) return null;
+    const name = item.meta.device ?? '';
+    const bars = /iPad/i.test(name) ? 74 : /iPhone|iPod/i.test(name) ? 180 : 76;
+    const cssH = item.meta.viewport.height - bars;
+    const px = cssH * item.meta.viewport.scale;
+    return px > 0 && px < imgH ? { pct: (px / imgH) * 100, cssH, bars } : null;
+  })();
 
   // The frame is exactly what was visible on the device, in screen pixels,
   // never fitted to the window: a 390×844 phone is a 390×844 box, a
@@ -121,8 +135,13 @@ export function ScreenshotViewer({
         <div className="ssv-fold" style={{ top: `${foldPct}%` }} aria-hidden>
           <span>
             fold · {vp.height} CSS px
-            {meta.viewportIsScreen ? ' · descriptor viewport = full screen; the real page area is smaller' : ''}
+            {meta.viewportIsScreen ? ' · descriptor viewport = full screen' : ''}
           </span>
+        </div>
+      )}
+      {fold && estimate && (
+        <div className="ssv-fold ssv-fold-estimate" style={{ top: `${estimate.pct}%` }} aria-hidden>
+          <span>estimated real fold · ~{estimate.cssH} CSS px (browser bars ≈ {estimate.bars} px)</span>
         </div>
       )}
     </div>
