@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useFocusTrap } from '../useFocusTrap.js';
 import { DEFAULT_MOBILE_DEVICE, DEVICE_NAMES, DESKTOP_VIEWPORT, ZOOM_LEVELS, builtinProfile, zoomedViewport, type DeviceProfile } from '@eab/shared';
 import { api } from '../api.js';
 import type { EditableStep } from './store.js';
@@ -32,6 +33,8 @@ export function StepEditModal({
 }) {
   const initial = step.payload;
   const isScreenshot = step.kind === 'screenshot';
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  useFocusTrap(dialogRef);
   const isRecordStart = step.kind === 'record_start';
 
   // record_start: show a pointer in the video; move it like a person.
@@ -148,6 +151,10 @@ export function StepEditModal({
       onClick={(e) => { if (e.target === e.currentTarget && !busy) onClose(); }}
     >
       <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Edit step ${step.kind}`}
         style={{
           width: '100%', maxWidth: 480, maxHeight: '85vh', overflow: 'auto',
           background: 'var(--bg, #1b1b1f)', border: '1px solid var(--border, rgba(127,127,127,0.35))',

@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { type ScreenshotMeta } from '@eab/shared';
 import { api } from './api.js';
+import { useFocusTrap } from './useFocusTrap.js';
 
 // The screenshot viewer: one run's screenshots, one at a time, with previous /
 // next (buttons and ← →), Escape and a close button. The "device frame"
@@ -30,6 +31,8 @@ export function ScreenshotViewer({
   onClose: () => void;
 }) {
   const item = items[index];
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  useFocusTrap(dialogRef);
   const [frame, setFrame] = useState<boolean>(() => {
     try { return localStorage.getItem(FRAME_KEY) === '1'; } catch { return false; }
   });
@@ -92,7 +95,7 @@ export function ScreenshotViewer({
 
   return (
     <div className="ssv-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="ssv" role="dialog" aria-modal="true" aria-label={item.name}>
+      <div className="ssv" role="dialog" aria-modal="true" aria-label={item.name} ref={dialogRef}>
         <header className="ssv-head">
           <strong className="ssv-name" title={item.name}>{item.name}</strong>
           <span className="muted ssv-meta">
