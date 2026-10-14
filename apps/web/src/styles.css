@@ -1633,6 +1633,8 @@ code { background: rgba(255,255,255,0.06); padding: 2px 4px; border-radius: 3px;
 .devices-warn { color: #fbbf24; cursor: help; }
 .devices-help { margin: 12px 0; max-width: 860px; }
 .devices-help p { font-size: 13px; line-height: 1.5; margin: 8px 0; }
+.devices-help-list { font-size: 13px; line-height: 1.5; margin: 4px 0 8px; padding-left: 20px; }
+.devices-help-list li { margin: 4px 0; }
 .devices-example {
   background: rgba(0,0,0,0.3); border: 1px solid var(--border); border-radius: 6px;
   padding: 8px 10px; font-size: 12px; line-height: 1.45; overflow-x: auto; margin: 4px 0;

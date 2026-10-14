@@ -124,13 +124,24 @@ export function AdminDevices() {
           both sizes, and the executor lays the page out in the entry's <code>viewport</code>.
         </p>
         <p>
-          Older entries in the list (the ones marked <span className="devices-warn">viewport = full screen</span>)
-          have no separate <code>screen</code>: their <code>viewport</code> is the whole screen. Captures on those
-          devices are a little taller than reality, and the viewer's <strong>fold line</strong> — the line across a
-          full-page screenshot where the first paint ended — sits too low for them. The viewer then also draws a
-          dashed <em>estimated real fold</em> (screen minus typical browser bars: 180 px on an iPhone, 74 on an
-          iPad, 76 on Android), labelled as the estimate it is.
+          The viewer's <strong>fold line</strong> marks where the first paint ended on a full-page screenshot — the
+          viewport height. How many lines it draws depends on the entry:
         </p>
+        <ul className="devices-help-list">
+          <li>
+            <strong>Entry has both <code>screen</code> and <code>viewport</code></strong> (iPhone 11–17, Pixel 5–9,
+            Galaxy S21 and newer, …): the viewport is the real page area, the fold is exact — <strong>one</strong> blue
+            line.
+          </li>
+          <li>
+            <strong>Entry has only <code>viewport</code></strong>, no <code>screen</code> (the ones marked{' '}
+            <span className="devices-warn">viewport = full screen</span>: iPhone X/XR/8/SE, Pixel 2–4, Galaxy S24,
+            older iPads, …): that viewport is really the whole screen, so captures are a little taller than reality
+            and the recorded fold sits too low — <strong>two</strong> lines: the blue one is what was recorded, the
+            dashed amber one an <em>estimated real fold</em> (screen minus typical browser bars: 180 px on an iPhone,
+            74 on an iPad, 76 on Android). The second line is a warning that the entry is incomplete, not better data.
+          </li>
+        </ul>
         <p>
           <strong>To make such a device exact</strong>, give it the modern shape under “Edit source”: keep the
           physical size as <code>screen</code> and set <code>viewport</code> to the page area. The simplest way is
@@ -149,8 +160,8 @@ export function AdminDevices() {
   "deviceScaleFactor": 3, "isMobile": true, "hasTouch": true, "defaultBrowserType": "webkit"
 }`}</pre>
         <p>
-          Save the source and the marker disappears, new captures use the corrected viewport, and the viewer draws a
-          single, accurate fold line. The same edit works for a device that is not in the list at all: add an entry
+          Save the source and the marker disappears, new captures use the corrected viewport, and the viewer draws
+          one accurate fold line instead of two. The same edit works for a device that is not in the list at all: add an entry
           with a unique name, a <code>userAgent</code> (copy one from the same family — it only decides whether the
           iPhone or the Android user agent is used), <code>screen</code>, <code>viewport</code> and{' '}
           <code>deviceScaleFactor</code>, then tick it above. Landscape entries are separate devices; add one with
