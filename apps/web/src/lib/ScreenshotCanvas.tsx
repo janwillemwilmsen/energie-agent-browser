@@ -1,13 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { parseScreenshotMetas, screenshotMetaFor, slotDisplayLabel, type Run } from '@eab/shared';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { parseScreenshotMetas, screenshotMetaFor, slotDisplayLabel, type Run, type ScreenshotMeta } from '@eab/shared';
 import { api } from './api.js';
 import { useFocusTrap } from './useFocusTrap.js';
 
-// The screenshot canvas: one run's screenshots side by side, at their real
-// pixel size, on a full-screen surface that pans (drag) and zooms (wheel or
-// pinch, around the cursor). A run switcher moves through the scenario's
-// completed runs, newest first like the timeline, so a flow can be read run
-// by run without leaving the canvas.
+// The screenshot canvas: screenshots at their real pixel size on a
+// full-screen surface that pans (drag, two-finger swipe) and zooms (pinch,
+// ctrl+wheel, around the cursor). The surface shows GROUPS — one run each —
+// as rows: a single run's screenshots side by side, or many runs (the
+// Screenshots page's whole selection) stacked. ScreenshotCanvas is the
+// single-scenario flavour with a run switcher, newest first like the
+// timeline.
 
 const MIN_Z = 0.02;
 const MAX_Z = 8;
@@ -19,48 +21,37 @@ interface View { x: number; y: number; z: number }
 
 const clampZ = (z: number) => Math.min(MAX_Z, Math.max(MIN_Z, z));
 
-export function ScreenshotCanvas({
-  scenarioId, scenarioName, initialRunId, onClose,
+/** One row on the surface: a run's screenshots. */
+export interface CanvasGroup {
+  key: string;
+  title: string;
+  subtitle?: string;
+  runId: number;
+  names: string[];
+  metas: ScreenshotMeta[];
+}
+
+export function CanvasSurface({
+  title, groups, toolbar, note, onRunStep, onClose,
 }: {
-  scenarioId: number;
-  scenarioName: string;
-  initialRunId: number;
+  title: string;
+  groups: CanvasGroup[];
+  /** Extra toolbar content after the title (the run switcher, say). */
+  toolbar?: ReactNode;
+  /** A message in place of the layout (loading, an error, nothing to show). */
+  note?: ReactNode;
+  /** Space / Alt+Space, when the caller has runs to step through. */
+  onRunStep?: (delta: number) => void;
   onClose: () => void;
 }) {
   const dialogRef = useRef<HTMLDivElement | null>(null);
   useFocusTrap(dialogRef);
 
-  // The scenario's completed runs, newest first; the switcher's options.
-  const [runs, setRuns] = useState<Run[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [runId, setRunId] = useState(initialRunId);
-  useEffect(() => {
-    api.listScenarioRuns(scenarioId)
-      .then((all) => setRuns(
-        all
-          .filter((r) => r.status === 'success' || r.status === 'failed')
-          .sort((a, b) => Date.parse(b.started_at) - Date.parse(a.started_at) || b.id - a.id),
-      ))
-      .catch((e) => setError(e?.message ?? String(e)));
-  }, [scenarioId]);
-  const index = runs ? runs.findIndex((r) => r.id === runId) : -1;
-  const run = index >= 0 ? runs![index]! : null;
-  useEffect(() => {
-    // The opening run is not among the completed ones (still running, say): show the newest.
-    if (runs && index < 0 && runs[0]) setRunId(runs[0].id);
-  }, [runs, index]);
-
-  const shots = useMemo(() => {
-    if (!run) return [] as string[];
-    try { return JSON.parse(run.screenshot_paths_json) as string[]; } catch { return []; }
-  }, [run]);
-  const metas = useMemo(() => parseScreenshotMetas(run?.screenshot_meta_json), [run]);
-
   // The view: the layout's origin in stage px and its scale.
   const [view, setView] = useState<View>({ x: PAD, y: PAD + 24, z: 1 });
   const stageRef = useRef<HTMLDivElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
-  // Once the user has zoomed or panned a run the auto-fit (which re-runs as
+  // Once the user has zoomed or panned, the auto-fit (which re-runs as
   // images load and change the layout's size) stops touching the view.
   const touched = useRef(false);
 
@@ -95,8 +86,9 @@ export function ScreenshotCanvas({
     if (s) zoomAt(s.clientWidth / 2, s.clientHeight / 2, z / view.z);
   };
 
-  // A new run: fit it to the width once its images have a size, until the
+  // New content: fit it to the width once its images have a size, until the
   // user takes over. The observer fires as images load and the layout grows.
+  const layoutKey = groups.map((g) => g.key).join('|');
   useEffect(() => {
     touched.current = false;
     const content = contentRef.current;
@@ -105,7 +97,7 @@ export function ScreenshotCanvas({
     const ro = new ResizeObserver(() => { if (!touched.current) fit('width'); });
     ro.observe(content);
     return () => ro.disconnect();
-  }, [run?.id, fit]);
+  }, [layoutKey, fit]);
 
   // What a plain scroll does: pan (a two-finger swipe on a trackpad moves the
   // canvas, in any direction) or zoom (a mouse wheel). A pinch arrives as a
@@ -164,19 +156,13 @@ export function ScreenshotCanvas({
     if (drag.current?.id === e.pointerId) { drag.current = null; setDragging(false); }
   };
 
-  const goRun = useCallback((delta: number) => {
-    if (!runs || index < 0) return;
-    const next = runs[index + delta];
-    if (next) setRunId(next.id);
-  }, [runs, index]);
-
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLSelectElement) return;
       if (e.key === 'Escape') { e.preventDefault(); onClose(); }
       // Space walks the run list (newest first, as on the timeline): Space =
       // next (older), Alt+Space = previous (newer).
-      else if (e.key === ' ') { e.preventDefault(); goRun(e.altKey ? -1 : 1); }
+      else if (e.key === ' ') { e.preventDefault(); onRunStep?.(e.altKey ? -1 : 1); }
       // Arrows move the view the way a scroll would: → shows what is to the
       // right. Shift makes the step five times larger.
       else if (e.key.startsWith('Arrow')) {
@@ -198,35 +184,22 @@ export function ScreenshotCanvas({
   });
 
   const pct = Math.round(view.z * 100);
+  const inv = 1 / view.z; // counter-scale for labels, so they read the same at any zoom
+  const total = groups.reduce((n, g) => n + g.names.length, 0);
 
   return (
-    <div className="ssc" role="dialog" aria-modal="true" aria-label={`${scenarioName} canvas`} ref={dialogRef}>
+    <div className="ssc" role="dialog" aria-modal="true" aria-label={`${title} canvas`} ref={dialogRef}>
       <header className="ssc-head">
-        <strong className="ssc-title" title={scenarioName}>{scenarioName}</strong>
-        <span className="ssc-runs">
-          <button type="button" className="chip" onClick={() => goRun(-1)} disabled={!runs || index <= 0} title="Previous run — newer (Alt+Space)">‹</button>
-          <select
-            value={run?.id ?? ''}
-            onChange={(e) => setRunId(Number(e.target.value))}
-            disabled={!runs || runs.length === 0}
-            title="Which run to show"
-          >
-            {!runs && <option value="">Loading runs…</option>}
-            {runs && runs.length === 0 && <option value="">No completed runs</option>}
-            {runs?.map((r, i) => (
-              <option key={r.id} value={r.id}>
-                {formatDate(r.started_at)} · #{r.id} · {r.status}{i === 0 ? ' · latest' : ''}
-              </option>
-            ))}
-          </select>
-          <button type="button" className="chip" onClick={() => goRun(1)} disabled={!runs || index < 0 || index >= runs.length - 1} title="Next run — older (Space)">›</button>
-          {run && <span className="muted">{shots.length} screenshot{shots.length === 1 ? '' : 's'}</span>}
+        <strong className="ssc-title" title={title}>{title}</strong>
+        {toolbar}
+        <span className="muted">
+          {groups.length > 1 ? `${groups.length} runs · ` : ''}{total} screenshot{total === 1 ? '' : 's'}
         </span>
         <span className="ssc-zoom" role="group" aria-label="Zoom">
           <button type="button" className="chip" onClick={() => zoomCenter(0.8)} title="Zoom out (−)">−</button>
           <span className="ssc-zoom-pct" title="Zoom">{pct}%</span>
           <button type="button" className="chip" onClick={() => zoomCenter(1.25)} title="Zoom in (+)">+</button>
-          <button type="button" className="chip" onClick={() => { touched.current = false; fit('width'); }} title="Fit all screenshots across the width (0)">fit width</button>
+          <button type="button" className="chip" onClick={() => { touched.current = false; fit('width'); }} title="Fit the widest row across the width (0)">fit width</button>
           <button type="button" className="chip" onClick={() => { touched.current = true; fit('all'); }} title="Fit everything in view (9)">fit all</button>
           <button type="button" className={`chip${pct === 100 ? ' chip-on' : ''}`} onClick={() => setZoom(1)} title="Real pixel size (1)">100%</button>
           <button
@@ -251,40 +224,51 @@ export function ScreenshotCanvas({
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
       >
-        {error && <p className="error ssc-note">{error}</p>}
-        {run && shots.length === 0 && <p className="muted ssc-note">This run produced no screenshots.</p>}
+        {note && <p className="muted ssc-note">{note}</p>}
         <div
           className="ssc-content"
           ref={contentRef}
-          style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.z})` }}
+          // The gap between rows holds the counter-scaled labels, so it is a
+          // constant number of SCREEN px (content px × z).
+          style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.z})`, rowGap: 64 * inv }}
         >
-          {run && shots.map((name) => {
-            const m = screenshotMetaFor(name, metas);
-            return (
-              <figure className="ssc-shot" key={`${run.id}/${name}`}>
-                {/* The caption is counter-scaled so it stays legible at any
-                    zoom, and clipped to the image's on-screen width (layout
-                    width × z, which the counter-scale turns back into screen
-                    px) so neighbours never overlap. */}
-                <figcaption
-                  style={{ transform: `scale(${1 / view.z})`, maxWidth: Math.max(8, ((m.width ?? m.viewport.width) + 40) * view.z) }}
-                  title={`${slotDisplayLabel(name)} — ${m.device ?? 'desktop'} · ${m.viewport.width}×${m.viewport.height}`}
-                >
-                  <b>{slotDisplayLabel(name)}</b>
-                  {' '}{m.device ?? 'desktop'} · {m.viewport.width}×{m.viewport.height}
-                  {m.width && m.height ? ` · ${m.width}×${m.height} px` : ''}
-                </figcaption>
-                <img
-                  src={api.runScreenshotUrl(run.id, name)}
-                  alt={name}
-                  width={m.width ?? undefined}
-                  height={m.height ?? undefined}
-                  draggable={false}
-                  decoding="async"
-                />
-              </figure>
-            );
-          })}
+          {groups.map((g) => (
+            <div className="ssc-row" key={g.key}>
+              {groups.length > 1 && (
+                <div className="ssc-row-label" style={{ transform: `scale(${inv})`, marginBottom: 26 * inv }}>
+                  <b>{g.title}</b>{g.subtitle ? ` · ${g.subtitle}` : ''}
+                  {g.names.length === 0 ? ' · no screenshots' : ''}
+                </div>
+              )}
+              {g.names.map((name) => {
+                const m = screenshotMetaFor(name, g.metas);
+                return (
+                  <figure className="ssc-shot" key={`${g.runId}/${name}`}>
+                    {/* The caption is counter-scaled so it stays legible at any
+                        zoom, and clipped to the image's on-screen width (layout
+                        width × z, which the counter-scale turns back into screen
+                        px) so neighbours never overlap. */}
+                    <figcaption
+                      style={{ transform: `scale(${inv})`, maxWidth: Math.max(8, ((m.width ?? m.viewport.width) + 40) * view.z) }}
+                      title={`${slotDisplayLabel(name)} — ${m.device ?? 'desktop'} · ${m.viewport.width}×${m.viewport.height}`}
+                    >
+                      <b>{slotDisplayLabel(name)}</b>
+                      {' '}{m.device ?? 'desktop'} · {m.viewport.width}×{m.viewport.height}
+                      {m.width && m.height ? ` · ${m.width}×${m.height} px` : ''}
+                    </figcaption>
+                    <img
+                      src={api.runScreenshotUrl(g.runId, name)}
+                      alt={name}
+                      width={m.width ?? undefined}
+                      height={m.height ?? undefined}
+                      draggable={false}
+                      decoding="async"
+                    />
+                  </figure>
+                );
+              })}
+            </div>
+          ))}
         </div>
       </div>
 
@@ -292,10 +276,96 @@ export function ScreenshotCanvas({
         {wheelMode === 'pan'
           ? 'two-finger swipe or drag to pan · pinch or Ctrl/⌘ + scroll to zoom'
           : 'drag or Shift + wheel to pan · wheel or pinch to zoom'}
-        {' '}· arrows move the view (Shift: faster) · Space next run · Alt+Space previous run · 0 fit width · 9 fit all · 1 = 100% · + − zoom · Esc closes
+        {' '}· arrows move the view (Shift: faster)
+        {onRunStep ? ' · Space next run · Alt+Space previous run' : ''}
+        {' '}· 0 fit width · 9 fit all · 1 = 100% · + − zoom · Esc closes
       </footer>
     </div>
   );
+}
+
+/** One scenario's run on the surface, with a switcher through its completed runs. */
+export function ScreenshotCanvas({
+  scenarioId, scenarioName, initialRunId, onClose,
+}: {
+  scenarioId: number;
+  scenarioName: string;
+  initialRunId: number;
+  onClose: () => void;
+}) {
+  // The scenario's completed runs, newest first; the switcher's options.
+  const [runs, setRuns] = useState<Run[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [runId, setRunId] = useState(initialRunId);
+  useEffect(() => {
+    api.listScenarioRuns(scenarioId)
+      .then((all) => setRuns(
+        all
+          .filter((r) => r.status === 'success' || r.status === 'failed')
+          .sort((a, b) => Date.parse(b.started_at) - Date.parse(a.started_at) || b.id - a.id),
+      ))
+      .catch((e) => setError(e?.message ?? String(e)));
+  }, [scenarioId]);
+  const index = runs ? runs.findIndex((r) => r.id === runId) : -1;
+  const run = index >= 0 ? runs![index]! : null;
+  useEffect(() => {
+    // The opening run is not among the completed ones (still running, say): show the newest.
+    if (runs && index < 0 && runs[0]) setRunId(runs[0].id);
+  }, [runs, index]);
+
+  const groups = useMemo<CanvasGroup[]>(() => (run ? [runGroup(run, scenarioName)] : []), [run, scenarioName]);
+
+  const goRun = useCallback((delta: number) => {
+    if (!runs || index < 0) return;
+    const next = runs[index + delta];
+    if (next) setRunId(next.id);
+  }, [runs, index]);
+
+  const toolbar = (
+    <span className="ssc-runs">
+      <button type="button" className="chip" onClick={() => goRun(-1)} disabled={!runs || index <= 0} title="Previous run — newer (Alt+Space)">‹</button>
+      <select
+        value={run?.id ?? ''}
+        onChange={(e) => setRunId(Number(e.target.value))}
+        disabled={!runs || runs.length === 0}
+        title="Which run to show"
+      >
+        {!runs && <option value="">Loading runs…</option>}
+        {runs && runs.length === 0 && <option value="">No completed runs</option>}
+        {runs?.map((r, i) => (
+          <option key={r.id} value={r.id}>
+            {formatDate(r.started_at)} · #{r.id} · {r.status}{i === 0 ? ' · latest' : ''}
+          </option>
+        ))}
+      </select>
+      <button type="button" className="chip" onClick={() => goRun(1)} disabled={!runs || index < 0 || index >= runs.length - 1} title="Next run — older (Space)">›</button>
+    </span>
+  );
+
+  return (
+    <CanvasSurface
+      title={scenarioName}
+      groups={groups}
+      toolbar={toolbar}
+      note={error ?? (run && groups[0]!.names.length === 0 ? 'This run produced no screenshots.' : null)}
+      onRunStep={goRun}
+      onClose={onClose}
+    />
+  );
+}
+
+/** A run as a canvas row. */
+export function runGroup(run: Pick<Run, 'id' | 'started_at' | 'screenshot_paths_json' | 'screenshot_meta_json'>, title: string): CanvasGroup {
+  let names: string[] = [];
+  try { names = JSON.parse(run.screenshot_paths_json) as string[]; } catch { /* malformed */ }
+  return {
+    key: `${run.id}`,
+    title,
+    subtitle: `${formatDate(run.started_at)} · #${run.id}`,
+    runId: run.id,
+    names,
+    metas: parseScreenshotMetas(run.screenshot_meta_json),
+  };
 }
 
 function formatDate(iso: string): string {

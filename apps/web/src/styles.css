@@ -1757,8 +1757,16 @@ code { background: rgba(255,255,255,0.06); padding: 2px 4px; border-radius: 3px;
 .ssc-note { position: absolute; left: 50%; top: 40%; transform: translateX(-50%); margin: 0; }
 .ssc-content {
   position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: transform;
-  display: flex; align-items: flex-start; gap: 48px;
+  display: flex; flex-direction: column; align-items: flex-start;
 }
+/* A row: one run's screenshots side by side; its label (many rows only)
+   floats above it, counter-scaled like the captions. */
+.ssc-row { position: relative; display: flex; align-items: flex-start; gap: 48px; min-height: 1px; }
+.ssc-row-label {
+  position: absolute; left: 0; bottom: 100%; transform-origin: 0 100%;
+  white-space: nowrap; font-size: 13px; color: var(--muted); pointer-events: none;
+}
+.ssc-row-label b { color: var(--text); font-weight: 600; }
 .ssc-shot { position: relative; flex: none; margin: 0; }
 .ssc-shot img {
   display: block; background: #fff; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.18), 0 8px 24px rgba(0, 0, 0, 0.5);
@@ -1771,6 +1779,12 @@ code { background: rgba(255,255,255,0.06); padding: 2px 4px; border-radius: 3px;
 .ssc-shot figcaption b { color: var(--text); font-weight: 600; }
 .ssc-foot { padding: 6px 14px; border-top: 1px solid var(--border); background: var(--panel); font-size: 12px; text-align: center; }
 button.ss-timeline-link { background: transparent; cursor: pointer; font: inherit; font-size: 13px; }
+/* Screenshots page toolbar: the scenario order. */
+.screenshots-sort { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+.screenshots-sort select {
+  background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 4px;
+  padding: 4px 6px; font-size: 13px;
+}
 
 /* Admin → Theme: one card per colour scheme, painted in its own colours. */
 .theme-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; margin: 12px 0; max-width: 980px; }

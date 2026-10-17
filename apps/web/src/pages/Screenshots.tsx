@@ -4,7 +4,7 @@ import { parseScreenshotMetas, screenshotMetaFor } from '@eab/shared';
 import { api, type RunDay, type Scenario } from '../lib/api.js';
 import { useResource, usePolling } from '../lib/resource.js';
 import { ScreenshotViewer } from '../lib/ScreenshotViewer.js';
-import { ScreenshotCanvas } from '../lib/ScreenshotCanvas.js';
+import { CanvasSurface, ScreenshotCanvas, runGroup, type CanvasGroup } from '../lib/ScreenshotCanvas.js';
 import { matchesTags, NO_TAGS, TagFilter, tagsActive, tagValues, type TagSelection } from '../lib/TagFilter.js';
 
 // Per-scenario gallery: one section per scenario that has runs (after the
@@ -32,10 +32,21 @@ interface ScenarioData {
   runByDay: Map<string, RunDay>;
 }
 
+const SORT_KEY = 'eab.screenshots.sort';
+
 export function Screenshots() {
   const [tags, setTags] = useState<TagSelection>(NO_TAGS);
   // Per-scenario date selection. Absent → use the scenario's latest day.
   const [dayByScenario, setDayByScenario] = useState<Record<number, string>>({});
+  // Section order: by the scenario's latest run (newest first) or by name.
+  const [sort, setSort] = useState<'lastRun' | 'name'>(() => {
+    try { return localStorage.getItem(SORT_KEY) === 'name' ? 'name' : 'lastRun'; } catch { return 'lastRun'; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem(SORT_KEY, sort); } catch { /* ignore */ }
+  }, [sort]);
+  // The canvas over everything shown: one row per scenario's displayed run.
+  const [canvasAll, setCanvasAll] = useState(false);
 
   const { data: runs, error: err, setError: setErr, refresh: load } = useResource(
     () => api.listRunsDaily(),
@@ -83,10 +94,13 @@ export function Screenshots() {
       s.populatedDays.sort();
       s.populatedDays.reverse();
     }
+    const byName = (a: ScenarioData, b: ScenarioData) => a.scenario_name.localeCompare(b.scenario_name);
+    // Last run: the start time of the scenario's newest run, newest first.
+    const lastRun = (s: ScenarioData) => Date.parse(s.runByDay.get(s.populatedDays[0] ?? '')?.started_at ?? '') || 0;
     return Array.from(map.values()).sort((a, b) =>
-      a.scenario_name.localeCompare(b.scenario_name),
+      sort === 'lastRun' ? lastRun(b) - lastRun(a) || byName(a, b) : byName(a, b),
     );
-  }, [runs, tags]);
+  }, [runs, tags, sort]);
 
   function setDay(scenarioId: number, day: string | null) {
     setDayByScenario((prev) => {
@@ -105,17 +119,22 @@ export function Screenshots() {
   // run shown for each scenario and its screenshot files. Drives the counter
   // and the zip download.
   const shown = useMemo(() => {
-    const items: { scenarioId: number; runId: number; names: string[] }[] = [];
+    const items: { scenarioId: number; scenarioName: string; run: RunDay; runId: number; names: string[] }[] = [];
     for (const s of scenarios) {
       const day = dayByScenario[s.scenario_id] ?? s.populatedDays[0] ?? '';
       const run = s.runByDay.get(day);
       if (!run) continue;
       let names: string[] = [];
       try { names = JSON.parse(run.screenshot_paths_json); } catch { /* malformed */ }
-      items.push({ scenarioId: s.scenario_id, runId: run.id, names });
+      items.push({ scenarioId: s.scenario_id, scenarioName: s.scenario_name, run, runId: run.id, names });
     }
     return items;
   }, [scenarios, dayByScenario]);
+  // The same, as canvas rows (page order).
+  const canvasGroups = useMemo<CanvasGroup[]>(
+    () => shown.map((it) => ({ ...runGroup(it.run, it.scenarioName), key: `${it.scenarioId}/${it.runId}` })),
+    [shown],
+  );
   const shownScreenshots = shown.reduce((n, it) => n + it.names.length, 0);
 
   const [downloading, setDownloading] = useState(false);
@@ -187,12 +206,26 @@ export function Screenshots() {
           <strong>{shownScreenshots}</strong> screenshot{shownScreenshots === 1 ? '' : 's'}
           {activeFilterCount > 0 && <span className="muted"> (filtered)</span>}
         </span>
+        <label className="screenshots-sort" style={{ marginLeft: 'auto' }}>
+          <span className="muted">Sort</span>
+          <select value={sort} onChange={(e) => setSort(e.target.value as 'lastRun' | 'name')} title="Order of the scenarios below">
+            <option value="lastRun">last run, newest first</option>
+            <option value="name">name</option>
+          </select>
+        </label>
+        <button
+          type="button"
+          onClick={() => setCanvasAll(true)}
+          disabled={shownScreenshots === 0}
+          title="Open every run shown below on one canvas, a row per scenario: pan and zoom through all of them"
+        >
+          Canvas ({shown.filter((it) => it.names.length > 0).length})
+        </button>
         <button
           type="button"
           onClick={() => void downloadZip()}
           disabled={downloading || shownScreenshots === 0}
           title="Download the screenshots shown below (one folder per scenario/run) as a zip"
-          style={{ marginLeft: 'auto' }}
         >
           {downloading ? 'Preparing zip…' : `Download (${shownScreenshots})`}
         </button>
@@ -240,6 +273,15 @@ export function Screenshots() {
           }
         />
       ))}
+
+      {canvasAll && (
+        <CanvasSurface
+          title={activeFilterCount === 0 ? 'All scenarios' : [...selectedBrands, ...selectedTypes].join(', ')}
+          groups={canvasGroups.filter((g) => g.names.length > 0)}
+          note={canvasGroups.every((g) => g.names.length === 0) ? 'None of the shown runs produced screenshots.' : null}
+          onClose={() => setCanvasAll(false)}
+        />
+      )}
     </section>
   );
 }
