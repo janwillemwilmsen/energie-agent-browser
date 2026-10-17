@@ -4,7 +4,9 @@ import {
   PLAYWRIGHT_DEVICES_SOURCE,
   builtinProfile,
   parseDeviceSource,
+  patchDeviceSizes,
   type DeviceProfile,
+  type DeviceSize,
 } from '@eab/shared';
 import { getSetting, setSetting } from './settings.js';
 
@@ -60,6 +62,16 @@ export function saveDeviceSource(json: string): number {
   const n = parseDeviceSource(json).length; // throws with the reason
   setSetting(SOURCE_KEY, json);
   return n;
+}
+
+/**
+ * Write screen/viewport sizes edited inline on the admin page into the
+ * stored source (the vendored copy becomes a custom one on the first edit).
+ * Throws with the reason for an unknown name.
+ */
+export function saveDeviceSizes(sizes: Record<string, { screen: DeviceSize; viewport: DeviceSize }>): void {
+  if (Object.keys(sizes).length === 0) return;
+  setSetting(SOURCE_KEY, patchDeviceSizes(deviceSource(), sizes));
 }
 
 export function saveEnabledDeviceNames(names: string[]): void {

@@ -523,11 +523,11 @@ export function ScenarioEditor() {
                 checked={draft.step_scroll_into_view}
                 onChange={(e) => setDraft({ ...draft, step_scroll_into_view: e.target.checked })}
               />
-              scroll into view(before each click, fill, type, select, check) 
+              Scroll into view(before each click, fill, type, select, check) + then wait (ms)
             </span>
           </label>
-          <label className="scenario-meta-narrow" title="Pause this long after the action so the page can react before the next step (0 = off)">
-            <span>Then wait (ms)</span>
+          <label className="scenario-meta-narrow" style={{ display: 'flex', flexDirection: 'row' }} title="Pause this long after the action so the page can react before the next step (0 = off)">
+            
             <input
               type="number"
               min={0}

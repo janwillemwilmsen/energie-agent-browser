@@ -53,6 +53,8 @@ import { Preflights } from './pages/Preflights.js';
 import { ScenarioTexts } from './pages/ScenarioTexts.js';
 import { AdminStorage } from './pages/AdminStorage.js';
 import { AdminEnv } from './pages/AdminEnv.js';
+import { AdminTheme } from './pages/AdminTheme.js';
+import { applyTheme, cachedTheme, loadTheme } from './lib/theme.js';
 
 interface NavItem {
   to: string;
@@ -143,6 +145,14 @@ export function App() {
     // unmounts every page (and its polling); a fresh login remounts them.
     return onUnauthenticated(() => setAuthed(false));
   }, []);
+
+  // The colour scheme: this browser's last one at once (no flash), then the
+  // stored one once the session is known (the admin endpoint sits behind the
+  // login gate). A failure keeps whatever is painted.
+  useEffect(() => { applyTheme(cachedTheme()); }, []);
+  useEffect(() => {
+    if (authed) loadTheme().catch(() => { /* keep the cached scheme */ });
+  }, [authed]);
 
   async function logout() {
     try {
@@ -235,6 +245,7 @@ export function App() {
           <Route path="/admin/session-states" element={<AdminSessionStates />} />
           <Route path="/admin/ai" element={<AdminAi />} />
           <Route path="/admin/devices" element={<AdminDevices />} />
+          <Route path="/admin/theme" element={<AdminTheme />} />
           <Route path="/admin/browser" element={<AdminBrowser />} />
           <Route path="/scenarios/:id/texts" element={<ScenarioTexts />} />
           <Route path="/ask" element={<Ask />} />

@@ -13,12 +13,25 @@ import { PLAYWRIGHT_DEVICES_SOURCE } from './playwrightDevicesSource.js';
 // scale on top. That is exactly the fidelity the built-ins have; neither
 // emulates touch or a coarse pointer (agent-browser 0.38.1 does not).
 
+export interface DeviceSize {
+  width: number;
+  height: number;
+}
+
 export interface DeviceProfile {
   name: string;
   /** The page's visible area in CSS px (Playwright's `viewport`: below the browser chrome). */
   width: number;
   height: number;
   scale: number;
+  /**
+   * The physical screen in CSS px (Playwright's `screen`). Older entries
+   * (iPhone X/8/SE, Pixel 2–4, …) carry none; then this is the viewport, and
+   * `screenFromViewport` says so — the admin page lets the operator fill in
+   * the real numbers.
+   */
+  screen: DeviceSize;
+  screenFromViewport: boolean;
   /** Phone or tablet (isMobile) rather than a desktop-class descriptor. */
   mobile: boolean;
   userAgent: string;
@@ -26,13 +39,6 @@ export interface DeviceProfile {
   family: 'ios' | 'android' | 'desktop';
   /** True when agent-browser itself knows the name (`set device` works directly). */
   builtin: boolean;
-  /**
-   * The descriptor has no separate `screen` size (Playwright's older entries:
-   * iPhone X/8/SE, Pixel 2–4, Galaxy S24, …), so its viewport is the whole
-   * screen — the real page area under the browser chrome is smaller. A fold
-   * line at this viewport sits too low; paste a corrected viewport to fix.
-   */
-  fullScreenViewport: boolean;
 }
 
 interface Descriptor {
@@ -80,16 +86,20 @@ export function parseDeviceSource(json: string): DeviceProfile[] {
     if (!(w > 0 && h > 0)) continue;
     const ua = typeof d.userAgent === 'string' ? d.userAgent : '';
     const scale = Number(d.deviceScaleFactor) > 0 ? Number(d.deviceScaleFactor) : 1;
+    const sw = Number(d?.screen?.width);
+    const sh = Number(d?.screen?.height);
+    const hasScreen = sw > 0 && sh > 0;
     out.push({
       name,
       width: Math.round(w),
       height: Math.round(h),
       scale,
+      screen: hasScreen ? { width: Math.round(sw), height: Math.round(sh) } : { width: Math.round(w), height: Math.round(h) },
+      screenFromViewport: !hasScreen,
       mobile: d.isMobile === true,
       userAgent: ua,
       family: familyOf(ua),
       builtin: BUILTIN.has(name),
-      fullScreenViewport: d.isMobile === true && !(Number(d?.screen?.width) > 0 && Number(d?.screen?.height) > 0),
     });
   }
   if (out.length === 0) throw new Error('no devices with a viewport found');
@@ -111,7 +121,40 @@ export function builtinProfile(name: string): DeviceProfile | undefined {
   const v: ViewportSize = DEVICE_PROFILES[name as DeviceName];
   const family: DeviceProfile['family'] = /iPhone|iPad/.test(name) ? 'ios' : 'android';
   // agent-browser's own profiles are screen sizes too.
-  return { name, width: v.width, height: v.height, scale: v.scale, mobile: true, userAgent: '', family, builtin: true, fullScreenViewport: true };
+  return {
+    name, width: v.width, height: v.height, scale: v.scale,
+    screen: { width: v.width, height: v.height }, screenFromViewport: true,
+    mobile: true, userAgent: '', family, builtin: true,
+  };
+}
+
+/**
+ * Write screen and viewport sizes into a device source: the entries are
+ * rewritten in Playwright's field order (userAgent, screen, viewport, …) and
+ * the whole list re-serialised with its 2-space indentation. Throws with a
+ * readable message for an unknown name or a source that does not parse.
+ */
+export function patchDeviceSizes(json: string, sizes: Record<string, { screen: DeviceSize; viewport: DeviceSize }>): string {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(json);
+  } catch (e: any) {
+    throw new Error(`the current source is not valid JSON: ${e?.message ?? e}`);
+  }
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('the current source is not a device map');
+  const map = raw as Record<string, Record<string, unknown>>;
+  for (const [name, s] of Object.entries(sizes)) {
+    const d = map[name];
+    if (!d || typeof d !== 'object') throw new Error(`unknown device "${name}"`);
+    const { userAgent, screen: _screen, viewport: _viewport, ...rest } = d;
+    map[name] = {
+      ...(userAgent !== undefined ? { userAgent } : {}),
+      screen: { width: s.screen.width, height: s.screen.height },
+      viewport: { width: s.viewport.width, height: s.viewport.height },
+      ...rest,
+    };
+  }
+  return JSON.stringify(map, null, 2) + '\n';
 }
 
 /** The viewport (CSS px + scale) a profile lays the page out in. */

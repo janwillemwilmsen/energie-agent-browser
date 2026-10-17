@@ -1,4 +1,4 @@
-import type { A11yTree, AuthProfile, DeviceProfile, Preflight, PreflightStep, Run, RunDay, Scenario, Schedule, ScenarioStep } from '@eab/shared';
+import type { A11yTree, AuthProfile, DeviceProfile, DeviceSize, Preflight, PreflightStep, Run, RunDay, Scenario, Schedule, ScenarioStep } from '@eab/shared';
 import { request as req, requestRaw } from './request.js';
 
 export { ApiError, errorMessage, onUnauthenticated } from './request.js';
@@ -634,10 +634,14 @@ export const api = {
       body: JSON.stringify({ username, password }),
     }),
   authLogout: () => req<{ ok: true }>('/api/auth/logout', { method: 'POST' }),
+  /** The UI colour scheme (admin Theme page): a scheme id, or null for the default. */
+  getTheme: () => req<{ theme: string | null }>('/api/admin/theme'),
+  updateTheme: (theme: string | null) =>
+    req<{ theme: string | null }>('/api/admin/theme', { method: 'PUT', body: JSON.stringify({ theme }) }),
   /** The device list (admin Devices page) and which names the screenshot dropdown offers. */
   getDevices: () => req<DeviceSettings>('/api/devices'),
   getDeviceSource: () => req<{ source: string }>('/api/devices/source'),
-  updateDevices: (body: { source?: string; enabled?: string[] }) =>
+  updateDevices: (body: { source?: string; sizes?: Record<string, { screen: DeviceSize; viewport: DeviceSize }>; enabled?: string[] }) =>
     req<DeviceSettings>('/api/devices', { method: 'PUT', body: JSON.stringify(body) }),
   agentAvailability: () =>
     req<{ available: boolean; busy: boolean }>('/api/agent-tasks/availability'),

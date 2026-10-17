@@ -69,8 +69,8 @@ export function Recordings() {
     <section>
       <h1>Recordings</h1>
       <p className="muted">
-        Videos of scenario runs. Enable <strong>🎥 Record this scenario</strong> in a scenario's
-        editor to capture a <code>.webm</code> on each run.
+        Videos of scenario runs. Enable <code>Start recording</code> and <code>Stop recording</code> in a scenario's
+        editor to capture a video of the run.
       </p>
 
       <details className="filter-panel" open={activeFilterCount > 0}>

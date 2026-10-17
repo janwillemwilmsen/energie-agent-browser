@@ -25,6 +25,7 @@ import { agentTasksRoutes } from './routes/agentTasks.js';
 import { adminEnvRoutes } from './routes/adminEnv.js';
 import { adminBrowserRoutes } from './routes/adminBrowser.js';
 import { devicesRoutes } from './routes/devices.js';
+import { themeRoutes } from './routes/theme.js';
 import { askRoutes } from './routes/ask.js';
 import { storageRoutes } from './routes/storage.js';
 import { screenshotsZipRoutes } from './routes/screenshotsZip.js';
@@ -103,6 +104,7 @@ export async function createApp(opts: CreateAppOptions = {}): Promise<FastifyIns
   await app.register(adminEnvRoutes);
   await app.register(adminBrowserRoutes);
   await app.register(devicesRoutes);
+  await app.register(themeRoutes);
   await app.register(askRoutes);
   await app.register(storageRoutes);
   await app.register(screenshotsZipRoutes);

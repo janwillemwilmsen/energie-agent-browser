@@ -4,6 +4,7 @@ import { parseScreenshotMetas, screenshotMetaFor } from '@eab/shared';
 import { api, type RunDay, type Scenario } from '../lib/api.js';
 import { useResource, usePolling } from '../lib/resource.js';
 import { ScreenshotViewer } from '../lib/ScreenshotViewer.js';
+import { ScreenshotCanvas } from '../lib/ScreenshotCanvas.js';
 import { matchesTags, NO_TAGS, TagFilter, tagsActive, tagValues, type TagSelection } from '../lib/TagFilter.js';
 
 // Per-scenario gallery: one section per scenario that has runs (after the
@@ -266,6 +267,8 @@ function ScenarioBlock({
   // shown run changes.
   const [viewing, setViewing] = useState<number | null>(null);
   useEffect(() => setViewing(null), [run?.id]);
+  // The canvas: this run's screenshots on a pan-and-zoom surface, with a run switcher.
+  const [canvas, setCanvas] = useState(false);
 
   const latestDay = data.populatedDays[0] ?? '';
 
@@ -287,6 +290,16 @@ function ScenarioBlock({
         >
           ◷ timeline
         </Link>
+        {run && (
+          <button
+            type="button"
+            className="ss-timeline-link"
+            onClick={() => setCanvas(true)}
+            title="Open this run's screenshots on a full-screen canvas: pan, zoom, switch runs"
+          >
+            ⊞ canvas
+          </button>
+        )}
 
         <div className="screenshots-day" style={{ marginLeft: 'auto' }}>
           <select
@@ -366,6 +379,14 @@ function ScenarioBlock({
               index={viewing}
               onIndex={setViewing}
               onClose={() => setViewing(null)}
+            />
+          )}
+          {canvas && (
+            <ScreenshotCanvas
+              scenarioId={data.scenario_id}
+              scenarioName={data.scenario_name}
+              initialRunId={run.id}
+              onClose={() => setCanvas(false)}
             />
           )}
         </>

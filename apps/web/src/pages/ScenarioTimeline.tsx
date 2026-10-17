@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { slotDisplayLabel, slotKey } from '@eab/shared';
+import { parseSlot, slotDisplayLabel, slotKey } from '@eab/shared';
 import { api, type Run, type Scenario } from '../lib/api.js';
+import { ScreenshotCanvas } from '../lib/ScreenshotCanvas.js';
 
 export function ScenarioTimeline() {
   const { id } = useParams();
@@ -9,6 +10,8 @@ export function ScenarioTimeline() {
   const [scenario, setScenario] = useState<Scenario | null>(null);
   const [runs, setRuns] = useState<Run[]>([]);
   const [err, setErr] = useState<string | null>(null);
+  // The run open on the canvas (pan-and-zoom view of its screenshots), if any.
+  const [canvasRun, setCanvasRun] = useState<number | null>(null);
 
   async function removeRun(runId: number) {
     if (!confirm(`Delete run #${runId} with its screenshots, texts and video recording?`)) return;
@@ -31,16 +34,18 @@ export function ScenarioTimeline() {
       .catch((e) => setErr(e.message));
   }, [scenarioId]);
 
-  // Build a row-per-screenshot-filename matrix so the same step from different
-  // runs lines up horizontally. Filenames are `NNN-YYYYMMDD-HHMMSS-label-viewport.png`
-  // (see runner.ts); stripping the position + timestamp leaves a stable key shared
-  // across runs (older un-stamped `NNN-label-viewport.png` files still match).
-  const matrix = useMemo(() => buildMatrix(runs), [runs]);
+  // Columns: the completed runs, newest on the left (the server lists them
+  // oldest first). Rows: one per slot key, in capture order (see buildMatrix).
+  const completedRuns = useMemo(
+    () => runs
+      .filter((r) => r.status === 'success' || r.status === 'failed')
+      .sort((a, b) => Date.parse(b.started_at) - Date.parse(a.started_at) || b.id - a.id),
+    [runs],
+  );
+  const matrix = useMemo(() => buildMatrix(completedRuns), [completedRuns]);
 
   if (err && !scenario) return <p className="error">{err}</p>;
   if (!scenario) return <p>Loading…</p>;
-
-  const completedRuns = runs.filter((r) => r.status === 'success' || r.status === 'failed');
 
   return (
     <section>
@@ -55,6 +60,18 @@ export function ScenarioTimeline() {
         {scenario.type && <span className="tag tag-type">{scenario.type}</span>}{' '}
         &mdash; {scenario.url}
       </p>
+      {completedRuns[0] && (
+        <p>
+          <button
+            type="button"
+            className="ss-timeline-link"
+            onClick={() => setCanvasRun(completedRuns[0]!.id)}
+            title="Open the latest run's screenshots on a full-screen canvas: pan, zoom, switch runs"
+          >
+            ⊞ canvas
+          </button>
+        </p>
+      )}
       {err && <p className="error">{err}</p>}
 
       {completedRuns.length === 0 ? (
@@ -73,6 +90,13 @@ export function ScenarioTimeline() {
                       <Link to={`/runs?run=${r.id}`} className="muted">
                         #{r.id}
                       </Link>{' '}
+                      <button
+                        className="step-del"
+                        title="Open this run on the canvas"
+                        onClick={() => setCanvasRun(r.id)}
+                      >
+                        ⊞
+                      </button>{' '}
                       <button
                         className="step-del"
                         title="Delete run"
@@ -120,6 +144,14 @@ export function ScenarioTimeline() {
           </table>
         </div>
       )}
+      {canvasRun != null && (
+        <ScreenshotCanvas
+          scenarioId={scenarioId}
+          scenarioName={scenario.name}
+          initialRunId={canvasRun}
+          onClose={() => setCanvasRun(null)}
+        />
+      )}
     </section>
   );
 }
@@ -129,6 +161,14 @@ interface Matrix {
   byRun: Record<number, Map<string, string>>;
 }
 
+/**
+ * A row per screenshot slot so the same step from different runs lines up
+ * horizontally. Rows follow capture order, oldest at the top: the filename
+ * stamp (`YYYYMMDD-HHMMSS-label-viewport.png`) within a run, older files by
+ * their `NNN-` position. `runs` arrive newest first, so the newest run sets
+ * the order and slots that only older runs still have are appended after,
+ * in their own order.
+ */
 function buildMatrix(runs: Run[]): Matrix {
   const byRun: Record<number, Map<string, string>> = {};
   const rowMap = new Map<string, string>();
@@ -141,7 +181,7 @@ function buildMatrix(runs: Run[]): Matrix {
       /* ignore */
     }
     const map = new Map<string, string>();
-    for (const filename of shots) {
+    for (const filename of [...shots].sort(compareCapture)) {
       // Screenshots with the same label + viewport share a row across runs,
       // whatever their position, stamp or format (the slot protocol's key).
       const key = slotKey(filename);
@@ -152,11 +192,21 @@ function buildMatrix(runs: Run[]): Matrix {
     byRun[r.id] = map;
   }
 
-  const rows = Array.from(rowMap.entries())
-    .map(([key, label]) => ({ key, label }))
-    .sort((a, b) => a.key.localeCompare(b.key));
-
+  const rows = Array.from(rowMap.entries()).map(([key, label]) => ({ key, label }));
   return { rows, byRun };
+}
+
+/** Capture order within one run: by stamp, then by the older files' position, then by name. */
+function compareCapture(a: string, b: string): number {
+  const pa = parseSlot(a);
+  const pb = parseSlot(b);
+  const sa = pa?.stamp ?? '';
+  const sb = pb?.stamp ?? '';
+  if (sa !== sb) return sa.localeCompare(sb);
+  const na = pa?.position ?? Number.MAX_SAFE_INTEGER;
+  const nb = pb?.position ?? Number.MAX_SAFE_INTEGER;
+  if (na !== nb) return na - nb;
+  return a.localeCompare(b);
 }
 
 function formatDate(iso: string): string {

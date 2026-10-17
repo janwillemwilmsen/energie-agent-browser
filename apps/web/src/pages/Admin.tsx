@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { AppWindow, ArrowRightLeft, Braces, Cookie, FileCog, HardDrive, KeyRound, Network, Smartphone, Sparkles, Terminal as TerminalIcon } from 'lucide-react';
+import { AppWindow, ArrowRightLeft, Braces, Cookie, FileCog, HardDrive, KeyRound, Network, Palette, Smartphone, Sparkles, Terminal as TerminalIcon } from 'lucide-react';
 
 // Admin landing page. Gathers lower-level / operational tools that don't belong
 // in the main navigation. The Terminal lives here now instead of the top menu.
@@ -85,6 +85,13 @@ export function Admin() {
           <span>
             <strong>AI scenario builder & AI Review</strong>
             <span className="muted"> — choose which model the ✨ AI task agent uses, and see AI budget remaining + configure settings for AI Review</span>
+          </span>
+        </Link>
+        <Link to="/admin/theme" className="admin-link">
+          <Palette size={18} aria-hidden />
+          <span>
+            <strong>Theme</strong>
+            <span className="muted"> — pick the app's colour scheme (applies to every browser)</span>
           </span>
         </Link>
       </div>

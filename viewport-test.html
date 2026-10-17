@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Viewport test page</title>
+<style>
+  /* A test target for screenshot steps: the page reports the sizes a browser
+     gives it, and a pixel ruler down the left edge makes the real viewport
+     and fold measurable in a capture. Everything is static markup plus a
+     synchronous script, so the numbers are in the first paint. */
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    color: #111; background: #fff;
+    min-height: 4000px; /* long enough to scroll and to show a fold on a full-page capture */
+    position: relative; overflow-x: hidden; /* the rulers never widen the page */
+  }
+  html.no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
+  html.no-scrollbar::-webkit-scrollbar { display: none; width: 0; height: 0; }
+
+  /* The left ruler: 10×10 px squares, a label every 100 px. */
+  #ruler { position: absolute; left: 0; top: 0; width: 10px; }
+  #ruler i { display: block; width: 10px; height: 10px; }
+  #ruler b {
+    position: absolute; left: 12px; font-weight: normal; font-size: 10px; line-height: 10px;
+    color: #333; white-space: nowrap; background: rgba(255,255,255,0.85); padding: 0 2px;
+  }
+  /* The top ruler: the same across the page width. */
+  #hruler { position: absolute; left: 0; top: 0; right: 0; height: 24px; display: flex; align-items: flex-start; overflow: hidden; pointer-events: none; }
+  #hruler i { display: block; width: 10px; height: 10px; flex: none; }
+  #hruler b {
+    position: absolute; top: 12px; font-weight: normal; font-size: 10px; line-height: 10px;
+    color: #333; white-space: nowrap; transform: translateX(-50%);
+  }
+
+  main { padding: 28px 16px 16px 60px; max-width: 720px; }
+  h1 { font-size: 16px; margin: 0 0 8px; }
+  table { border-collapse: collapse; margin: 6px 0 12px; }
+  td { padding: 1px 10px 1px 0; vertical-align: top; }
+  td:first-child { color: #555; }
+  td:last-child { font-weight: 600; }
+  .big { font-size: 22px; font-weight: 700; margin: 4px 0 10px; }
+  .big small { font-size: 12px; font-weight: 400; color: #555; }
+  .controls { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0 14px; }
+  button {
+    font: inherit; padding: 6px 10px; border: 1px solid #999; border-radius: 4px; background: #f4f4f4; cursor: pointer;
+  }
+  button[aria-pressed="true"] { background: #111; color: #fff; border-color: #111; }
+  .ua { word-break: break-all; color: #555; font-size: 11px; }
+  p.note { color: #555; font-size: 12px; max-width: 600px; }
+
+  /* The fold: where the first paint ended, at innerHeight on load. */
+  #fold { position: absolute; left: 0; right: 0; height: 0; border-top: 2px dashed #e11; pointer-events: none; }
+  #fold span {
+    position: absolute; right: 8px; bottom: 2px; background: #e11; color: #fff; font-size: 11px; line-height: 16px; padding: 0 6px;
+  }
+  /* Bands every 500 px so a long capture reads at a glance. */
+  .band { position: absolute; left: 0; right: 0; height: 500px; pointer-events: none; }
+  .band span { position: absolute; right: 8px; top: 4px; font-size: 48px; font-weight: 700; color: rgba(0,0,0,0.08); }
+</style>
+</head>
+<body>
+  <div id="ruler" aria-hidden="true"></div>
+  <div id="hruler" aria-hidden="true"></div>
+  <div id="bands" aria-hidden="true"></div>
+  <div id="fold" aria-hidden="true"><span></span></div>
+
+  <main>
+    <h1>Viewport test page</h1>
+    <div class="big" id="headline">…</div>
+
+    <table id="info"></table>
+
+    <div class="controls">
+      <button type="button" id="toggle-scrollbar" aria-pressed="false">hide scrollbars</button>
+      <button type="button" id="refresh">refresh values</button>
+      <button type="button" id="longer">page +2000 px</button>
+    </div>
+
+    <p class="note">
+      Left ruler: 10×10 px squares, ten colours per 100 px, labelled every 100 px — count them in a
+      capture to measure the real viewport. Top ruler: the same across the width. Red dashed line:
+      where the first paint ended (<code>innerHeight</code> at load; the values above are from
+      first paint and update on resize). Compare with the device's entry on the admin Devices page:
+      <strong>viewport</strong> should match <code>innerWidth × innerHeight</code>,
+      <strong>screen</strong> should match <code>screen.width × screen.height</code>.
+    </p>
+    <p class="ua" id="ua"></p>
+  </main>
+
+  <script>
+    // Synchronous on purpose: everything is in place before the first paint.
+    (function () {
+      var COLORS = ['#e6194b', '#f58231', '#ffe119', '#bfef45', '#3cb44b', '#42d4f4', '#4363d8', '#911eb4', '#f032e6', '#a9a9a9'];
+      var PAGE_STEP = 2000;
+
+      function px(n) { return Math.round(n * 100) / 100; }
+
+      function buildRulers() {
+        var h = Math.max(document.documentElement.scrollHeight, parseInt(getComputedStyle(document.body).minHeight, 10) || 0);
+        var w = document.documentElement.clientWidth;
+        var ruler = document.getElementById('ruler');
+        var html = '';
+        for (var y = 0; y < h; y += 10) {
+          var k = (y / 10) % 10;
+          html += '<i style="background:' + COLORS[k] + (k === 0 ? ';outline:1px solid #000;outline-offset:-1px' : '') + '"></i>';
+          if (y % 100 === 0) html += '<b style="top:' + y + 'px">' + y + '</b>';
+        }
+        ruler.innerHTML = html;
+        var hr = document.getElementById('hruler');
+        html = '';
+        for (var x = 0; x < w; x += 10) {
+          var kx = (x / 10) % 10;
+          html += '<i style="background:' + COLORS[kx] + (kx === 0 ? ';outline:1px solid #000;outline-offset:-1px' : '') + '"></i>';
+          if (x % 100 === 0 && x > 0) html += '<b style="left:' + x + 'px">' + x + '</b>';
+        }
+        hr.innerHTML = html;
+        var bands = document.getElementById('bands');
+        html = '';
+        for (var b = 500; b < h; b += 500) html += '<div class="band" style="top:' + b + 'px;border-top:1px solid #ddd"><span>' + b + '</span></div>';
+        bands.innerHTML = html;
+      }
+
+      var firstPaint = null;
+      function readValues() {
+        var vv = window.visualViewport;
+        var mq = function (q) { return window.matchMedia(q).matches; };
+        return {
+          'innerWidth × innerHeight': window.innerWidth + ' × ' + window.innerHeight,
+          'documentElement.clientWidth × clientHeight': document.documentElement.clientWidth + ' × ' + document.documentElement.clientHeight,
+          'visualViewport width × height': vv ? px(vv.width) + ' × ' + px(vv.height) + (vv.scale !== 1 ? ' (scale ' + px(vv.scale) + ')' : '') : 'n/a',
+          'outerWidth × outerHeight': window.outerWidth + ' × ' + window.outerHeight,
+          'screen.width × screen.height': screen.width + ' × ' + screen.height,
+          'screen.availWidth × availHeight': screen.availWidth + ' × ' + screen.availHeight,
+          'devicePixelRatio': px(window.devicePixelRatio),
+          'rendered pixels (inner × dpr)': Math.round(window.innerWidth * devicePixelRatio) + ' × ' + Math.round(window.innerHeight * devicePixelRatio),
+          'orientation': (screen.orientation && screen.orientation.type) || (mq('(orientation: landscape)') ? 'landscape' : 'portrait'),
+          'pointer / hover': (mq('(pointer: coarse)') ? 'coarse' : mq('(pointer: fine)') ? 'fine' : 'none') + ' / ' + (mq('(hover: hover)') ? 'hover' : 'no hover'),
+          'maxTouchPoints': navigator.maxTouchPoints,
+          'prefers-color-scheme': mq('(prefers-color-scheme: dark)') ? 'dark' : 'light',
+          'scrollbar width (inner − client)': (window.innerWidth - document.documentElement.clientWidth) + ' px',
+          'page height (scrollHeight)': document.documentElement.scrollHeight + ' px',
+        };
+      }
+
+      function render() {
+        var v = readValues();
+        if (!firstPaint) firstPaint = { w: window.innerWidth, h: window.innerHeight };
+        document.getElementById('headline').innerHTML =
+          'viewport ' + window.innerWidth + ' × ' + window.innerHeight +
+          ' <small>· screen ' + screen.width + ' × ' + screen.height + ' · @' + px(devicePixelRatio) + '×</small>' +
+          (firstPaint.w !== window.innerWidth || firstPaint.h !== window.innerHeight
+            ? '<br><small>first paint was ' + firstPaint.w + ' × ' + firstPaint.h + '</small>' : '');
+        var rows = '';
+        for (var k in v) rows += '<tr><td>' + k + '</td><td>' + v[k] + '</td></tr>';
+        document.getElementById('info').innerHTML = rows;
+        document.getElementById('ua').textContent = navigator.userAgent;
+        var fold = document.getElementById('fold');
+        fold.style.top = firstPaint.h + 'px';
+        fold.firstElementChild.textContent = 'first-paint fold · innerHeight ' + firstPaint.h + ' px';
+      }
+
+      buildRulers();
+      render();
+
+      window.addEventListener('resize', function () { buildRulers(); render(); });
+      if (window.visualViewport) window.visualViewport.addEventListener('resize', render);
+      document.getElementById('refresh').addEventListener('click', function () { firstPaint = null; render(); });
+      document.getElementById('toggle-scrollbar').addEventListener('click', function () {
+        var on = document.documentElement.classList.toggle('no-scrollbar');
+        this.setAttribute('aria-pressed', on ? 'true' : 'false');
+        this.textContent = on ? 'show scrollbars' : 'hide scrollbars';
+        render();
+      });
+      document.getElementById('longer').addEventListener('click', function () {
+        var cur = parseInt(getComputedStyle(document.body).minHeight, 10) || 0;
+        document.body.style.minHeight = (cur + PAGE_STEP) + 'px';
+        buildRulers();
+        render();
+      });
+    })();
+  </script>
+</body>
+</html>

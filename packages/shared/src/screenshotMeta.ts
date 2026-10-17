@@ -23,8 +23,6 @@ export interface ScreenshotMeta {
   height: number | null;
   /** True when inferred from the filename instead of recorded at capture. */
   inferred?: boolean;
-  /** The device descriptor had no separate screen size: its viewport is the whole screen (see DeviceProfile). */
-  viewportIsScreen?: boolean;
 }
 
 const ZOOM_RE = /-zoom(\d{3})$/;
@@ -50,7 +48,6 @@ export function inferScreenshotMeta(name: string): ScreenshotMeta {
     width: null,
     height: null,
     inferred: true,
-    viewportIsScreen: mobile,
   };
 }
 

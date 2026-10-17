@@ -47,8 +47,8 @@ export async function scenariosRoutes(app: FastifyInstance) {
     return { ...row, steps };
   });
 
-  // Timeline data: every run for a single scenario, oldest first so the UI can
-  // render left-to-right without flipping. Screenshots stay as filenames; the
+  // Timeline data: every run for a single scenario, oldest first (the timeline
+  // page orders them itself). Screenshots stay as filenames; the
   // existing /api/runs/:id/screenshots/:name endpoint serves the PNG bytes.
   app.get<{ Params: { id: string } }>('/api/scenarios/:id/runs', async (req, reply) => {
     const scenarioId = Number(req.params.id);

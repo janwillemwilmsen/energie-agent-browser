@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { defaultDevices, inferScreenshotMeta, parseDeviceSource, parseScreenshotMetas, screenshotMetaFor } from '@eab/shared';
+import { PLAYWRIGHT_DEVICES_SOURCE, defaultDevices, inferScreenshotMeta, parseDeviceSource, parseScreenshotMetas, patchDeviceSizes, screenshotMetaFor } from '@eab/shared';
 
 describe('device list', () => {
   it('parses the vendored Playwright descriptors, marking agent-browser built-ins and the UA family', () => {
@@ -7,8 +7,19 @@ describe('device list', () => {
     expect(all.length).toBeGreaterThan(150);
     const fold = all.find((d) => d.name === 'Galaxy Z Fold 6 Cover')!;
     expect(fold).toMatchObject({ width: 484, height: 1112, scale: 2, mobile: true, family: 'android', builtin: false });
-    expect(all.find((d) => d.name === 'iPhone 14')).toMatchObject({ family: 'ios', builtin: true, width: 390, height: 664 });
+    // A modern entry carries a screen; an older one repeats its viewport as the screen.
+    expect(all.find((d) => d.name === 'iPhone 14')).toMatchObject({ family: 'ios', builtin: true, width: 390, height: 664, screen: { width: 390, height: 844 }, screenFromViewport: false });
+    expect(all.find((d) => d.name === 'iPhone X')).toMatchObject({ width: 375, height: 812, screen: { width: 375, height: 812 }, screenFromViewport: true });
     expect(all.find((d) => d.name === 'Desktop Chrome')).toMatchObject({ family: 'desktop', mobile: false });
+  });
+
+  it('writes edited sizes into the source in Playwright field order', () => {
+    const json = patchDeviceSizes(PLAYWRIGHT_DEVICES_SOURCE, { 'iPhone X': { screen: { width: 375, height: 812 }, viewport: { width: 375, height: 635 } } });
+    const x = parseDeviceSource(json).find((d) => d.name === 'iPhone X')!;
+    expect(x).toMatchObject({ width: 375, height: 635, screen: { width: 375, height: 812 }, screenFromViewport: false, scale: 3 });
+    expect(Object.keys(JSON.parse(json)['iPhone X'])).toEqual(['userAgent', 'screen', 'viewport', 'deviceScaleFactor', 'isMobile', 'hasTouch', 'defaultBrowserType']);
+    expect(json).toMatch(/^\{\n  "Blackberry PlayBook": \{\n    "userAgent"/);
+    expect(() => patchDeviceSizes(PLAYWRIGHT_DEVICES_SOURCE, { 'Nokia 3310': { screen: { width: 1, height: 1 }, viewport: { width: 1, height: 1 } } })).toThrow(/unknown device "Nokia 3310"/);
   });
 
   it('rejects a source that is not a device map', () => {

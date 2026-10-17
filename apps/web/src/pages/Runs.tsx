@@ -265,6 +265,7 @@ export function Runs() {
           }}
         />
       </div>
+      <p className="muted" style={{ marginTop: 0 }}>Click on the status of a run to view details.</p>
       {err && <p className="error">{err}</p>}
 
       {scenarioParam && (
