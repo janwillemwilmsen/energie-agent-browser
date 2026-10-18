@@ -601,7 +601,7 @@ export function AdminStorage() {
           {auth.profiles.length === 0 ? (
             <p className="muted">No saved auth profiles.</p>
           ) : (
-            <table className="table storage-table-compact">
+            <table className="table storage-table-compact storage-table-wide">
               <thead>
                 <tr>
                   <th>Profile</th>
@@ -637,7 +637,7 @@ export function AdminStorage() {
           {auth.sessionStates.length === 0 ? (
             <p className="muted">No saved session state files.</p>
           ) : (
-            <table className="table storage-table-compact">
+            <table className="table storage-table-compact storage-table-wide">
               <thead>
                 <tr>
                   <th>Session</th>
