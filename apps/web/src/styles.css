@@ -1813,8 +1813,17 @@ button.ss-timeline-link { background: transparent; cursor: pointer; font: inheri
 .projects-table { border-collapse: collapse; width: 100%; max-width: 1100px; margin: 12px 0 20px; font-size: 13px; }
 .projects-table th { text-align: left; font-weight: 500; font-size: 12px; color: var(--muted); padding: 4px 10px 6px 0; }
 .projects-table td { padding: 8px 10px 8px 0; border-top: 1px solid var(--border); vertical-align: top; }
+/* The Project column holds the expandable scenario list; a fixed share keeps
+   the count columns still when one opens. */
+.projects-table th:nth-child(2), .projects-table td:nth-child(2) { width: 56%; }
 .projects-row-active td { background: rgba(255,255,255,0.03); }
-.projects-names { font-size: 12px; margin-top: 2px; max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.projects-names { font-size: 12px; margin-top: 2px; }
+.projects-names summary { cursor: pointer; list-style: revert; }
+.projects-names ul { margin: 4px 0 0; padding: 0 0 0 16px; columns: 2; column-gap: 24px; max-width: 640px; }
+.projects-names li { break-inside: avoid; padding: 1px 0; display: flex; align-items: center; gap: 6px; }
+.projects-names li a { color: var(--text); text-decoration: none; }
+.projects-names li a:hover { color: var(--accent); }
+.projects-names .tag { font-size: 10px; }
 .projects-actions { white-space: nowrap; }
 .projects-actions .chip { font-size: 12px; padding: 2px 8px; margin-right: 4px; }
 .projects-card { max-width: 860px; margin: 12px 0; }

@@ -228,9 +228,18 @@ function ProjectRow({
             {p.id === 1 && <span className="muted"> · default</span>}
             {active && <span className="muted"> · active</span>}
             {scenarios.length > 0 && (
-              <div className="muted projects-names" title={scenarios.map((s) => s.name).join('\n')}>
-                {scenarios.slice(0, 4).map((s) => s.name).join(' · ')}{scenarios.length > 4 ? ` · +${scenarios.length - 4}` : ''}
-              </div>
+              <details className="projects-names">
+                <summary className="muted">{scenarios.length} scenario{scenarios.length === 1 ? '' : 's'}</summary>
+                <ul>
+                  {[...scenarios].sort((a, b) => a.name.localeCompare(b.name)).map((s) => (
+                    <li key={s.id}>
+                      <Link to={`/scenarios/${s.id}`}>{s.name}</Link>
+                      {s.brand && <span className="tag tag-brand">{s.brand}</span>}
+                      {s.type && <span className="tag tag-type">{s.type}</span>}
+                    </li>
+                  ))}
+                </ul>
+              </details>
             )}
           </>
         )}
