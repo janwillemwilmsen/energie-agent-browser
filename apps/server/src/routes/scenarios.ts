@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { ScenarioCreate, ScenarioUpdate, ViewportPreset, safeParseScenarioStepPayload } from '@eab/shared';
 import { getDb } from '../db/index.js';
 import { runStore } from '../runs/index.js';
+import { resolveProjectId, scopeSql, syncScheduleProjects, getProject } from '../projects.js';
 
 function normalizeTag(value: unknown): string | null {
   if (value == null) return null;
@@ -11,19 +12,21 @@ function normalizeTag(value: unknown): string | null {
 }
 
 export async function scenariosRoutes(app: FastifyInstance) {
-  app.get('/api/scenarios', async () => {
-    const db = getDb();
-    return db.prepare('SELECT * FROM scenarios ORDER BY updated_at DESC').all();
+  // Lists follow the request's project scope (X-Project-Id; none = all).
+  app.get('/api/scenarios', async (req) => {
+    const { cond, params } = scopeSql(req, 'project_id');
+    return getDb().prepare(`SELECT * FROM scenarios WHERE ${cond} ORDER BY updated_at DESC`).all(...params);
   });
 
   // Homepage data: one row per scenario with the latest run's last screenshot.
   // The last screenshot in a run reflects the *final* state captured, which is
   // what the user wants as the card thumbnail.
-  app.get('/api/scenarios/cards', async () => {
+  app.get('/api/scenarios/cards', async (req) => {
     const db = getDb();
+    const { cond, params } = scopeSql(req, 'project_id');
     const scenarios = db
-      .prepare('SELECT * FROM scenarios ORDER BY updated_at DESC')
-      .all() as Array<{ id: number }>;
+      .prepare(`SELECT * FROM scenarios WHERE ${cond} ORDER BY updated_at DESC`)
+      .all(...params) as Array<{ id: number }>;
 
     return scenarios.map((s) => {
       const run = runStore().latestFinishedForScenario(s.id);
@@ -60,16 +63,19 @@ export async function scenariosRoutes(app: FastifyInstance) {
 
   app.post('/api/scenarios', async (req, reply) => {
     const body = ScenarioCreate.parse(req.body);
+    const projectId = resolveProjectId(req, body.project_id);
+    if (projectId == null) return reply.code(400).send({ error: 'unknown_project', project_id: body.project_id ?? req.projectId });
     const db = getDb();
     const info = db
       .prepare(
-        `INSERT INTO scenarios (name, url, viewport_preset, brand, type, preflight_id)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO scenarios (name, url, viewport_preset, project_id, brand, type, preflight_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         body.name,
         body.url,
         body.viewport_preset ?? 'desktop',
+        projectId,
         normalizeTag(body.brand),
         normalizeTag(body.type),
         body.preflight_id ?? null,
@@ -95,16 +101,17 @@ export async function scenariosRoutes(app: FastifyInstance) {
     const copy = db.transaction(() => {
       const info = db
         .prepare(
-          `INSERT INTO scenarios (name, url, viewport_preset, brand, type,
+          `INSERT INTO scenarios (name, url, viewport_preset, project_id, brand, type,
              retries, retry_wait_before_ms, retry_wait_after_ms, restart_on_failure,
              preflight_id, preflight_mode, record_enabled,
              step_scroll_into_view, step_settle_ms, notes, auto_diff)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           body.name ?? `${src.name} (copy)`,
           src.url,
           body.viewport_preset ?? src.viewport_preset,
+          src.project_id,
           src.brand,
           src.type,
           src.retries,
@@ -135,12 +142,17 @@ export async function scenariosRoutes(app: FastifyInstance) {
     if (!existing) return reply.code(404).send({ error: 'not_found' });
 
     const next = { ...(existing as any), ...body };
+    // A project change is a move: the scenario's runs etc. follow by
+    // construction; its schedules follow when their whole chain is here.
+    if (body.project_id != null && !getProject(body.project_id)) {
+      return reply.code(400).send({ error: 'unknown_project', project_id: body.project_id });
+    }
     const preflightId =
       next.preflight_id == null ? null : Number(next.preflight_id);
     const preflightMode = next.preflight_mode === 'cookies' ? 'cookies' : 'steps';
     db.prepare(
       `UPDATE scenarios
-       SET name = ?, url = ?, viewport_preset = ?, brand = ?, type = ?,
+       SET name = ?, url = ?, viewport_preset = ?, project_id = ?, brand = ?, type = ?,
            retries = ?, retry_wait_before_ms = ?, retry_wait_after_ms = ?, restart_on_failure = ?,
            preflight_id = ?, preflight_mode = ?, record_enabled = ?,
            step_scroll_into_view = ?, step_settle_ms = ?, notes = ?, auto_diff = ?,
@@ -150,6 +162,7 @@ export async function scenariosRoutes(app: FastifyInstance) {
       next.name,
       next.url,
       next.viewport_preset,
+      next.project_id,
       normalizeTag(next.brand),
       normalizeTag(next.type),
       Math.max(0, Number(next.retries ?? 0)),
@@ -165,6 +178,9 @@ export async function scenariosRoutes(app: FastifyInstance) {
       next.auto_diff ? 1 : 0,
       Number(req.params.id),
     );
+    if (body.project_id != null && body.project_id !== (existing as { project_id: number }).project_id) {
+      syncScheduleProjects([Number(req.params.id)]);
+    }
 
     return db.prepare('SELECT * FROM scenarios WHERE id = ?').get(Number(req.params.id));
   });

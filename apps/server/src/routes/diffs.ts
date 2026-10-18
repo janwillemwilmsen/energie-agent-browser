@@ -7,6 +7,7 @@ import { getDb } from '../db/index.js';
 import { slotKey, slotViewport } from '@eab/shared';
 import { diffImageFiles, readImageSize } from '../diff/pixelDiff.js';
 import { runStore } from '../runs/index.js';
+import { scopeSql } from '../projects.js';
 
 interface ArtifactRow {
   id: number;
@@ -224,14 +225,23 @@ export async function diffsRoutes(app: FastifyInstance) {
     return reply.send(fs.createReadStream(abs));
   });
 
+  // The list follows the request's project scope through the comparison's
+  // (soft) scenario reference; a comparison whose scenario is gone shows
+  // only without a scope.
   app.get<{ Querystring: { scenario_id?: string } }>('/api/comparisons', async (req) => {
     const db = getDb();
     const sid = req.query.scenario_id ? Number(req.query.scenario_id) : null;
-    const rows = (
-      sid != null
-        ? db.prepare('SELECT * FROM comparisons WHERE scenario_id = ? ORDER BY id DESC LIMIT 200').all(sid)
-        : db.prepare('SELECT * FROM comparisons ORDER BY id DESC LIMIT 200').all()
-    ) as ComparisonRow[];
+    const scope = scopeSql(req, 'scenarios.project_id');
+    const conds = [scope.cond];
+    const params: unknown[] = [...scope.params];
+    if (sid != null) { conds.push('comparisons.scenario_id = ?'); params.push(sid); }
+    const rows = db
+      .prepare(
+        `SELECT comparisons.* FROM comparisons
+         LEFT JOIN scenarios ON scenarios.id = comparisons.scenario_id
+         WHERE ${conds.join(' AND ')} ORDER BY comparisons.id DESC LIMIT 200`,
+      )
+      .all(...params) as ComparisonRow[];
     return rows.map(enrichComparison);
   });
 

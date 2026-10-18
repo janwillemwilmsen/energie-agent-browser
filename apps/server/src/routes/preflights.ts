@@ -6,6 +6,7 @@ import { boundSessionName, openSession, persistSessionState, DEFAULT_SESSION } f
 import { cliBrowser } from '../agentBrowser/cliBrowser.js';
 import { getAuthSelectors } from '../authSelectors.js';
 import { applyViewport, executeStep, executeSteps, type StepContext } from '../scenarios/stepExecutor.js';
+import { getProject } from '../projects.js';
 
 // The recorder and Replay both drive the shared recorder session through the
 // Step executor, so a preflight step behaves exactly as it will inside a
@@ -25,18 +26,21 @@ export async function preflightsRoutes(app: FastifyInstance) {
   // --- CRUD ----------------------------------------------------------------
   // The list carries each preflight's usage: how many scenarios have it
   // attached, and their names (for the overview's tooltip).
-  app.get('/api/preflights', async () => {
+  // Within a project scope (X-Project-Id) the list holds the project's own
+  // preflights and the shared ones (project_id NULL); no scope = all.
+  app.get('/api/preflights', async (req) => {
     const db = getDb();
+    const scoped = req.projectId != null;
     const rows = db
       .prepare(
-        `SELECT id, name, description, steps_json,
+        `SELECT id, name, project_id, description, steps_json,
                 retries, retry_wait_before_ms, retry_wait_after_ms, restart_on_failure,
                 created_at, updated_at, deleted_at
          FROM preflights
-         WHERE deleted_at IS NULL
+         WHERE deleted_at IS NULL ${scoped ? 'AND (project_id IS NULL OR project_id = ?)' : ''}
          ORDER BY updated_at DESC`,
       )
-      .all() as Array<Record<string, unknown> & { id: number }>;
+      .all(...(scoped ? [req.projectId] : [])) as Array<Record<string, unknown> & { id: number }>;
     const using = db
       .prepare('SELECT id, name, preflight_id FROM scenarios WHERE preflight_id IS NOT NULL ORDER BY name COLLATE NOCASE')
       .all() as { id: number; name: string; preflight_id: number }[];
@@ -64,16 +68,22 @@ export async function preflightsRoutes(app: FastifyInstance) {
     if (activeByName(body.name)) {
       return reply.code(409).send({ error: 'name_taken', name: body.name });
     }
+    // Shared (NULL) unless a project is named; the request's scope is NOT
+    // assumed, because a preflight usually serves every brand.
+    if (body.project_id != null && !getProject(body.project_id)) {
+      return reply.code(400).send({ error: 'unknown_project', project_id: body.project_id });
+    }
     const db = getDb();
     const info = db
       .prepare(
         `INSERT INTO preflights
-           (name, description, steps_json,
+           (name, project_id, description, steps_json,
             retries, retry_wait_before_ms, retry_wait_after_ms, restart_on_failure)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         body.name,
+        body.project_id ?? null,
         body.description ?? '',
         JSON.stringify(body.steps ?? []),
         Math.max(0, body.retries ?? 0),
@@ -106,6 +116,7 @@ export async function preflightsRoutes(app: FastifyInstance) {
       | {
           id: number;
           name: string;
+          project_id: number | null;
           description: string;
           steps_json: string;
           retries: number;
@@ -115,6 +126,9 @@ export async function preflightsRoutes(app: FastifyInstance) {
         }
       | undefined;
     if (!existing) return reply.code(404).send({ error: 'not_found' });
+    if (body.project_id != null && !getProject(body.project_id)) {
+      return reply.code(400).send({ error: 'unknown_project', project_id: body.project_id });
+    }
 
     if (body.name && body.name !== existing.name) {
       const clash = activeByName(body.name);
@@ -128,12 +142,13 @@ export async function preflightsRoutes(app: FastifyInstance) {
       v == null ? fallback : Math.max(0, v);
     db.prepare(
       `UPDATE preflights
-       SET name = ?, description = ?, steps_json = ?,
+       SET name = ?, project_id = ?, description = ?, steps_json = ?,
            retries = ?, retry_wait_before_ms = ?, retry_wait_after_ms = ?, restart_on_failure = ?,
            updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
     ).run(
       nextName,
+      body.project_id === undefined ? existing.project_id : body.project_id,
       body.description ?? existing.description,
       body.steps ? JSON.stringify(body.steps) : existing.steps_json,
       clampOr(body.retries, existing.retries),

@@ -77,6 +77,73 @@ describe('the app over an in-memory database', () => {
     expect(bad.json()).toMatchObject({ error: 'validation_error', message: expect.stringMatching(/invalid navigate step at url/) });
   });
 
+  // Projects: the X-Project-Id header scopes lists and is the default owner
+  // of what a request creates; without it everything shows.
+  it('scopes scenarios, runs and schedules to the X-Project-Id project', async () => {
+    const created = await app.inject({ method: 'POST', url: '/api/projects', payload: { name: 'Essent', color: '#ff0066' } });
+    expect(created.statusCode).toBe(201);
+    const essent = created.json().id as number;
+    expect(essent).toBeGreaterThan(1);
+
+    // Created under the header → lands in that project.
+    const s = await app.inject({
+      method: 'POST', url: '/api/scenarios', headers: { 'x-project-id': String(essent) },
+      payload: { name: 'Essent home', url: 'https://essent.test/', viewport_preset: 'desktop' },
+    });
+    expect(s.statusCode).toBe(201);
+    expect(s.json().project_id).toBe(essent);
+
+    const names = async (headers?: Record<string, string>) =>
+      (await app.inject({ method: 'GET', url: '/api/scenarios', headers })).json().map((x: { name: string }) => x.name).sort();
+    expect(await names({ 'x-project-id': String(essent) })).toEqual(['Essent home']);
+    expect(await names({ 'x-project-id': '1' })).toEqual(['S2', 'Shop']);
+    expect(await names()).toEqual(['Essent home', 'S2', 'Shop']);
+    expect(await names({ 'x-project-id': 'all' })).toEqual(['Essent home', 'S2', 'Shop']);
+
+    // Lists rooted in scenarios follow: runs (none yet, but the filter parses), cards.
+    const cards = await app.inject({ method: 'GET', url: '/api/scenarios/cards', headers: { 'x-project-id': String(essent) } });
+    expect(cards.json()).toHaveLength(1);
+    const runs = await app.inject({ method: 'GET', url: '/api/runs', headers: { 'x-project-id': String(essent) } });
+    expect(runs.json()).toEqual([]);
+    const count = await app.inject({ method: 'GET', url: '/api/runs/count', headers: { 'x-project-id': String(essent) } });
+    expect(count.json()).toEqual({ total: 0 });
+
+    // A schedule may not chain scenarios of two projects; one project's chain takes that project.
+    const shop = (await app.inject({ method: 'GET', url: '/api/scenarios', headers: { 'x-project-id': '1' } })).json()[0].id;
+    const mixed = await app.inject({ method: 'POST', url: '/api/schedules', payload: { scenario_ids: [shop, s.json().id], cron_expr: '0 3 * * *' } });
+    expect(mixed.statusCode).toBe(400);
+    expect(mixed.json()).toMatchObject({ error: 'mixed_projects' });
+    const ok = await app.inject({ method: 'POST', url: '/api/schedules', payload: { scenario_ids: [s.json().id], cron_expr: '0 3 * * *' } });
+    expect(ok.statusCode).toBe(201);
+    expect(ok.json().project_id).toBe(essent);
+    const schedules = async (project: string) =>
+      (await app.inject({ method: 'GET', url: '/api/schedules', headers: { 'x-project-id': project } })).json();
+    expect(await schedules(String(essent))).toHaveLength(1);
+    expect(await schedules('1')).toHaveLength(0);
+
+    // A non-empty project cannot go; the Default project never goes.
+    const del = await app.inject({ method: 'DELETE', url: `/api/projects/${essent}` });
+    expect(del.statusCode).toBe(409);
+    expect(del.json()).toMatchObject({ error: 'not_empty', scenarios: 1, schedules: 1 });
+    expect((await app.inject({ method: 'DELETE', url: '/api/projects/1' })).statusCode).toBe(409);
+
+    // Bulk move by brand: the scenario and its single-member schedule move together.
+    await app.inject({ method: 'PUT', url: `/api/scenarios/${s.json().id}`, payload: { brand: 'Essent' } });
+    const moved = await app.inject({ method: 'POST', url: '/api/projects/1/move-scenarios', payload: { brand: 'essent' } });
+    expect(moved.statusCode).toBe(200);
+    expect(moved.json()).toMatchObject({ moved: 1 });
+    expect(await names({ 'x-project-id': String(essent) })).toEqual([]);
+    expect(await schedules('1')).toHaveLength(1);
+    // Now empty, it can go; its listing shows what each project holds.
+    expect((await app.inject({ method: 'DELETE', url: `/api/projects/${essent}` })).statusCode).toBe(204);
+    const list = await app.inject({ method: 'GET', url: '/api/projects' });
+    expect(list.json()).toMatchObject([{ id: 1, name: 'Default', scenario_count: 3, schedule_count: 1 }]);
+    // An unknown project on create is a 400, not a silent fallback.
+    const bad = await app.inject({ method: 'POST', url: '/api/scenarios', headers: { 'x-project-id': '999' }, payload: { name: 'X', url: 'https://x.test/', viewport_preset: 'desktop' } });
+    expect(bad.statusCode).toBe(400);
+    expect(bad.json()).toMatchObject({ error: 'unknown_project' });
+  });
+
   it('gates the API behind the login when auth is enabled', async () => {
     install({ APP_AUTH_ENABLED: 'true' });
     try {

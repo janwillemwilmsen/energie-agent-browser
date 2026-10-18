@@ -3,6 +3,7 @@ import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { config } from '../config.js';
 import { getDb } from '../db/index.js';
+import { scopeSql } from '../projects.js';
 
 interface RecordingRow {
   id: number;
@@ -31,14 +32,17 @@ export async function recordingsRoutes(app: FastifyInstance) {
         )
         .all(runId);
     }
+    // The list follows the request's project scope (X-Project-Id; none = all).
+    const { cond, params } = scopeSql(req);
     return db
       .prepare(
         `SELECT recordings.*, scenarios.name AS scenario_name, scenarios.brand, scenarios.type
          FROM recordings
          LEFT JOIN scenarios ON scenarios.id = recordings.scenario_id
+         WHERE ${cond}
          ORDER BY recordings.id DESC LIMIT 200`,
       )
-      .all();
+      .all(...params);
   });
 
   // Run ids that have at least one clip, with the count: the Runs list marks

@@ -31,6 +31,8 @@ import { storageRoutes } from './routes/storage.js';
 import { screenshotsZipRoutes } from './routes/screenshotsZip.js';
 import { terminalWsRoute } from './ws/terminal.js';
 import { screencastWsRoute } from './ws/screencast.js';
+import { projectsRoutes } from './routes/projects.js';
+import { projectScope } from './projects.js';
 
 // The composition root for the HTTP app: error handling, the login gate,
 // every route, and the static SPA. It starts nothing — no timers, no
@@ -85,9 +87,13 @@ export async function createApp(opts: CreateAppOptions = {}): Promise<FastifyIns
     }
   });
 
+  // The project scope of a request (X-Project-Id), read by every list endpoint.
+  projectScope(app);
+
   app.get('/health', async () => ({ ok: true, ts: new Date().toISOString() }));
 
   await app.register(authRoutes);
+  await app.register(projectsRoutes);
   await app.register(scenariosRoutes);
   await app.register(snapshotRoutes);
   await app.register(runsRoutes);

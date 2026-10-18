@@ -306,6 +306,8 @@ export const ScenarioCreate = z.object({
   name: z.string().min(1),
   url: z.string().url(),
   viewport_preset: ViewportPreset,
+  // The project it belongs to; omitted → the request's X-Project-Id scope, else the default project.
+  project_id: z.number().int().positive().optional(),
   brand: z.string().trim().min(1).nullable().optional(),
   type: z.string().trim().min(1).nullable().optional(),
   retries: z.number().int().min(0).optional(),
@@ -391,6 +393,8 @@ export type AuthProfileCreate = z.infer<typeof AuthProfileCreate>;
 
 export const PreflightCreate = z.object({
   name: PreflightName,
+  // The project it belongs to; null = shared across all projects (the default).
+  project_id: z.number().int().positive().nullable().optional(),
   description: z.string().optional(),
   steps: z.array(PreflightStep).optional(),
   retries: z.number().int().min(0).optional(),
@@ -402,6 +406,7 @@ export type PreflightCreate = z.infer<typeof PreflightCreate>;
 
 export const PreflightUpdate = z.object({
   name: PreflightName.optional(),
+  project_id: z.number().int().positive().nullable().optional(),
   description: z.string().optional(),
   steps: z.array(PreflightStep).optional(),
   retries: z.number().int().min(0).optional(),

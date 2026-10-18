@@ -51,6 +51,8 @@ export type RunDayRow = Omit<RunListRow, 'log_text'> & {
  */
 export interface RunFilter {
   scenarioId?: number;
+  /** The Scenario's project; absent/null = every project. */
+  projectId?: number | null;
   brands?: string[];
   types?: string[];
   statuses?: string[];
@@ -99,7 +101,7 @@ export interface RunStore {
    * every Scenario that ever ran is in here, however old its Runs. One row per
    * day a Scenario ran, so it stays small where list() would carry every Run.
    */
-  listLatestPerDay(): RunDayRow[];
+  listLatestPerDay(projectId?: number | null): RunDayRow[];
   /** How many Runs match the filter (all of them when none), however old. */
   count(opts?: RunFilter): number;
   /** Runs started within a sqlite datetime window such as '-1 day', newest first. */
@@ -149,6 +151,10 @@ function filterSql(f: RunFilter): { where: string; params: unknown[] } {
     conds.push('runs.scenario_id = ?');
     params.push(f.scenarioId);
   }
+  if (f.projectId != null) {
+    conds.push('scenarios.project_id = ?');
+    params.push(f.projectId);
+  }
   inList('scenarios.brand', f.brands);
   inList('scenarios.type', f.types);
   inList('runs.status', f.statuses);
@@ -181,14 +187,16 @@ export function createRunStore(deps: { db: Database; dataDir: string }): RunStor
     ),
     // started_at is a UTC 'YYYY-MM-DD HH:MM:SS' string, so date() is its day
     // prefix; the highest id on a day is that day's latest Run.
-    listLatestPerDay: db.prepare(
+    // One statement per scope: all projects, or one (the project filter is
+    // on the joined scenario).
+    listLatestPerDay: (['', 'AND scenarios.project_id = ?'] as const).map((scope) => db.prepare(
       `SELECT runs.id, runs.scenario_id, runs.started_at, runs.finished_at, runs.status,
               runs.screenshot_paths_json, runs.text_paths_json, runs.screenshot_meta_json, date(runs.started_at) AS day,
               scenarios.name AS scenario_name, scenarios.brand, scenarios.type
        FROM runs LEFT JOIN scenarios ON scenarios.id = runs.scenario_id
-       WHERE runs.id IN (SELECT MAX(id) FROM runs GROUP BY scenario_id, date(started_at))
+       WHERE runs.id IN (SELECT MAX(id) FROM runs GROUP BY scenario_id, date(started_at)) ${scope}
        ORDER BY runs.started_at DESC, runs.id DESC`,
-    ),
+    )),
     listSince: db.prepare(
       `SELECT runs.*, scenarios.name AS scenario_name, scenarios.brand, scenarios.type
        FROM runs LEFT JOIN scenarios ON scenarios.id = runs.scenario_id
@@ -288,7 +296,8 @@ export function createRunStore(deps: { db: Database; dataDir: string }): RunStor
       return row.n;
     },
     listForScenario: (scenarioId) => q.listForScenario.all(scenarioId) as RunRow[],
-    listLatestPerDay: () => q.listLatestPerDay.all() as RunDayRow[],
+    listLatestPerDay: (projectId) =>
+      (projectId == null ? q.listLatestPerDay[0]!.all() : q.listLatestPerDay[1]!.all(projectId)) as RunDayRow[],
     listStartedSince: (window) => q.listSince.all(window) as RunListRow[],
     latestFinishedForScenario(scenarioId) {
       const row = q.latestFinished.get(scenarioId) as

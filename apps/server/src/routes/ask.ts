@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { getDb } from '../db/index.js';
 import { runStore } from '../runs/index.js';
+import { resolveProjectId, scopeSql } from '../projects.js';
 import { askModel, listGatewayModelsDetailed, streamChat, type ChatMessage, type Usage } from '../ask/llm.js';
 import { ASK_SYSTEM_PROMPT, assetKey, buildPacks, packToContent, pickRun, screenshotUrl } from '../ask/context.js';
 import { createPreset, deletePreset, listPresets, updatePreset } from '../ask/presets.js';
@@ -88,10 +89,11 @@ function messageOut(m: MessageRow) {
 }
 
 export async function askRoutes(app: FastifyInstance) {
-  app.get('/api/ask/scenarios', async () => {
+  app.get('/api/ask/scenarios', async (req) => {
+    const { cond, params } = scopeSql(req, 'project_id');
     const rows = getDb()
-      .prepare('SELECT id, name, url, brand, type, viewport_preset FROM scenarios ORDER BY name COLLATE NOCASE')
-      .all() as { id: number; name: string; url: string; brand: string | null; type: string | null; viewport_preset: string }[];
+      .prepare(`SELECT id, name, url, brand, type, viewport_preset FROM scenarios WHERE ${cond} ORDER BY name COLLATE NOCASE`)
+      .all(...params) as { id: number; name: string; url: string; brand: string | null; type: string | null; viewport_preset: string }[];
     return rows.map((s) => {
       const runId = pickRun(s.id);
       const run = runId ? runStore().get(runId) : undefined;
@@ -130,14 +132,15 @@ export async function askRoutes(app: FastifyInstance) {
     return reply.code(204).send();
   });
 
-  app.get('/api/ask/threads', async () => {
+  app.get('/api/ask/threads', async (req) => {
+    const { cond, params } = scopeSql(req, 't.project_id');
     const rows = getDb()
       .prepare(
         `SELECT t.*, (SELECT count(*) FROM ask_messages m WHERE m.thread_id = t.id) AS message_count,
                 (SELECT text FROM ask_messages m WHERE m.thread_id = t.id AND m.role = 'assistant' ORDER BY id DESC LIMIT 1) AS last_reply
-         FROM ask_threads t ORDER BY t.updated_at DESC, t.id DESC`,
+         FROM ask_threads t WHERE ${cond} ORDER BY t.updated_at DESC, t.id DESC`,
       )
-      .all() as (ThreadRow & { message_count: number; last_reply: string | null })[];
+      .all(...params) as (ThreadRow & { message_count: number; last_reply: string | null })[];
     return rows.map((t) => ({ ...threadOut(t), messageCount: t.message_count, lastReply: (t.last_reply ?? '').slice(0, 160) }));
   });
 
@@ -149,9 +152,15 @@ export async function askRoutes(app: FastifyInstance) {
       .filter((n): n is string => !!n);
     if (names.length !== body.scenarioIds.length) return reply.code(404).send({ error: 'scenario_not_found' });
     const runIds = body.scenarioIds.map((sid, i) => pickRun(sid, body.runIds?.[i] ?? null));
+    // The thread lives in its first scenario's project (the request scope when there is none).
+    const first = body.scenarioIds[0];
+    const owner = first != null
+      ? (db.prepare('SELECT project_id FROM scenarios WHERE id = ?').get(first) as { project_id: number } | undefined)?.project_id
+      : undefined;
+    const projectId = owner ?? resolveProjectId(req, undefined) ?? 1;
     const info = db
-      .prepare('INSERT INTO ask_threads (title, scenario_ids_json, run_ids_json, model) VALUES (?, ?, ?, ?)')
-      .run(body.title || names.join(' vs '), JSON.stringify(body.scenarioIds), JSON.stringify(runIds), body.model ?? '');
+      .prepare('INSERT INTO ask_threads (title, scenario_ids_json, run_ids_json, model, project_id) VALUES (?, ?, ?, ?, ?)')
+      .run(body.title || names.join(' vs '), JSON.stringify(body.scenarioIds), JSON.stringify(runIds), body.model ?? '', projectId);
     const row = db.prepare('SELECT * FROM ask_threads WHERE id = ?').get(info.lastInsertRowid) as ThreadRow;
     return reply.code(201).send(threadOut(row));
   });

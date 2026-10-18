@@ -51,25 +51,27 @@ export async function runsRoutes(app: FastifyInstance) {
   const ListQuery = FilterQuery.extend({
     limit: z.coerce.number().int().min(1).max(100_000).default(100),
   });
-  const toFilter = (q: z.infer<typeof FilterQuery>) => ({
+  // The request's project scope (X-Project-Id) narrows every list here.
+  const toFilter = (q: z.infer<typeof FilterQuery>, projectId: number | null) => ({
     scenarioId: q.scenarioId,
+    projectId,
     brands: q.brand,
     types: q.type,
     statuses: q.status,
   });
   app.get('/api/runs', async (req) => {
     const q = ListQuery.parse(req.query ?? {});
-    return runStore().list({ ...toFilter(q), limit: q.limit });
+    return runStore().list({ ...toFilter(q, req.projectId), limit: q.limit });
   });
 
   // The latest run per scenario per day, all history, no log text. The
   // Screenshots gallery reads this: a window over /api/runs would hide
   // scenarios that have not run recently.
-  app.get('/api/runs/daily', async () => runStore().listLatestPerDay());
+  app.get('/api/runs/daily', async (req) => runStore().listLatestPerDay(req.projectId));
 
   // Number of runs matching the same filters, for the Runs page's "N of M".
   app.get('/api/runs/count', async (req) => ({
-    total: runStore().count(toFilter(FilterQuery.parse(req.query ?? {}))),
+    total: runStore().count(toFilter(FilterQuery.parse(req.query ?? {}), req.projectId)),
   }));
 
   // Runs parked at a `pause` step right now, for the Resume/Abort buttons.

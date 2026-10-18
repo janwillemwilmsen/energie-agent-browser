@@ -1,8 +1,9 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply } from 'fastify';
 import cron from 'node-cron';
 import { z } from 'zod';
 import { getDb } from '../db/index.js';
 import { registerSchedule, unregisterSchedule, scheduleScenarioIds } from '../scheduler/index.js';
+import { projectsOfScenarios, scopeSql } from '../projects.js';
 
 // A schedule runs an ordered chain of one or more scenarios. `scenario_ids`
 // is the canonical field; the legacy single `scenario_id` is still accepted
@@ -57,9 +58,21 @@ export async function schedulesRoutes(app: FastifyInstance) {
     };
   });
 
-  app.get('/api/schedules', async () => {
-    return (getDb().prepare('SELECT * FROM schedules ORDER BY id').all() as any[]).map(toApi);
+  // The list follows the request's project scope (X-Project-Id; none = all).
+  app.get('/api/schedules', async (req) => {
+    const { cond, params } = scopeSql(req, 'project_id');
+    return (getDb().prepare(`SELECT * FROM schedules WHERE ${cond} ORDER BY id`).all(...params) as any[]).map(toApi);
   });
+
+  // A chain stays inside one project: the schedule takes that project.
+  function chainProject(ids: number[], reply: FastifyReply): number | null {
+    const projects = projectsOfScenarios(ids);
+    if (projects.size !== 1) {
+      reply.code(400).send({ error: 'mixed_projects', message: 'every scenario in a schedule must belong to the same project' });
+      return null;
+    }
+    return [...projects][0]!;
+  }
 
   app.post('/api/schedules', async (req, reply) => {
     const body = ScheduleBody.parse(req.body);
@@ -71,13 +84,15 @@ export async function schedulesRoutes(app: FastifyInstance) {
     if (missing != null) {
       return reply.code(400).send({ error: 'unknown_scenario', scenario_id: missing });
     }
+    const projectId = chainProject(ids, reply);
+    if (projectId == null) return;
     const db = getDb();
     const info = db
       .prepare(
-        `INSERT INTO schedules (scenario_id, scenario_ids_json, cron_expr, enabled)
-         VALUES (?, ?, ?, ?)`,
+        `INSERT INTO schedules (scenario_id, scenario_ids_json, cron_expr, enabled, project_id)
+         VALUES (?, ?, ?, ?, ?)`,
       )
-      .run(ids[0], JSON.stringify(ids), body.cron_expr, body.enabled ? 1 : 0);
+      .run(ids[0], JSON.stringify(ids), body.cron_expr, body.enabled ? 1 : 0, projectId);
     const row = db
       .prepare('SELECT * FROM schedules WHERE id = ?')
       .get(info.lastInsertRowid) as any;
@@ -99,13 +114,15 @@ export async function schedulesRoutes(app: FastifyInstance) {
     if (missing != null) {
       return reply.code(400).send({ error: 'unknown_scenario', scenario_id: missing });
     }
+    const projectId = chainProject(ids, reply);
+    if (projectId == null) return;
     const cronExpr = body.cron_expr ?? existing.cron_expr;
     const enabled = body.enabled ?? !!existing.enabled;
     db.prepare(
       `UPDATE schedules
-       SET scenario_id = ?, scenario_ids_json = ?, cron_expr = ?, enabled = ?
+       SET scenario_id = ?, scenario_ids_json = ?, cron_expr = ?, enabled = ?, project_id = ?
        WHERE id = ?`,
-    ).run(ids[0], JSON.stringify(ids), cronExpr, enabled ? 1 : 0, id);
+    ).run(ids[0], JSON.stringify(ids), cronExpr, enabled ? 1 : 0, projectId, id);
     const row = db.prepare('SELECT * FROM schedules WHERE id = ?').get(id) as any;
     registerSchedule(row);
     return toApi(row);

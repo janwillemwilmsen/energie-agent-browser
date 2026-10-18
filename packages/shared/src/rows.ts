@@ -4,11 +4,29 @@ import type { PreflightMode, ViewportPreset } from './schemas.js';
 // schemas: the server never validates its own responses, and a schema nobody
 // parses with only drifts. Field notes describe what the API sends.
 
+/** A top-level container separating topics and brands; every scenario belongs to one. */
+export interface Project {
+  id: number;
+  name: string;
+  /** '#rrggbb' accent for the switcher chip, or null. */
+  color: string | null;
+  position: number;
+  created_at: string;
+  updated_at: string;
+  /** Joined by GET /api/projects. */
+  scenario_count?: number;
+  schedule_count?: number;
+  preflight_count?: number;
+  last_run_at?: string | null;
+}
+
 export interface Scenario {
   id: number;
   name: string;
   url: string;
   viewport_preset: ViewportPreset;
+  /** The project this scenario belongs to (projects.id). */
+  project_id: number;
   brand: string | null;
   type: string | null;
   retries: number;
@@ -34,6 +52,8 @@ export interface Scenario {
 export interface Preflight {
   id: number;
   name: string;
+  /** The project it belongs to, or null when shared across all projects. */
+  project_id: number | null;
   description: string;
   /** JSON array of PreflightStep. */
   steps_json: string;
@@ -59,6 +79,8 @@ export interface AuthProfile {
 
 export interface Schedule {
   id: number;
+  /** The project of its chain (every scenario in a chain shares one). */
+  project_id: number;
   scenario_id: number;
   /** Ordered chain of scenarios this schedule runs sequentially. */
   scenario_ids: number[];
