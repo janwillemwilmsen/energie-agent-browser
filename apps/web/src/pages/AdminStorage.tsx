@@ -851,7 +851,7 @@ export function AdminStorage() {
                       />
                     </td>
                     <td>#{r.runId}</td>
-                    <td>
+                    <td className="storage-scenario" title={r.scenarioName ?? undefined}>
                       {r.orphan ? (
                         <span className="muted">orphan folder (no run row)</span>
                       ) : (
@@ -951,7 +951,7 @@ export function AdminStorage() {
                       <input type="checkbox" checked={selRecs.has(key)} onChange={() => toggleRec(key)} />
                     </td>
                     <td>{r.id != null ? `#${r.id}` : <span className="muted">orphan file</span>}</td>
-                    <td>
+                    <td className="storage-scenario" title={r.scenarioName ?? undefined}>
                       {r.scenarioName ?? (
                         <span className="muted">{r.scenarioId != null ? `scenario ${r.scenarioId}` : '—'}</span>
                       )}

@@ -2111,12 +2111,14 @@ button.ss-timeline-link { background: transparent; cursor: pointer; font: inheri
 .storage-card-size { margin-left: auto; font-weight: 600; font-variant-numeric: tabular-nums; }
 .storage-details { margin: 16px 0; }
 .storage-details > summary { cursor: pointer; color: var(--muted); font-size: 13px; }
-/* Every table on the page shares one width. */
-.storage-table-compact { max-width: 1200px; width: 100%; margin-top: 8px; }
-.storage-table-wide, .storage-projects { max-width: 1200px; width: 100%; }
+/* Every table on the page shares one width: the content area's, up to a cap
+   wide enough for the runs table's eleven columns on a desktop. */
+:root { --storage-table-max: 1600px; }
+.storage-table-compact { max-width: var(--storage-table-max); width: 100%; margin-top: 8px; }
+.storage-table-wide, .storage-projects { max-width: var(--storage-table-max); width: 100%; }
 /* Long lists (auth vault, session states) scroll inside a capped box with the
    header kept in view. */
-.storage-scroll { max-height: 320px; overflow: auto; max-width: 1200px; margin-top: 8px; border: 1px solid var(--border); border-radius: 6px; }
+.storage-scroll { max-height: 320px; overflow: auto; max-width: var(--storage-table-max); margin-top: 8px; border: 1px solid var(--border); border-radius: 6px; }
 .storage-scroll .storage-table-wide { margin-top: 0; }
 .storage-scroll thead th { position: sticky; top: 0; z-index: 1; background: var(--panel); }
 .storage-table-compact td, .storage-table-compact th { padding: 4px 8px; font-size: 13px; }
@@ -2137,10 +2139,13 @@ button.ss-timeline-link { background: transparent; cursor: pointer; font: inheri
 /* Runs / recordings by disk usage: a capped scroll box like the auth lists,
    the header kept in view, the same width as every other table. */
 .storage-table-wrap {
-  overflow: auto; max-height: 480px; max-width: 1200px;
+  overflow: auto; max-height: 480px; max-width: var(--storage-table-max);
   border: 1px solid var(--border); border-radius: 6px;
 }
 .storage-table { white-space: nowrap; width: 100%; }
+/* A long scenario name is cut with an ellipsis (full name in the tooltip)
+   rather than forcing the table to scroll sideways. */
+.storage-table td.storage-scenario { max-width: 380px; overflow: hidden; text-overflow: ellipsis; }
 .storage-table thead th { position: sticky; top: 0; z-index: 1; background: var(--panel); }
 .storage-table th.num, .storage-table td.num,
 .storage-table-compact th.num, .storage-table-compact td.num {
