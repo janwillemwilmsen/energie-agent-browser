@@ -67,6 +67,19 @@ function fileSize(abs: string): number {
   }
 }
 
+// The text files a run's save_text steps wrote: the .md files at the top of
+// its screenshot directory (see routes/runs.ts). Reported apart from the
+// images they sit next to.
+function textStats(runDir: string): DirStats {
+  const out: DirStats = { bytes: 0, files: 0 };
+  for (const name of listFiles(runDir)) {
+    if (!name.toLowerCase().endsWith('.md')) continue;
+    out.bytes += fileSize(path.join(runDir, name));
+    out.files += 1;
+  }
+  return out;
+}
+
 function listSubdirs(abs: string): string[] {
   try {
     return fs
@@ -186,13 +199,18 @@ function dbReport() {
 }
 
 function groupsReport(): StorageGroup[] {
-  const shots = dirStats(runStore().screenshotsRoot(), { skipDirNames: new Set(['thumbs']) });
-  // Thumb caches live in screenshots/<run>/thumbs — count them separately.
+  const all = dirStats(runStore().screenshotsRoot(), { skipDirNames: new Set(['thumbs']) });
+  // Thumb caches live in screenshots/<run>/thumbs and the save_text .md files
+  // next to the images — count both separately.
   let thumbs: DirStats = { bytes: 0, files: 0 };
+  let texts: DirStats = { bytes: 0, files: 0 };
   for (const run of listSubdirs(runStore().screenshotsRoot())) {
     const t = dirStats(path.join(runStore().screenshotsRoot(), run, 'thumbs'));
     thumbs = { bytes: thumbs.bytes + t.bytes, files: thumbs.files + t.files };
+    const x = textStats(path.join(runStore().screenshotsRoot(), run));
+    texts = { bytes: texts.bytes + x.bytes, files: texts.files + x.files };
   }
+  const shots = { bytes: all.bytes - texts.bytes, files: all.files - texts.files };
   const rec = dirStats(path.join(DATA(), 'recordings'));
   const diffs = dirStats(path.join(DATA(), 'diffs'));
   const preview = dirStats(path.join(DATA(), 'preview'));
@@ -200,6 +218,7 @@ function groupsReport(): StorageGroup[] {
 
   return [
     { key: 'screenshots', label: 'Run screenshots', dir: 'screenshots', bytes: shots.bytes, files: shots.files },
+    { key: 'texts', label: 'Saved page texts', dir: 'screenshots/*/*.md', bytes: texts.bytes, files: texts.files },
     { key: 'recordings', label: 'Video recordings', dir: 'recordings', bytes: rec.bytes, files: rec.files },
     { key: 'diffs', label: 'Diff artifacts', dir: 'diffs', bytes: diffs.bytes, files: diffs.files },
     { key: 'thumbs', label: 'Thumbnail cache', dir: 'screenshots/*/thumbs', bytes: thumbs.bytes, files: thumbs.files, cache: true },
@@ -214,12 +233,16 @@ export interface RunStorageItem {
   runId: number;
   scenarioId: number | null;
   scenarioName: string | null;
+  projectId: number | null;
+  projectName: string | null;
   brand: string | null;
   type: string | null;
   status: string | null; // null → orphan dir (no runs row)
   startedAt: string | null;
-  bytes: number; // screenshots (excluding thumbs)
+  bytes: number; // screenshots (excluding thumbs and texts)
   files: number;
+  textBytes: number; // save_text .md files
+  textFiles: number;
   thumbBytes: number;
   logBytes: number;
   recordingBytes: number; // recordings rows pointing at this run
@@ -232,8 +255,11 @@ function runsReport(): RunStorageItem[] {
     .prepare(
       `SELECT runs.id, runs.scenario_id, runs.status, runs.started_at,
               LENGTH(runs.log_text) AS log_bytes,
-              scenarios.name AS scenario_name, scenarios.brand, scenarios.type
-       FROM runs LEFT JOIN scenarios ON scenarios.id = runs.scenario_id`,
+              scenarios.name AS scenario_name, scenarios.brand, scenarios.type,
+              scenarios.project_id, projects.name AS project_name
+       FROM runs
+       LEFT JOIN scenarios ON scenarios.id = runs.scenario_id
+       LEFT JOIN projects ON projects.id = scenarios.project_id`,
     )
     .all() as {
     id: number;
@@ -244,6 +270,8 @@ function runsReport(): RunStorageItem[] {
     scenario_name: string | null;
     brand: string | null;
     type: string | null;
+    project_id: number | null;
+    project_name: string | null;
   }[];
 
   const recBytesByRun = new Map<number, number>();
@@ -261,17 +289,22 @@ function runsReport(): RunStorageItem[] {
     const dir = runStore().screenshotDir(r.id);
     const s = dirStats(dir, { skipDirNames: new Set(['thumbs']) });
     const t = dirStats(path.join(dir, 'thumbs'));
+    const x = textStats(dir);
     dirs.delete(String(r.id));
     out.push({
       runId: r.id,
       scenarioId: r.scenario_id,
       scenarioName: r.scenario_name,
+      projectId: r.project_id,
+      projectName: r.project_name,
       brand: r.brand,
       type: r.type,
       status: r.status,
       startedAt: r.started_at,
-      bytes: s.bytes,
-      files: s.files,
+      bytes: s.bytes - x.bytes,
+      files: s.files - x.files,
+      textBytes: x.bytes,
+      textFiles: x.files,
       thumbBytes: t.bytes,
       logBytes: r.log_bytes ?? 0,
       recordingBytes: recBytesByRun.get(r.id) ?? 0,
@@ -285,16 +318,21 @@ function runsReport(): RunStorageItem[] {
     const dir = path.join(shotsRoot, name);
     const s = dirStats(dir, { skipDirNames: new Set(['thumbs']) });
     const t = dirStats(path.join(dir, 'thumbs'));
+    const x = textStats(dir);
     out.push({
       runId: Number(name),
       scenarioId: null,
       scenarioName: null,
+      projectId: null,
+      projectName: null,
       brand: null,
       type: null,
       status: null,
       startedAt: null,
-      bytes: s.bytes,
-      files: s.files,
+      bytes: s.bytes - x.bytes,
+      files: s.files - x.files,
+      textBytes: x.bytes,
+      textFiles: x.files,
       thumbBytes: t.bytes,
       logBytes: 0,
       recordingBytes: 0,
@@ -457,6 +495,79 @@ function deleteRuns(
   return { deletedRows: deleted, freedBytes: freed, skippedRunning: ids.length - target.length };
 }
 
+// ---- Per-project summary -------------------------------------------------
+
+export interface ProjectStorageItem {
+  projectId: number | null; // null → runs/files whose scenario is gone
+  projectName: string | null;
+  color: string | null;
+  scenarios: number;
+  runs: number;
+  screenshotBytes: number;
+  textBytes: number;
+  thumbBytes: number;
+  recordingBytes: number;
+  diffBytes: number;
+  logBytes: number;
+  totalBytes: number;
+}
+
+// What each project takes: its runs' screenshots, texts, thumbs and log text
+// (from the per-run walk), its recordings (rows by scenario, so clips without
+// a run count too) and its diff images (comparisons by scenario). Orphans and
+// rows whose scenario was deleted land in a null bucket.
+function projectsReport(runs: RunStorageItem[]): ProjectStorageItem[] {
+  const db = getDb();
+  const byId = new Map<number | null, ProjectStorageItem>();
+  const bucket = (id: number | null, name: string | null = null, color: string | null = null) => {
+    let b = byId.get(id);
+    if (!b) {
+      b = { projectId: id, projectName: name, color, scenarios: 0, runs: 0, screenshotBytes: 0, textBytes: 0, thumbBytes: 0, recordingBytes: 0, diffBytes: 0, logBytes: 0, totalBytes: 0 };
+      byId.set(id, b);
+    }
+    return b;
+  };
+  for (const p of db.prepare('SELECT id, name, color FROM projects ORDER BY position, name COLLATE NOCASE').all() as { id: number; name: string; color: string | null }[]) {
+    bucket(p.id, p.name, p.color);
+  }
+  for (const s of db.prepare('SELECT project_id, COUNT(*) AS n FROM scenarios GROUP BY project_id').all() as { project_id: number; n: number }[]) {
+    bucket(s.project_id).scenarios = s.n;
+  }
+  for (const r of runs) {
+    const b = bucket(r.projectId, r.projectName);
+    b.runs += 1;
+    b.screenshotBytes += r.bytes;
+    b.textBytes += r.textBytes;
+    b.thumbBytes += r.thumbBytes;
+    b.logBytes += r.logBytes;
+  }
+  for (const r of db
+    .prepare(
+      `SELECT scenarios.project_id AS project_id, COALESCE(SUM(recordings.size_bytes), 0) AS b
+       FROM recordings LEFT JOIN scenarios ON scenarios.id = recordings.scenario_id
+       GROUP BY scenarios.project_id`,
+    )
+    .all() as { project_id: number | null; b: number }[]) {
+    bucket(r.project_id).recordingBytes += r.b;
+  }
+  for (const r of db
+    .prepare(
+      `SELECT scenarios.project_id AS project_id, artifacts.file_path AS file_path
+       FROM comparisons
+       JOIN artifacts ON artifacts.id = comparisons.diff_artifact_id
+       LEFT JOIN scenarios ON scenarios.id = comparisons.scenario_id`,
+    )
+    .all() as { project_id: number | null; file_path: string }[]) {
+    bucket(r.project_id).diffBytes += fileSize(path.join(DATA(), r.file_path));
+  }
+  const out = Array.from(byId.values());
+  for (const b of out) {
+    b.totalBytes = b.screenshotBytes + b.textBytes + b.thumbBytes + b.recordingBytes + b.diffBytes + b.logBytes;
+  }
+  // Empty null bucket adds nothing; drop it.
+  return out.filter((b) => b.projectId != null || b.totalBytes > 0 || b.runs > 0);
+}
+
 // ---- Routes ----------------------------------------------------------------
 
 export async function storageRoutes(app: FastifyInstance) {
@@ -468,11 +579,13 @@ export async function storageRoutes(app: FastifyInstance) {
     const orphanDiffs = orphanDiffFiles();
     const orphanShots = orphanScreenshotDirs();
     const missingRecordings = recordingsReport().filter((r) => r.missing).length;
+    const projects = projectsReport(runsReport());
     return {
       dataDir: DATA(),
       totalBytes: dbTotal + filesTotal,
       db,
       groups,
+      projects,
       orphans: {
         screenshotDirs: orphanShots.length,
         screenshotBytes: orphanShots.reduce((n, o) => n + o.bytes, 0),

@@ -39,6 +39,7 @@ function fmtInt(n: number | null | undefined): string {
 const GROUP_COLORS: Record<string, string> = {
   db: '#a78bfa',
   screenshots: '#38bdf8',
+  texts: '#fb923c',
   recordings: '#f472b6',
   diffs: '#fbbf24',
   thumbs: '#34d399',
@@ -440,6 +441,62 @@ export function AdminStorage() {
               </div>
             ))}
           </div>
+
+          {/* ---- By project ---- */}
+          {summary.projects && summary.projects.length > 0 && (() => {
+            const rows = [...summary.projects].sort((a, b) => b.totalBytes - a.totalBytes);
+            const grand = rows.reduce((n, p) => n + p.totalBytes, 0) || 1;
+            return (
+              <details className="storage-details" open>
+                <summary>By project ({rows.length})</summary>
+                <p className="muted">
+                  What each project's runs take: screenshots, saved texts, thumbnails, recordings, diff images and the
+                  run log text in the database. Files whose scenario was deleted show as “no project”.
+                </p>
+                <table className="table storage-table-compact storage-projects">
+                  <thead>
+                    <tr>
+                      <th>Project</th>
+                      <th className="num">Scenarios</th>
+                      <th className="num">Runs</th>
+                      <th className="num">Screenshots</th>
+                      <th className="num">Texts</th>
+                      <th className="num">Thumbs</th>
+                      <th className="num">Recordings</th>
+                      <th className="num">Diffs</th>
+                      <th className="num">Run logs</th>
+                      <th className="num">Total</th>
+                      <th>Share</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((p) => (
+                      <tr key={p.projectId ?? 'none'}>
+                        <td>
+                          <i className="storage-project-dot" style={{ background: p.color ?? 'var(--border)' }} />
+                          {p.projectName ?? <span className="muted">no project</span>}
+                        </td>
+                        <td className="num">{fmtInt(p.scenarios)}</td>
+                        <td className="num">{fmtInt(p.runs)}</td>
+                        <td className="num">{fmtSize(p.screenshotBytes)}</td>
+                        <td className="num">{fmtSize(p.textBytes)}</td>
+                        <td className="num">{fmtSize(p.thumbBytes)}</td>
+                        <td className="num">{fmtSize(p.recordingBytes)}</td>
+                        <td className="num">{fmtSize(p.diffBytes)}</td>
+                        <td className="num">{fmtSize(p.logBytes)}</td>
+                        <td className="num"><strong>{fmtSize(p.totalBytes)}</strong></td>
+                        <td>
+                          <span className="storage-share" title={`${((p.totalBytes / grand) * 100).toFixed(1)}%`}>
+                            <i style={{ width: `${Math.max(1, (p.totalBytes / grand) * 100)}%`, background: p.color ?? 'var(--accent)' }} />
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </details>
+            );
+          })()}
 
           {/* ---- Database tables ---- */}
           <details className="storage-details">

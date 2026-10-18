@@ -381,6 +381,20 @@ export interface StorageTable {
   rows: number | null;
   bytes: number | null;
 }
+export interface StorageProject {
+  projectId: number | null;
+  projectName: string | null;
+  color: string | null;
+  scenarios: number;
+  runs: number;
+  screenshotBytes: number;
+  textBytes: number;
+  thumbBytes: number;
+  recordingBytes: number;
+  diffBytes: number;
+  logBytes: number;
+  totalBytes: number;
+}
 export interface StorageSummary {
   dataDir: string;
   totalBytes: number;
@@ -397,6 +411,8 @@ export interface StorageSummary {
     tables: StorageTable[];
   };
   groups: StorageGroup[];
+  /** What each project takes on disk (null project = files whose scenario is gone). */
+  projects: StorageProject[];
   orphans: {
     screenshotDirs: number;
     screenshotBytes: number;
@@ -410,12 +426,17 @@ export interface RunStorageItem {
   runId: number;
   scenarioId: number | null;
   scenarioName: string | null;
+  projectId: number | null;
+  projectName: string | null;
   brand: string | null;
   type: string | null;
   status: string | null;
   startedAt: string | null;
+  /** Screenshot images only (texts and thumbs apart). */
   bytes: number;
   files: number;
+  textBytes: number;
+  textFiles: number;
   thumbBytes: number;
   logBytes: number;
   recordingBytes: number;

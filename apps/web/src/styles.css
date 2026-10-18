@@ -1839,6 +1839,12 @@ button.ss-timeline-link { background: transparent; cursor: pointer; font: inheri
 }
 .projects-swatch.on { border-color: var(--text); }
 
+/* Admin → Storage: the per-project table. */
+.storage-project-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 8px; vertical-align: middle; }
+.storage-share { display: inline-block; width: 120px; height: 8px; background: rgba(255,255,255,0.06); border-radius: 4px; overflow: hidden; vertical-align: middle; }
+.storage-share i { display: block; height: 100%; border-radius: 4px; }
+.storage-projects td, .storage-projects th { white-space: nowrap; }
+
 /* Admin → Theme: one card per colour scheme, painted in its own colours. */
 .theme-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; margin: 12px 0; max-width: 980px; }
 .theme-card {
