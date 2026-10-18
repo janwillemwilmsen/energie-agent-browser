@@ -1797,10 +1797,13 @@ button.ss-timeline-link { background: transparent; cursor: pointer; font: inheri
   display: inline-flex; align-items: center; justify-content: center; flex: none;
   width: 14px; height: 14px; border-radius: 50%; color: var(--on-accent);
 }
+/* An explicit dark background (not transparent) and color-scheme, or the
+   browser paints the option list white with the light text on it. */
 .project-switcher select {
-  background: transparent; color: var(--text); border: 0; border-radius: 4px;
+  background: var(--panel); color: var(--text); color-scheme: dark; border: 0; border-radius: 4px;
   padding: 2px 4px; font-size: 13px; font-weight: 600; max-width: 240px; cursor: pointer;
 }
+.project-switcher option { background: var(--panel); color: var(--text); }
 .project-switcher select:focus { outline: 1px solid var(--accent); }
 .project-manage { color: var(--muted); display: inline-flex; padding: 3px; border-radius: 4px; }
 .project-manage:hover { color: var(--accent); background: rgba(255,255,255,0.04); }
