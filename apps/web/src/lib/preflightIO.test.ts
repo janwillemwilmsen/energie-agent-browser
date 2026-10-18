@@ -19,6 +19,7 @@ import {
 const row: Preflight = {
   id: 7,
   name: 'essent-login',
+  project_id: null,
   description: 'Log in to Mijn Essent',
   steps_json: JSON.stringify([
     { kind: 'navigate', url: 'https://mijn.essent.nl' },

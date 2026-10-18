@@ -1,4 +1,4 @@
-import type { A11yTree, AuthProfile, DeviceProfile, DeviceSize, Preflight, PreflightStep, Run, RunDay, Scenario, Schedule, ScenarioStep } from '@eab/shared';
+import type { A11yTree, AuthProfile, DeviceProfile, DeviceSize, Preflight, Project, PreflightStep, Run, RunDay, Scenario, Schedule, ScenarioStep } from '@eab/shared';
 import { request as req, requestRaw } from './request.js';
 
 export { ApiError, errorMessage, onUnauthenticated } from './request.js';
@@ -548,7 +548,7 @@ export const api = {
     req<Scenario>(`/api/scenarios/${id}/copy`, { method: 'POST', body: JSON.stringify(body) }),
   createScenario: (
     body: Pick<Scenario, 'name' | 'url' | 'viewport_preset'> &
-      Partial<Pick<Scenario, 'brand' | 'type' | 'preflight_id'>>,
+      Partial<Pick<Scenario, 'project_id' | 'brand' | 'type' | 'preflight_id'>>,
   ) => req<Scenario>('/api/scenarios', { method: 'POST', body: JSON.stringify(body) }),
   updateScenario: (
     id: number,
@@ -558,6 +558,7 @@ export const api = {
         | 'name'
         | 'url'
         | 'viewport_preset'
+        | 'project_id'
         | 'brand'
         | 'type'
         | 'retries'
@@ -634,6 +635,22 @@ export const api = {
       body: JSON.stringify({ username, password }),
     }),
   authLogout: () => req<{ ok: true }>('/api/auth/logout', { method: 'POST' }),
+  /** Projects (the switcher, admin Projects page). Lists carry scenario/schedule counts. */
+  listProjects: () => req<Project[]>('/api/projects'),
+  createProject: (body: { name: string; color?: string | null }) =>
+    req<Project>('/api/projects', { method: 'POST', body: JSON.stringify(body) }),
+  updateProject: (id: number, body: { name?: string; color?: string | null; position?: number }) =>
+    req<Project>(`/api/projects/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  reorderProjects: (order: number[]) =>
+    req<Project[]>('/api/projects/reorder', { method: 'POST', body: JSON.stringify({ order }) }),
+  deleteProject: (id: number) => req<void>(`/api/projects/${id}`, { method: 'DELETE' }),
+  /** Move scenarios into a project: by ids, or every scenario with a brand and/or type. */
+  moveScenariosToProject: (id: number, body: { scenario_ids?: number[]; brand?: string; type?: string; from_project_id?: number }) =>
+    req<{ moved: number; scenario_ids: number[]; schedules: { updated: number[]; mixed: number[] } }>(
+      `/api/projects/${id}/move-scenarios`, { method: 'POST', body: JSON.stringify(body) },
+    ),
+  /** Every scenario regardless of the active project (the admin Projects page). */
+  listAllScenarios: () => req<Scenario[]>('/api/scenarios', { headers: { 'X-Project-Id': 'all' } }),
   /** The UI colour scheme (admin Theme page): a scheme id, or null for the default. */
   getTheme: () => req<{ theme: string | null }>('/api/admin/theme'),
   updateTheme: (theme: string | null) =>

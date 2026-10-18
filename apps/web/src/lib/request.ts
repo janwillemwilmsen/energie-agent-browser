@@ -1,6 +1,9 @@
-// The request core behind every API call: JSON in/out, one error shape, and
-// session-expiry detection. Endpoint thunks in api.ts are thin on purpose;
-// everything a caller must know about talking to the server lives here.
+import { projectHeaders } from './projectScope.js';
+
+// The request core behind every API call: JSON in/out, one error shape, the
+// project scope header, and session-expiry detection. Endpoint thunks in
+// api.ts are thin on purpose; everything a caller must know about talking to
+// the server lives here.
 
 export interface ApiErrorIssue {
   path: string;
@@ -96,7 +99,9 @@ function noteFailure(url: string, err: ApiError): void {
  * non-2xx status. For callers that need headers or binary bodies.
  */
 export async function requestRaw(url: string, init?: RequestInit): Promise<Response> {
-  const headers: Record<string, string> = { ...((init?.headers as Record<string, string>) ?? {}) };
+  // The active project rides on every call (see lib/projectScope.ts); a
+  // caller's own headers win.
+  const headers: Record<string, string> = { ...projectHeaders(), ...((init?.headers as Record<string, string>) ?? {}) };
   // Only declare a JSON body when we're actually sending one — Fastify rejects
   // an empty body with Content-Type: application/json as 400 Bad Request.
   if (init?.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';

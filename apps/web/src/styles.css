@@ -1786,6 +1786,49 @@ button.ss-timeline-link { background: transparent; cursor: pointer; font: inheri
   padding: 4px 6px; font-size: 13px;
 }
 
+/* The project bar at the top of every page: the switcher and what the
+   active project holds. Sticky so it stays while a page scrolls. */
+.project-bar {
+  position: sticky; top: 0; z-index: 20;
+  display: flex; align-items: center; gap: 10px;
+  margin: -16px -16px 12px; padding: 8px 16px;
+  background: var(--panel); border-bottom: 1px solid var(--border); font-size: 13px;
+}
+.project-dot {
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+  width: 16px; height: 16px; border-radius: 50%; color: var(--on-accent);
+}
+.project-switcher select {
+  background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px;
+  padding: 4px 8px; font-size: 14px; font-weight: 600; max-width: 320px;
+}
+.project-meta { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.project-manage { margin-left: auto; color: var(--muted); display: inline-flex; padding: 4px; border-radius: 4px; }
+.project-manage:hover { color: var(--accent); background: rgba(255,255,255,0.04); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+@media (max-width: 640px) { .project-meta { display: none; } }
+
+/* Admin → Projects */
+.projects-table { border-collapse: collapse; width: 100%; max-width: 1100px; margin: 12px 0 20px; font-size: 13px; }
+.projects-table th { text-align: left; font-weight: 500; font-size: 12px; color: var(--muted); padding: 4px 10px 6px 0; }
+.projects-table td { padding: 8px 10px 8px 0; border-top: 1px solid var(--border); vertical-align: top; }
+.projects-row-active td { background: rgba(255,255,255,0.03); }
+.projects-names { font-size: 12px; margin-top: 2px; max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.projects-actions { white-space: nowrap; }
+.projects-actions .chip { font-size: 12px; padding: 2px 8px; margin-right: 4px; }
+.projects-card { max-width: 860px; margin: 12px 0; }
+.projects-card h3 { margin: 0 0 6px; }
+.projects-form, .projects-inline { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.projects-form input, .projects-inline input { min-width: 200px; }
+.projects-form select {
+  background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 4px 6px; font-size: 13px; max-width: 360px;
+}
+.projects-swatches { display: inline-flex; gap: 4px; align-items: center; }
+.projects-swatch {
+  width: 20px; height: 20px; border-radius: 50%; padding: 0; border: 2px solid transparent; cursor: pointer; color: var(--muted); font-size: 12px; line-height: 1;
+}
+.projects-swatch.on { border-color: var(--text); }
+
 /* Admin → Theme: one card per colour scheme, painted in its own colours. */
 .theme-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; margin: 12px 0; max-width: 980px; }
 .theme-card {

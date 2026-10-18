@@ -5,6 +5,7 @@ import { api, type Preflight, type Run, type ScenarioDetail } from '../lib/api.j
 import { AddStepControls, SnapshotPane, StepEditorDnd, StepList, useServerStepStore } from '../lib/stepEditor/index.js';
 import { PreviewStream } from '../lib/screencast.js';
 import { failureFromLog } from '../lib/runLog.js';
+import { useProject } from '../lib/project.js';
 
 const SESSION = 'default';
 
@@ -35,6 +36,8 @@ interface MetaDraft {
   name: string;
   url: string;
   viewport_preset: 'desktop' | 'mobile' | 'both';
+  /** The project it belongs to; changing it moves the scenario (runs and all). */
+  project_id: number;
   brand: string;
   type: string;
   preflight_id: number | null;
@@ -50,6 +53,7 @@ function emptyDraft(): MetaDraft {
     name: '',
     url: '',
     viewport_preset: 'desktop',
+    project_id: 1,
     brand: '',
     type: '',
     preflight_id: null,
@@ -65,6 +69,7 @@ function draftFrom(d: ScenarioDetail): MetaDraft {
     name: d.name,
     url: d.url,
     viewport_preset: d.viewport_preset,
+    project_id: d.project_id ?? 1,
     brand: d.brand ?? '',
     type: d.type ?? '',
     preflight_id: d.preflight_id ?? null,
@@ -80,6 +85,7 @@ function draftsEqual(a: MetaDraft, b: MetaDraft): boolean {
     a.name === b.name &&
     a.url === b.url &&
     a.viewport_preset === b.viewport_preset &&
+    a.project_id === b.project_id &&
     a.brand === b.brand &&
     a.type === b.type &&
     a.preflight_id === b.preflight_id &&
@@ -195,6 +201,7 @@ export function ScenarioEditor() {
   /** The auto diff's outcome for the last play; cleared on the next play. */
   const [diffNote, setDiffNote] = useState<{ text: string; link: boolean } | null>(null);
   const [draft, setDraft] = useState<MetaDraft>(emptyDraft());
+  const { projects } = useProject();
   const [savingMeta, setSavingMeta] = useState(false);
   const [metaSavedAt, setMetaSavedAt] = useState<number | null>(null);
   const [preflights, setPreflights] = useState<Preflight[]>([]);
@@ -349,6 +356,7 @@ export function ScenarioEditor() {
         name: draft.name.trim(),
         url: draft.url.trim(),
         viewport_preset: draft.viewport_preset,
+        project_id: draft.project_id,
         brand: draft.brand.trim() || null,
         type: draft.type.trim() || null,
         preflight_id: draft.preflight_id,
@@ -435,6 +443,17 @@ export function ScenarioEditor() {
           />
         </label>
         <div className="scenario-meta-row">
+          <label>
+            <span>Project</span>
+            <select
+              value={draft.project_id}
+              onChange={(e) => setDraft({ ...draft, project_id: Number(e.target.value) })}
+              title="Changing it moves the scenario, with its runs, to that project"
+            >
+              {!projects.some((p) => p.id === draft.project_id) && <option value={draft.project_id}>#{draft.project_id}</option>}
+              {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          </label>
           <label>
             <span>Brand</span>
             <input

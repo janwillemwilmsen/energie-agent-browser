@@ -54,7 +54,10 @@ import { ScenarioTexts } from './pages/ScenarioTexts.js';
 import { AdminStorage } from './pages/AdminStorage.js';
 import { AdminEnv } from './pages/AdminEnv.js';
 import { AdminTheme } from './pages/AdminTheme.js';
+import { AdminProjects } from './pages/AdminProjects.js';
 import { applyTheme, cachedTheme, loadTheme } from './lib/theme.js';
+import { ProjectProvider, useProject } from './lib/project.js';
+import { ProjectSwitcher } from './lib/ProjectSwitcher.js';
 
 interface NavItem {
   to: string;
@@ -171,6 +174,7 @@ export function App() {
   }
 
   return (
+    <ProjectProvider>
     <div
       className={`app${navCollapsed ? ' app-collapsed' : ''}${isMobile && mobileOpen ? ' app-mobile-open' : ''}`}
     >
@@ -230,7 +234,21 @@ export function App() {
         </button>
       </nav>
       <main className="main">
-        <Suspense fallback={<p className="muted">Loading…</p>}>
+        <ProjectSwitcher />
+        <PageRoutes />
+      </main>
+    </div>
+    </ProjectProvider>
+  );
+}
+
+// The pages, remounted whenever the active project changes so every page
+// refetches under the new scope — no per-page work.
+function PageRoutes() {
+  const { projectId } = useProject();
+  return (
+    <div key={projectId ?? 'all'} className="main-pages">
+      <Suspense fallback={<p className="muted">Loading…</p>}>
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/scenarios" element={<Scenarios />} />
@@ -246,6 +264,7 @@ export function App() {
           <Route path="/admin/ai" element={<AdminAi />} />
           <Route path="/admin/devices" element={<AdminDevices />} />
           <Route path="/admin/theme" element={<AdminTheme />} />
+          <Route path="/admin/projects" element={<AdminProjects />} />
           <Route path="/admin/browser" element={<AdminBrowser />} />
           <Route path="/scenarios/:id/texts" element={<ScenarioTexts />} />
           <Route path="/ask" element={<Ask />} />
@@ -264,8 +283,7 @@ export function App() {
           <Route path="/docs/:slug" element={<Docs />} />
           <Route path="/diffs" element={<Diffs />} />
         </Routes>
-        </Suspense>
-      </main>
+      </Suspense>
     </div>
   );
 }
