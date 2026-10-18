@@ -168,7 +168,9 @@ export function Screenshots() {
         {activeFilterCount === 0 ? (
           <>
             Showing all scenarios and screenshots (if available). Filter on 'Brand' and/or 'Type' to
-            select specific scenarios and screenshots.
+            select specific scenarios and screenshots. <br/>
+			Each scenario has its own day dropdown (only days with screenshots) — newest run is the
+          default.
           </>
         ) : (
           <>
@@ -234,11 +236,7 @@ export function Screenshots() {
       <TagFilter brands={brands} types={types} selection={tags} onChange={setTags} />
 
       <div className="screenshots-toolbar">
-        <span className="muted">
-          Each scenario has its own day dropdown (only days with screenshots) — newest run is the
-          default. Brand/Type filters narrow which scenarios show below.
-        </span>
-        {Object.keys(dayByScenario).length > 0 && (
+         {Object.keys(dayByScenario).length > 0 && (
           <button
             type="button"
             className="screenshots-today"

@@ -1786,27 +1786,25 @@ button.ss-timeline-link { background: transparent; cursor: pointer; font: inheri
   padding: 4px 6px; font-size: 13px;
 }
 
-/* The project bar at the top of every page: the switcher and what the
-   active project holds. Sticky so it stays while a page scrolls. */
-.project-bar {
-  position: sticky; top: 0; z-index: 20;
-  display: flex; align-items: center; gap: 10px;
-  margin: -16px -16px 12px; padding: 8px 16px;
-  background: var(--panel); border-bottom: 1px solid var(--border); font-size: 13px;
+/* The project switcher: a small box at the top right of a page. Its row is
+   slim and takes no background, so the page's own header sits right under it. */
+.project-bar { display: flex; justify-content: flex-end; margin: -6px 0 4px; }
+.project-box {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 6px 3px 8px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
 }
 .project-dot {
   display: inline-flex; align-items: center; justify-content: center; flex: none;
-  width: 16px; height: 16px; border-radius: 50%; color: var(--on-accent);
+  width: 14px; height: 14px; border-radius: 50%; color: var(--on-accent);
 }
 .project-switcher select {
-  background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px;
-  padding: 4px 8px; font-size: 14px; font-weight: 600; max-width: 320px;
+  background: transparent; color: var(--text); border: 0; border-radius: 4px;
+  padding: 2px 4px; font-size: 13px; font-weight: 600; max-width: 240px; cursor: pointer;
 }
-.project-meta { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.project-manage { margin-left: auto; color: var(--muted); display: inline-flex; padding: 4px; border-radius: 4px; }
+.project-switcher select:focus { outline: 1px solid var(--accent); }
+.project-manage { color: var(--muted); display: inline-flex; padding: 3px; border-radius: 4px; }
 .project-manage:hover { color: var(--accent); background: rgba(255,255,255,0.04); }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-@media (max-width: 640px) { .project-meta { display: none; } }
 
 /* Admin → Projects */
 .projects-table { border-collapse: collapse; width: 100%; max-width: 1100px; margin: 12px 0 20px; font-size: 13px; }
