@@ -601,6 +601,7 @@ export function AdminStorage() {
           {auth.profiles.length === 0 ? (
             <p className="muted">No saved auth profiles.</p>
           ) : (
+            <div className="storage-scroll">
             <table className="table storage-table-compact storage-table-wide">
               <thead>
                 <tr>
@@ -631,12 +632,14 @@ export function AdminStorage() {
                 ))}
               </tbody>
             </table>
+            </div>
           )}
 
           <h3 style={{ margin: '16px 0 0' }}>Session states (cookie jars)</h3>
           {auth.sessionStates.length === 0 ? (
             <p className="muted">No saved session state files.</p>
           ) : (
+            <div className="storage-scroll">
             <table className="table storage-table-compact storage-table-wide">
               <thead>
                 <tr>
@@ -670,6 +673,7 @@ export function AdminStorage() {
                 ))}
               </tbody>
             </table>
+            </div>
           )}
 
         </>

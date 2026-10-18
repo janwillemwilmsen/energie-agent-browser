@@ -2114,6 +2114,11 @@ button.ss-timeline-link { background: transparent; cursor: pointer; font: inheri
 .storage-table-compact { max-width: 520px; margin-top: 8px; }
 /* Tables with long paths/names (auth vault, session states, per-project) take the page width. */
 .storage-table-wide, .storage-projects { max-width: 1200px; width: 100%; }
+/* Long lists (auth vault, session states) scroll inside a capped box with the
+   header kept in view. */
+.storage-scroll { max-height: 320px; overflow: auto; max-width: 1200px; margin-top: 8px; border: 1px solid var(--border); border-radius: 6px; }
+.storage-scroll .storage-table-wide { margin-top: 0; }
+.storage-scroll thead th { position: sticky; top: 0; z-index: 1; background: var(--panel); }
 .storage-table-compact td, .storage-table-compact th { padding: 4px 8px; font-size: 13px; }
 .storage-maint { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
 .storage-maint-row {
