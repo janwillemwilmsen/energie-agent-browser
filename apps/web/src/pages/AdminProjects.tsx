@@ -27,7 +27,7 @@ export function AdminProjects() {
     try {
       await fn();
       await Promise.all([refreshProjects(), refreshScenarios()]);
-      setNote(label);
+      if (label) setNote(label); // '' = the action set its own note
     } catch (e: any) {
       setError(e?.message ?? String(e));
     } finally {

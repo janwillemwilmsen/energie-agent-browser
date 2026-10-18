@@ -1,4 +1,4 @@
-import { safeParseScenarioStepPayload } from '@eab/shared';
+import { safeParseScenarioStepPayload, type Project } from '@eab/shared';
 import { api, type Preflight, type ScenarioDetail } from './api.js';
 
 // Portable, environment-independent representation of a scenario, used to copy
@@ -38,6 +38,9 @@ export interface PortableScenario {
   auto_diff: number;
   // Resolved by name for portability; null when the scenario has no preflight.
   preflight_name: string | null;
+  // The project, by name (created on import when missing); absent in older
+  // bundles → the importing instance's active project.
+  project: string | null;
   steps: PortableStep[];
 }
 
@@ -58,8 +61,10 @@ function safeParse(raw: string): unknown {
 export function toPortableScenario(
   detail: ScenarioDetail,
   preflightNameById: Map<number, string>,
+  projectNameById: Map<number, string> = new Map(),
 ): PortableScenario {
   return {
+    project: projectNameById.get(detail.project_id) ?? null,
     name: detail.name,
     url: detail.url,
     viewport_preset: detail.viewport_preset,
@@ -144,6 +149,7 @@ function validateScenario(s: any, idx: number): PortableScenario {
     notes: typeof s.notes === 'string' ? s.notes : '',
     auto_diff: s.auto_diff ? 1 : 0,
     preflight_name: typeof s.preflight_name === 'string' ? s.preflight_name : null,
+    project: typeof s.project === 'string' && s.project.trim() ? s.project.trim() : null,
     steps: outSteps,
   };
 }
@@ -161,6 +167,8 @@ export interface ImportResult {
 export async function importPortableScenario(
   s: PortableScenario,
   activePreflights: Preflight[],
+  /** This instance's projects; a project the bundle names but this list lacks is created and appended here. */
+  projects: Project[] = [],
 ): Promise<ImportResult> {
   const warnings: string[] = [];
 
@@ -175,10 +183,25 @@ export async function importPortableScenario(
       );
   }
 
+  // Resolve the project by name; create it when missing. No name → the
+  // active project (the request's scope), as a new scenario would get.
+  let projectId: number | undefined;
+  if (s.project) {
+    const want = s.project.toLowerCase();
+    let match = projects.find((p) => p.name.toLowerCase() === want);
+    if (!match) {
+      match = await api.createProject({ name: s.project });
+      projects.push(match);
+      warnings.push(`project "${s.project}" created`);
+    }
+    projectId = match.id;
+  }
+
   const created = await api.createScenario({
     name: s.name,
     url: s.url,
     viewport_preset: s.viewport_preset,
+    ...(projectId != null ? { project_id: projectId } : {}),
     brand: s.brand,
     type: s.type,
     preflight_id: preflightId,

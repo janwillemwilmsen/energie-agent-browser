@@ -70,9 +70,10 @@ export function AdminScenarioIO() {
     setExporting(true);
     try {
       const nameById = new Map(preflights.map((p) => [p.id, p.name] as const));
+      const projectNameById = new Map((await api.listProjects()).map((p) => [p.id, p.name] as const));
       // listScenarios has no steps — fetch each scenario's detail for them.
       const details = await Promise.all(ids.map((id) => api.getScenario(id)));
-      const bundle = makeBundle(details.map((d) => toPortableScenario(d, nameById)));
+      const bundle = makeBundle(details.map((d) => toPortableScenario(d, nameById, projectNameById)));
       setExportText(JSON.stringify(bundle, null, 2));
     } catch (e: any) {
       setErr(e?.message ?? String(e));
@@ -108,11 +109,12 @@ export function AdminScenarioIO() {
     setImporting(true);
     const out: ImportResult[] = [];
     try {
-      // Re-read the local preflights so name→id resolution uses current data.
-      const activePreflights = await api.listPreflights();
+      // Re-read the local preflights and projects so name→id resolution uses
+      // current data (a project the bundle names is created once, then reused).
+      const [activePreflights, projects] = await Promise.all([api.listPreflights(), api.listProjects()]);
       for (const s of parsed) {
         try {
-          out.push(await importPortableScenario(s, activePreflights));
+          out.push(await importPortableScenario(s, activePreflights, projects));
         } catch (e: any) {
           setImportErr(`Failed on "${s.name}": ${e?.message ?? e}`);
           break;
