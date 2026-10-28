@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { StepKind } from '@eab/shared';
-import { api, type Preflight, type Run, type ScenarioDetail } from '../lib/api.js';
+import { BROWSER_BACKEND_LABEL, StepKind, type BrowserBackendKind } from '@eab/shared';
+import { api, type BrowserBackendAvailability, type Preflight, type Run, type ScenarioDetail } from '../lib/api.js';
 import { AddStepControls, SnapshotPane, StepEditorDnd, StepList, useServerStepStore } from '../lib/stepEditor/index.js';
 import { PreviewStream } from '../lib/screencast.js';
 import { failureFromLog } from '../lib/runLog.js';
@@ -46,6 +46,8 @@ interface MetaDraft {
   // Settle policy around interactive steps (see the Step executor's Settle).
   step_scroll_into_view: boolean;
   step_settle_ms: number;
+  /** The browser backend runs use instead of the Admin → Browser default; null = the default. */
+  browser_backend: BrowserBackendKind | null;
 }
 
 function emptyDraft(): MetaDraft {
@@ -61,6 +63,7 @@ function emptyDraft(): MetaDraft {
     auto_diff: false,
     step_scroll_into_view: false,
     step_settle_ms: 0,
+    browser_backend: null,
   };
 }
 
@@ -77,6 +80,7 @@ function draftFrom(d: ScenarioDetail): MetaDraft {
     auto_diff: !!d.auto_diff,
     step_scroll_into_view: !!d.step_scroll_into_view,
     step_settle_ms: d.step_settle_ms ?? 0,
+    browser_backend: d.browser_backend ?? null,
   };
 }
 
@@ -92,7 +96,8 @@ function draftsEqual(a: MetaDraft, b: MetaDraft): boolean {
     a.preflight_mode === b.preflight_mode &&
     a.auto_diff === b.auto_diff &&
     a.step_scroll_into_view === b.step_scroll_into_view &&
-    a.step_settle_ms === b.step_settle_ms
+    a.step_settle_ms === b.step_settle_ms &&
+    a.browser_backend === b.browser_backend
   );
 }
 
@@ -205,9 +210,13 @@ export function ScenarioEditor() {
   const [savingMeta, setSavingMeta] = useState(false);
   const [metaSavedAt, setMetaSavedAt] = useState<number | null>(null);
   const [preflights, setPreflights] = useState<Preflight[]>([]);
+  // For the browser override picker: which backends exist, which is the admin
+  // default, and which are configured well enough to be picked.
+  const [backends, setBackends] = useState<BrowserBackendAvailability | null>(null);
 
   useEffect(() => {
     api.listPreflights().then(setPreflights).catch(() => undefined);
+    api.browserBackends().then(setBackends).catch(() => undefined);
   }, []);
 
   async function reload() {
@@ -364,6 +373,7 @@ export function ScenarioEditor() {
         auto_diff: draft.auto_diff ? 1 : 0,
         step_scroll_into_view: draft.step_scroll_into_view ? 1 : 0,
         step_settle_ms: Math.min(60_000, Math.max(0, Math.floor(draft.step_settle_ms) || 0)),
+        browser_backend: draft.browser_backend,
       });
       const next = { ...data, ...updated };
       setData(next);
@@ -428,6 +438,33 @@ export function ScenarioEditor() {
               <option value="desktop">Desktop</option>
               <option value="mobile">Mobile</option>
               <option value="both">Both</option>
+            </select>
+          </label>
+          {/* Browser override: the Admin → Browser page picks the backend every
+              run uses; this pins another one for this scenario only. A backend
+              whose settings are incomplete can't be picked (the run would fail
+              at bootstrap), unless it is the saved value, so it stays visible. */}
+          <label>
+            <span>Browser</span>
+            <select
+              value={draft.browser_backend ?? ''}
+              onChange={(e) =>
+                setDraft({ ...draft, browser_backend: e.target.value === '' ? null : (e.target.value as BrowserBackendKind) })
+              }
+              title="Which browser backend runs of this scenario use. Default = whatever is active on Admin → Browser; a specific one overrides it for this scenario only. Settings for each live on the admin page."
+            >
+              <option value="">
+                Default{backends ? ` (${BROWSER_BACKEND_LABEL[backends.active]})` : ''}
+              </option>
+              {(backends?.backends ?? []).map((b) => (
+                <option key={b.kind} value={b.kind} disabled={!b.configured && draft.browser_backend !== b.kind}>
+                  {BROWSER_BACKEND_LABEL[b.kind]}
+                  {b.kind === backends?.active ? ' — admin default' : b.configured ? '' : ' — not configured'}
+                </option>
+              ))}
+              {backends == null && draft.browser_backend != null && (
+                <option value={draft.browser_backend}>{BROWSER_BACKEND_LABEL[draft.browser_backend]}</option>
+              )}
             </select>
           </label>
         </div>

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { BrowserBackendKind } from '@eab/shared';
 import { config } from '../config.js';
 import { getSetting, setSetting } from '../settings.js';
 import { decryptSecret, encryptSecret, isEncrypted } from '../secrets.js';
@@ -77,7 +78,9 @@ export const BackendSchema = z.discriminatedUnion('kind', [
 
 export type BrowserBackend = z.infer<typeof BackendSchema>;
 export type BackendKind = BrowserBackend['kind'];
-export const BACKEND_KINDS: readonly BackendKind[] = ['local', 'cdp', 'browserless-cloud', 'browserbase', 'kernel'];
+// The shared enum (scenario schema, pickers) and this union must agree; the
+// assignment fails to type-check if a kind is added on one side only.
+export const BACKEND_KINDS: readonly BackendKind[] = BrowserBackendKind.options;
 
 // Stored form of each backend: the same fields, but the required ones (URL,
 // API key) may be empty, so an unconfigured inactive backend is still a valid
@@ -103,7 +106,7 @@ export const StealthSchema = z.object({
 export type Stealth = z.infer<typeof StealthSchema>;
 
 export const BrowserConfigSchema = z.object({
-  active: z.enum(['local', 'cdp', 'browserless-cloud', 'browserbase', 'kernel']),
+  active: BrowserBackendKind,
   backends: z.object({
     local: LocalSchema,
     cdp: CdpSchema.extend({ url: maybe }),
@@ -190,10 +193,34 @@ export function currentConfig(): { config: BrowserConfig; source: 'setting' | 'e
   return { config: envConfig(), source: 'env' };
 }
 
-/** The active backend and the stealth settings — what every spawn uses. */
-export function currentBackend(): { backend: BrowserBackend; stealth: Stealth; source: 'setting' | 'env' } {
+/**
+ * The backend a spawn uses — the active one, or `override` (a Scenario's
+ * pinned backend) — plus the stealth settings. An override must be usable
+ * (strict schema: its URL / API key filled in on the admin page); an
+ * unusable one throws rather than silently running on the active browser.
+ */
+export function currentBackend(override?: BackendKind | null): { backend: BrowserBackend; stealth: Stealth; source: 'setting' | 'env' } {
   const { config: cfg, source } = currentConfig();
-  return { backend: cfg.backends[cfg.active] as BrowserBackend, stealth: cfg.stealth, source };
+  const kind = override ?? cfg.active;
+  if (override && override !== cfg.active) {
+    const r = BackendSchema.safeParse(cfg.backends[override]);
+    if (!r.success) {
+      const issue = r.error.issues[0];
+      throw new Error(
+        `browser "${override}" is not configured on Admin → Browser (${issue?.path.join('.') || 'value'} ${issue?.message ?? 'invalid'})`,
+      );
+    }
+  }
+  return { backend: cfg.backends[kind] as BrowserBackend, stealth: cfg.stealth, source };
+}
+
+/** Every backend kind with whether it is usable as-is (strict schema), for pickers. */
+export function backendAvailability(): { active: BackendKind; backends: { kind: BackendKind; configured: boolean }[] } {
+  const { config: cfg } = currentConfig();
+  return {
+    active: cfg.active,
+    backends: BACKEND_KINDS.map((kind) => ({ kind, configured: BackendSchema.safeParse(cfg.backends[kind]).success })),
+  };
 }
 
 /** The strict check for the active backend; returns the problem, or null when it can be used. */

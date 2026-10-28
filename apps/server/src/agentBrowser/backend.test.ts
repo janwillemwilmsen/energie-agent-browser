@@ -7,6 +7,7 @@ import { migrate } from '../db/migrate.js';
 import { getSetting, setSetting } from '../settings.js';
 import { _setSecretsKeyForTests, decryptSecret, encryptSecret, isEncrypted } from '../secrets.js';
 import {
+  backendAvailability,
   backendEnv,
   cdpConnectUrl,
   currentBackend,
@@ -145,6 +146,32 @@ describe('browser config', () => {
     const { stealth: _s, ...old } = kernelConfig('sk-1');
     setSetting('browser_backends', encryptSecret(JSON.stringify(old)));
     expect(currentConfig().config.stealth).toEqual(envConfig().stealth);
+  });
+
+  it('resolves a scenario override against the stored config, strictly', () => {
+    const cfg = kernelConfig('sk-1');
+    cfg.active = 'local';
+    cfg.backends.browserbase.apiKey = 'bb-key';
+    setConfigSetting(cfg);
+    // No override / null: the active backend.
+    expect(currentBackend().backend.kind).toBe('local');
+    expect(currentBackend(null).backend.kind).toBe('local');
+    // A configured one is used, with the shared stealth settings.
+    expect(currentBackend('browserbase').backend).toMatchObject({ kind: 'browserbase', apiKey: 'bb-key' });
+    expect(currentBackend('kernel').backend).toMatchObject({ kind: 'kernel', apiKey: 'sk-1' });
+    // An unconfigured one is refused with the admin-page hint, never swapped for the active one.
+    expect(() => currentBackend('cdp')).toThrow(/browser "cdp" is not configured on Admin → Browser/);
+    // The picker sees the same verdicts.
+    expect(backendAvailability()).toEqual({
+      active: 'local',
+      backends: [
+        { kind: 'local', configured: true },
+        { kind: 'cdp', configured: false },
+        { kind: 'browserless-cloud', configured: false },
+        { kind: 'browserbase', configured: true },
+        { kind: 'kernel', configured: true },
+      ],
+    });
   });
 
   it('wires the kernel backend into KERNEL_* env for the daemon', () => {

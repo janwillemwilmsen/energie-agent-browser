@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import {
   BrowserConfigSchema,
+  backendAvailability,
   bootstrapCommand,
   cdpApiBase,
   cdpConnectUrl,
@@ -34,6 +35,10 @@ import { config } from '../config.js';
 // GET  /api/browser/health           the active backend + a reachability
 //                                    probe; the Terminal/Network pages use it
 //                                    for their badge and bootstrap button.
+// GET  /api/browser/backends         every backend kind, the active one, and
+//                                    which are configured — for the scenario
+//                                    editor's browser override picker (no
+//                                    settings, no secrets).
 // GET  /api/admin/browser            every backend's settings + which is active
 //                                    (secrets redacted), the source, and the
 //                                    env fallback.
@@ -195,6 +200,7 @@ async function health() {
 
 export async function adminBrowserRoutes(app: FastifyInstance) {
   app.get('/api/browser/health', async () => health());
+  app.get('/api/browser/backends', async () => backendAvailability());
 
   // Secrets go to the page in full: this is the owner's own admin page behind
   // the app login, and a masked key can be neither checked nor copied. (They

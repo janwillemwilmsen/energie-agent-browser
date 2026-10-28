@@ -1,4 +1,4 @@
-import type { PreflightMode, ViewportPreset } from './schemas.js';
+import type { BrowserBackendKind, PreflightMode, ViewportPreset } from './schemas.js';
 
 // Row shapes as the server actually returns them. These are plain types, not
 // schemas: the server never validates its own responses, and a schema nobody
@@ -45,6 +45,8 @@ export interface Scenario {
   notes: string;
   /** 0/1: the editor diffs a successful play against the previous run. */
   auto_diff: number;
+  /** Runs use this browser backend instead of the admin default; null = the default. */
+  browser_backend: BrowserBackendKind | null;
   created_at: string;
   updated_at: string;
 }

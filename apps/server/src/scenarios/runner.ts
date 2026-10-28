@@ -22,7 +22,7 @@ import { installCursorOverlay, type CursorOverlay } from './cursorOverlay.js';
 import { deviceResolver } from '../devices.js';
 import { runStore, testRuns, type RunStatus } from '../runs/index.js';
 import { notifyRunFinished } from '../notifications.js';
-import { parseStepPayload, slotStamp, type ScreenshotMeta, type ViewportPreset } from '@eab/shared';
+import { parseStepPayload, slotStamp, type BrowserBackendKind, type ScreenshotMeta, type ViewportPreset } from '@eab/shared';
 
 // Scenario-run orchestration: loads the Scenario and its Preflight, creates the
 // Run row, binds the browser session, applies the Preflight, runs the Steps per
@@ -68,6 +68,8 @@ interface ScenarioRow {
   preflight_mode: string;
   step_scroll_into_view: number;
   step_settle_ms: number;
+  /** The backend this scenario pins; null = the admin page's active one. */
+  browser_backend: BrowserBackendKind | null;
 }
 
 /**
@@ -224,7 +226,7 @@ export function startRun(scenarioId: number, opts: StartRunOptions = {}): Starte
     .prepare(
       `SELECT id, name, url, viewport_preset,
               retries, retry_wait_before_ms, retry_wait_after_ms, restart_on_failure,
-              preflight_id, preflight_mode, step_scroll_into_view, step_settle_ms
+              preflight_id, preflight_mode, step_scroll_into_view, step_settle_ms, browser_backend
        FROM scenarios WHERE id = ?`,
     )
     .get(scenarioId) as ScenarioRow | undefined;
@@ -302,6 +304,10 @@ export function startRun(scenarioId: number, opts: StartRunOptions = {}): Starte
   // Terminal/Editor tab and every run + the live preview share it.
   const session = DEFAULT_SESSION;
   const browser = cliBrowser(session);
+  // Which backend the shared daemon must drive for this run: the scenario's
+  // override, or null for the admin default. Every openSession below says so,
+  // so a daemon left on another backend by the previous run is restarted.
+  const backend = scenario.browser_backend ?? null;
   const maxRestarts = Math.max(0, scenario.restart_on_failure ?? 0);
   // Video recording is opened/closed by `record_start` / `record_stop` steps;
   // this holder is shared across viewports and restart attempts so a recording
@@ -311,6 +317,7 @@ export function startRun(scenarioId: number, opts: StartRunOptions = {}): Starte
   };
   const ctx: RunContext = { runId, journal, session, scenario, log, recording };
   if (testOnly) appendLog(ctx, 'test run — nothing is saved (no run, screenshots, texts or recordings)');
+  if (backend) appendLog(ctx, `browser: ${backend} (this scenario's override of the Admin → Browser default)`);
   const scenarioPolicy: RetryPolicy = {
     retries: Math.max(0, scenario.retries ?? 0),
     retryWaitBeforeMs: Math.max(0, scenario.retry_wait_before_ms ?? 0),
@@ -383,6 +390,11 @@ export function startRun(scenarioId: number, opts: StartRunOptions = {}): Starte
         appendLog(ctx, 'fresh session requested — restarting browser');
         await closeSession(session).catch(() => undefined);
       }
+      // Without a preflight nothing below opens the session explicitly — the
+      // first step's command would reuse whatever daemon is up. Make sure it
+      // drives this scenario's backend (an unconfigured override fails here,
+      // before any step, with the admin-page hint).
+      if (!preflightName) await openSession(session, { intent: 'reuse', backend });
 
       // Preflight application: bind the daemon to the preflight's --session-name
       // (so any state save still lands in the right slot) AND execute the
@@ -431,7 +443,7 @@ export function startRun(scenarioId: number, opts: StartRunOptions = {}): Starte
             if (useCookiesOnly) {
               // Bound to the preflight with its saved cookies loaded; the steps
               // are NOT run.
-              await openSession(session, { intent: 'bind', sessionName: name });
+              await openSession(session, { intent: 'bind', sessionName: name, backend });
               appendLog(ctx, `preflight "${name}": cookies loaded`);
             } else {
               // A genuinely clean browser bound to the preflight, WITHOUT its
@@ -439,7 +451,7 @@ export function startRun(scenarioId: number, opts: StartRunOptions = {}): Starte
               // and a restored consent cookie would hide the banner the "click
               // consent" step is looking for. Binding the name keeps a future
               // save landing in the right slot.
-              await openSession(session, { intent: 'preflight-steps', sessionName: name });
+              await openSession(session, { intent: 'preflight-steps', sessionName: name, backend });
               // NOTE: recording is deliberately NOT started here. The preflight
               // navigates (login), and `record start` poisons the next navigation —
               // so we wait and start recording after the scenario's first navigation.
@@ -490,7 +502,7 @@ export function startRun(scenarioId: number, opts: StartRunOptions = {}): Starte
             if (preflightName) {
               await applyPreflight(preflightName);
             } else {
-              await openSession(session, { intent: 'reuse' });
+              await openSession(session, { intent: 'reuse', backend });
             }
             appendLog(ctx, 'browser connection reset; re-running scenario from the top');
           } catch (e: any) {

@@ -162,6 +162,13 @@ export interface BrowserConfig {
   stealth: BrowserStealth;
 }
 
+// Every backend kind with whether it can be used as-is, for the scenario
+// editor's override picker (no settings, no secrets).
+export interface BrowserBackendAvailability {
+  active: BrowserBackendKind;
+  backends: { kind: BrowserBackendKind; configured: boolean }[];
+}
+
 export interface BrowserSettings {
   config: BrowserConfig;
   source: 'setting' | 'env';
@@ -593,6 +600,7 @@ export const api = {
         | 'step_settle_ms'
         | 'notes'
         | 'auto_diff'
+        | 'browser_backend'
       >
     >,
   ) => req<Scenario>(`/api/scenarios/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
@@ -836,6 +844,7 @@ export const api = {
     ),
   browserHealth: () =>
     req<BrowserHealth>('/api/browser/health'),
+  browserBackends: () => req<BrowserBackendAvailability>('/api/browser/backends'),
   getBrowserSettings: () => req<BrowserSettings>('/api/admin/browser'),
   saveBrowserSettings: (config: BrowserConfig | null) =>
     req<{ config: BrowserConfig; source: 'setting' | 'env' }>('/api/admin/browser', {

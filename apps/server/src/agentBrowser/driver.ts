@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config } from '../config.js';
-import { backendEnv, bootstrapArgs, currentBackend, isRemote } from './backend.js';
+import { BACKEND_KINDS, backendEnv, bootstrapArgs, currentBackend, isRemote, type BackendKind } from './backend.js';
 import { planOpen, type OpenIntent } from './sessionPlan.js';
 export type { OpenIntent } from './sessionPlan.js';
 
@@ -171,6 +171,50 @@ function writeSessionName(session: string, name: string | null): void {
   }
 }
 
+// The sister marker for the backend override a daemon was started with (a
+// Scenario's pinned backend). Every command against a daemon must spawn with
+// the env of the backend that daemon drives — agent-browser compares the
+// configuration and force-restarts on a mismatch — so the override has to
+// outlive the bootstrap call, hot-reloads included. Absent = the admin default.
+function backendMarker(session: string): string {
+  return path.join(os.homedir(), '.agent-browser', `${session}.backend`);
+}
+function readBackendKind(session: string): BackendKind | null {
+  try {
+    const v = fs.readFileSync(backendMarker(session), 'utf-8').trim() as BackendKind;
+    return BACKEND_KINDS.includes(v) ? v : null;
+  } catch {
+    return null;
+  }
+}
+function writeBackendKind(session: string, kind: BackendKind | null): void {
+  const file = backendMarker(session);
+  try {
+    if (kind) fs.writeFileSync(file, kind);
+    else { try { fs.unlinkSync(file); } catch { /* missing is fine */ } }
+  } catch {
+    /* best-effort */
+  }
+}
+/** The backend override the live daemon for `session` was started with, or null (the admin default). */
+export function boundBackendKind(session: string): BackendKind | null {
+  return readBackendKind(session);
+}
+
+// The backend the live daemon for `session` drives. Only when the override's
+// credentials were removed on the admin page while its daemon was still up
+// does this fall back to the active backend (the daemon is then unusable
+// anyway; the next bootstrap fails loudly in spawnConnectDetached).
+function sessionBackend(session: string): ReturnType<typeof currentBackend> {
+  const kind = readBackendKind(session);
+  try {
+    return currentBackend(kind);
+  } catch (e: any) {
+    if (DEBUG) console.log(`[ab] session=${session} backend override "${kind}" unusable (${e?.message ?? e}); using the active backend`);
+    return currentBackend();
+  }
+}
+
 export interface RunResult {
   stdout: string;
   stderr: string;
@@ -206,11 +250,12 @@ const DEBUG = process.env.AB_DRIVER_DEBUG === '1';
 
 /**
  * The environment every agent-browser process gets: the wiring for the
- * configured backend (local / cdp / browserless.io) plus the stealth knobs.
- * The terminal's shell builds on it too.
+ * backend `session`'s daemon drives (the configured one, or the override it
+ * was started with) plus the stealth knobs. The terminal's shell builds on
+ * it too.
  */
-export function agentBrowserEnv(): NodeJS.ProcessEnv {
-  const { backend, stealth } = currentBackend();
+export function agentBrowserEnv(session: string = DEFAULT_SESSION): NodeJS.ProcessEnv {
+  const { backend, stealth } = sessionBackend(session);
   return backendEnv(backend, stealth);
 }
 
@@ -219,14 +264,16 @@ export function nativeBin(): string {
   return NATIVE_BIN;
 }
 
-function runRaw(args: string[], timeoutMs: number): Promise<RunResult> {
+// `session` is the daemon the command talks to (its env must match the one
+// the daemon was started with); `args` already carry `--session`.
+function runRaw(session: string, args: string[], timeoutMs: number): Promise<RunResult> {
   return new Promise((resolve) => {
     const startedAt = Date.now();
     if (DEBUG) console.log(`[ab] spawn ${args.join(' ')} (timeout=${timeoutMs}ms)`);
     const proc = spawn(NATIVE_BIN, args, {
       shell: false,
       windowsHide: true,
-      env: agentBrowserEnv(),
+      env: agentBrowserEnv(session),
     });
     let stdout = '';
     let stderr = '';
@@ -450,7 +497,14 @@ async function killStaleDaemons(session: string): Promise<void> {
   await waitForDaemonPortClosed(session, knownPort);
 }
 
-async function spawnConnectDetached(session: string, sessionName?: string | null): Promise<void> {
+async function spawnConnectDetached(
+  session: string,
+  sessionName: string | null | undefined,
+  backendKind: BackendKind | null,
+): Promise<void> {
+  // Resolve the backend first: an override that is not configured throws
+  // here, before anything is killed or spawned, with the admin-page hint.
+  const { backend, stealth } = currentBackend(backendKind);
   await killStaleDaemons(session);
   const logDir = path.join(config.dataDir, 'agent-browser-logs');
   fs.mkdirSync(logDir, { recursive: true });
@@ -470,7 +524,10 @@ async function spawnConnectDetached(session: string, sessionName?: string | null
   // up. That chicken-and-egg makes the very first `--session-name` bootstrap
   // fail with "Could not configure browser … No such file or directory
   // (os error 2)". Pre-create it so binding a brand-new preflight works.
-  const { backend, stealth } = currentBackend();
+  //
+  // Record the override before the spawn: every command from here on (the
+  // ready poll's state load, the run's steps) must use this backend's env.
+  writeBackendKind(session, backendKind);
   const cliArgs = ['--session', session];
   if (sessionName) {
     try {
@@ -512,12 +569,13 @@ async function spawnConnectDetached(session: string, sessionName?: string | null
       windowsHide: true,
       detached: process.platform !== 'win32',
       stdio: ['ignore', fd, fd],
-      env: agentBrowserEnv(),
+      env: backendEnv(backend, stealth),
     });
     proc.unref();
     proc.on('exit', () => { try { fs.closeSync(fd); } catch { /* already closed */ } });
     if (DEBUG) console.log(
-      `[ab] daemon spawn session=${session}${sessionName ? ` session-name=${sessionName}` : ''} pid=${proc.pid}`,
+      `[ab] daemon spawn session=${session}${sessionName ? ` session-name=${sessionName}` : ''}` +
+        ` backend=${backend.kind}${backendKind ? ' (override)' : ''} pid=${proc.pid}`,
     );
   } catch (e: any) {
     if (DEBUG) console.log(`[ab] daemon spawn failed: ${e?.message ?? e}`);
@@ -550,7 +608,7 @@ async function loadPersistedStateIntoDaemon(session: string, sessionName: string
   const target = persistedStatePath(sessionName);
   if (!fs.existsSync(target)) return; // first-ever use of this name, nothing to load
   try {
-    const r = await runRaw(['--session', session, 'state', 'load', target], 10_000);
+    const r = await runRaw(session, ['--session', session, 'state', 'load', target], 10_000);
     if (DEBUG) {
       console.log(
         `[ab] state load session=${session} name=${sessionName} ` +
@@ -566,8 +624,9 @@ async function connectSession(
   session: string,
   sessionName: string | null,
   skipStateLoad = false,
+  backendKind: BackendKind | null = null,
 ): Promise<void> {
-  await spawnConnectDetached(session, sessionName);
+  await spawnConnectDetached(session, sessionName, backendKind);
 
   const logPath = path.join(config.dataDir, 'agent-browser-logs', `${session}.log`);
   const start = Date.now();
@@ -667,7 +726,11 @@ async function ensureSessionLocked(
  */
 export async function openSession(session: string, intent: OpenIntent): Promise<void> {
   await withSessionLock(session, async () => {
-    const plan = planOpen(intent, { alive: isSessionAlive(session), boundName: readSessionName(session) });
+    const plan = planOpen(intent, {
+      alive: isSessionAlive(session),
+      boundName: readSessionName(session),
+      boundBackend: readBackendKind(session),
+    });
     if (plan.close) await closeSessionLocked(session).catch(() => undefined);
     if (plan.wipeName) {
       // Give agent-browser a moment to finish writing state on shutdown before
@@ -684,7 +747,7 @@ export async function openSession(session: string, intent: OpenIntent): Promise<
       clearAutoSavedState(session, plan.sessionName);
     }
     if (plan.connect) {
-      await connectSession(session, plan.sessionName, !plan.loadState);
+      await connectSession(session, plan.sessionName, !plan.loadState, plan.backend);
     } else if (plan.loadState && plan.sessionName) {
       // Already bound to the name: re-apply the on-disk state anyway. The
       // in-memory jar drifts between calls, and "bind" means "this
@@ -703,7 +766,7 @@ export async function run(args: string[], opts: RunOptions = {}): Promise<RunRes
     return {
       cmd: trackCommand(
         session,
-        runRaw(['--session', session, ...args], opts.timeoutMs ?? CMD_TIMEOUT_MS),
+        runRaw(session, ['--session', session, ...args], opts.timeoutMs ?? CMD_TIMEOUT_MS),
       ),
     };
   });
@@ -727,7 +790,7 @@ export async function runWithStdin(
     const proc = spawn(NATIVE_BIN, fullArgs, {
       shell: false,
       windowsHide: true,
-      env: agentBrowserEnv(),
+      env: agentBrowserEnv(session),
     });
     let stdout = '';
     let stderr = '';
@@ -837,7 +900,7 @@ export async function persistSessionState(session: string, sessionName: string):
     const stateDir = path.join(os.homedir(), '.agent-browser', 'sessions');
     fs.mkdirSync(stateDir, { recursive: true });
     const target = persistedStatePath(sessionName);
-    const r = await runRaw(['--session', session, 'state', 'save', target], 10_000);
+    const r = await runRaw(session, ['--session', session, 'state', 'save', target], 10_000);
     if (DEBUG) {
       console.log(
         `[ab] state save session=${session} name=${sessionName} ` +
@@ -882,8 +945,8 @@ async function closeSessionLocked(session: string): Promise<void> {
   // and QUEUES connections beyond it — every "fresh session" restart that
   // left its predecessor alive was one slot burned for up to TTL, and the
   // third run in a row simply hung. Bounded: a stuck daemon still gets killed.
-  if (isRemote(currentBackend().backend) && isSessionAlive(session)) {
-    await runRaw(['--session', session, 'close'], 10_000).catch(() => undefined);
+  if (isRemote(sessionBackend(session).backend) && isSessionAlive(session)) {
+    await runRaw(session, ['--session', session, 'close'], 10_000).catch(() => undefined);
   }
   const knownPort = readPortMarker(session);
   try {
@@ -920,6 +983,7 @@ async function closeSessionLocked(session: string): Promise<void> {
     try { fs.unlinkSync(path.join(dir, `${session}.${ext}`)); } catch { /* ignore */ }
   }
   writeSessionName(session, null);
+  writeBackendKind(session, null);
   // Don't return until the old daemon has really let go of its port, so a
   // caller that immediately re-bootstraps (Replay, session-name rebind)
   // can't collide with it.

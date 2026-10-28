@@ -301,6 +301,20 @@ export type StepPayload = z.infer<typeof StepPayload>;
 export const PreflightMode = z.enum(['steps', 'cookies']);
 export type PreflightMode = z.infer<typeof PreflightMode>;
 
+// Where the browser a run drives lives (Admin → Browser configures each one;
+// the server's agentBrowser/backend.ts owns their settings). A Scenario may
+// pin one of these instead of the admin page's active choice.
+export const BrowserBackendKind = z.enum(['local', 'cdp', 'browserless-cloud', 'browserbase', 'kernel']);
+export type BrowserBackendKind = z.infer<typeof BrowserBackendKind>;
+/** Short names for pickers; the admin page has the long descriptions. */
+export const BROWSER_BACKEND_LABEL: Record<BrowserBackendKind, string> = {
+  local: 'Local browser',
+  cdp: 'Browserless (CDP)',
+  'browserless-cloud': 'browserless.io provider',
+  browserbase: 'Browserbase',
+  kernel: 'Kernel',
+};
+
 
 export const ScenarioCreate = z.object({
   name: z.string().min(1),
@@ -325,6 +339,8 @@ export const ScenarioCreate = z.object({
   notes: z.string().max(20_000).optional(),
   // Editor play option (0/1): diff a successful play against the previous run.
   auto_diff: z.number().int().min(0).max(1).optional(),
+  // Run in this browser backend instead of the admin page's active one; null = the default.
+  browser_backend: BrowserBackendKind.nullable().optional(),
 });
 export type ScenarioCreate = z.infer<typeof ScenarioCreate>;
 
