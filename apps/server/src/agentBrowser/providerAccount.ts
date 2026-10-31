@@ -27,6 +27,7 @@ const TIMEOUT_MS = 8_000;
 export function dashboardUrl(backend: BrowserBackend): string | null {
   switch (backend.kind) {
     case 'local':
+    case 'connector':
     case 'chrome': return null;
     case 'cdp': return /browserless\.io$/i.test(safeHost(backend.url)) ? 'https://account.browserless.io/' : null;
     case 'browserless-cloud': return 'https://account.browserless.io/';
@@ -112,6 +113,7 @@ export async function providerAccount(backend: BrowserBackend): Promise<Provider
     switch (backend.kind) {
       case 'local':
         return fail('nothing to check for a local browser');
+      case 'connector':
       case 'chrome':
         return fail('no account behind your own Chrome — the status panel above shows whether it is reachable');
       case 'cdp':

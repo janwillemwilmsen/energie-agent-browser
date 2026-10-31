@@ -4,11 +4,16 @@ import { config } from '../config.js';
 import { getSetting, setSetting } from '../settings.js';
 import { decryptSecret, encryptSecret, isEncrypted } from '../secrets.js';
 import { resolveChromeConnectUrl } from './chromeRemote.js';
+import { cdpUrlFor, requirePc } from '../connector/hub.js';
 
-// Which browser the agent-browser daemon drives, as a value. Six backends:
+// Which browser the agent-browser daemon drives, as a value. Seven backends:
 //
 //   local            agent-browser's own installed browser (`agent-browser
 //                    install`). Chromium launch args travel via AGENT_BROWSER_ARGS.
+//   connector        The Chrome on the user's own PC, reached through the
+//                    connector the PC runs (connector/hub.ts): the daemon
+//                    connects to a loopback URL on this server and the hub
+//                    relays to the PC. One optional field, which PC.
 //   chrome           A Chrome the user started with --remote-debugging-port
 //                    (their own PC, reached over a tunnel). One field, host:port;
 //                    the daemon runs `connect ws://host:port/devtools/browser/<id>`
@@ -37,6 +42,13 @@ const LocalSchema = z.object({
   kind: z.literal('local'),
   // Empty → agent-browser auto-detects its installed browser.
   executablePath: z.string().trim().max(1000).default(''),
+});
+// Which paired PC to drive, by the name it connected with; empty = the most
+// recently connected one. Always valid as a setting — whether a PC is
+// connected right now is checked at bootstrap, with a message saying what to run.
+const ConnectorSchema = z.object({
+  kind: z.literal('connector'),
+  pc: z.string().trim().max(60).default(''),
 });
 // host:port of the remote-debugging Chrome. ws(s):// or http(s):// — only the
 // host and port matter (chromeRemote.ts builds the real URLs); no token, Chrome
@@ -87,6 +99,7 @@ const KernelSchema = z.object({
 /** The strict schema: what a backend must look like to be USED. */
 export const BackendSchema = z.discriminatedUnion('kind', [
   LocalSchema,
+  ConnectorSchema,
   ChromeSchema,
   CdpSchema,
   CloudSchema,
@@ -127,8 +140,9 @@ export const BrowserConfigSchema = z.object({
   active: BrowserBackendKind,
   backends: z.object({
     local: LocalSchema,
-    // Defaulted: blobs saved before this backend existed must still parse,
+    // Defaulted: blobs saved before these backends existed must still parse,
     // or currentConfig would silently fall back to env.
+    connector: ConnectorSchema.default({ kind: 'connector', pc: '' }),
     chrome: ChromeSchema.extend({ url: maybe }).default({ kind: 'chrome', url: '' }),
     cdp: CdpSchema.extend({ url: maybe }),
     'browserless-cloud': CloudSchema.extend({ apiKey: maybe }),
@@ -159,7 +173,8 @@ export function envConfig(): BrowserConfig {
     active: config.browser.mode === 'local' ? 'local' : 'cdp',
     backends: {
       local: { kind: 'local', executablePath: config.browser.executablePath },
-      // No env form: a tunnel to someone's PC is set up on the admin page, not in .env.
+      // No env form: pairing a PC or a tunnel to one is set up on the admin page, not in .env.
+      connector: { kind: 'connector', pc: '' },
       chrome: { kind: 'chrome', url: '' },
       cdp: { kind: 'cdp', url: config.browserless.url, token: config.browserless.token },
       'browserless-cloud': {
@@ -341,10 +356,11 @@ export function backendEnv(backend: BrowserBackend, stealth: Stealth = envStealt
       if (backend.executablePath) env.AGENT_BROWSER_EXECUTABLE_PATH = backend.executablePath;
       else delete env.AGENT_BROWSER_EXECUTABLE_PATH;
       break;
+    case 'connector':
     case 'chrome':
-      // Nothing to pass: the daemon gets the resolved ws URL on its command
-      // line (bootstrapArgs), and Chrome is already running with whatever
-      // flags the user gave it — launch args cannot apply.
+      // Nothing to pass: the daemon gets the connect URL on its command line
+      // (bootstrapArgs), and the user's Chrome is already running with
+      // whatever flags it was given — launch args cannot apply.
       break;
     case 'cdp':
       // Make BROWSERLESS_API_KEY available so spawned commands never trigger an
@@ -397,13 +413,24 @@ export async function bootstrapArgs(backend: BrowserBackend, stealth: Stealth): 
   switch (backend.kind) {
     case 'cdp': return ['connect', cdpConnectUrl(backend, stealth)];
     case 'chrome': return ['connect', await resolveChromeConnectUrl(backend.url)];
+    case 'connector': return ['connect', connectorConnectUrl(backend)];
     default: return ['open', 'about:blank'];
   }
 }
 
+/** The loopback relay URL for the configured PC; throws (what to run) when no PC is connected. */
+export function connectorConnectUrl(backend: Extract<BrowserBackend, { kind: 'connector' }>): string {
+  return cdpUrlFor(requirePc(backend.pc).id);
+}
+
 /** The env var the Terminal shell exports with the connect URL, per backend (null: the backend opens a page instead). */
-export function connectUrlEnvVar(backend: BrowserBackend): 'BROWSERLESS_CDP_URL' | 'CHROME_CDP_URL' | null {
-  return backend.kind === 'cdp' ? 'BROWSERLESS_CDP_URL' : backend.kind === 'chrome' ? 'CHROME_CDP_URL' : null;
+export function connectUrlEnvVar(backend: BrowserBackend): 'BROWSERLESS_CDP_URL' | 'CHROME_CDP_URL' | 'CONNECTOR_CDP_URL' | null {
+  switch (backend.kind) {
+    case 'cdp': return 'BROWSERLESS_CDP_URL';
+    case 'chrome': return 'CHROME_CDP_URL';
+    case 'connector': return 'CONNECTOR_CDP_URL';
+    default: return null;
+  }
 }
 
 /**

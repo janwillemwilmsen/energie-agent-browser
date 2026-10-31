@@ -999,6 +999,9 @@ code { background: rgba(255,255,255,0.06); padding: 2px 4px; border-radius: 3px;
 .bb-howto ol { margin: 8px 0 0; padding-left: 20px; display: flex; flex-direction: column; gap: 8px; }
 .bb-howto p { margin: 8px 0 0; }
 .bb-howto-cmd { margin: 4px 0; padding: 6px 8px; white-space: pre-wrap; word-break: break-all; background: rgba(0,0,0,0.3); border-radius: 4px; }
+/* Your own PC: the numbered steps live directly in the fields, not collapsed. */
+.bb-howto-steps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 8px; font-size: 13px; }
+.bb-howto-steps a { color: var(--accent); }
 .bb-stealth-field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
 .bb-stealth-applies { font-size: 12px; }
 .bb-stealth textarea { resize: vertical; }

@@ -31,6 +31,8 @@ import { storageRoutes } from './routes/storage.js';
 import { screenshotsZipRoutes } from './routes/screenshotsZip.js';
 import { terminalWsRoute } from './ws/terminal.js';
 import { screencastWsRoute } from './ws/screencast.js';
+import { connectorRoutes } from './routes/connector.js';
+import { connectorWsRoutes } from './connector/hub.js';
 import { projectsRoutes } from './routes/projects.js';
 import { projectScope } from './projects.js';
 
@@ -81,6 +83,10 @@ export async function createApp(opts: CreateAppOptions = {}): Promise<FastifyIns
   app.addHook('onRequest', async (req, reply) => {
     const url = req.raw.url ?? '';
     if (url.startsWith('/api/auth/') || url === '/health') return;
+    // The PC-side connector socket authenticates with its pairing code, and
+    // the daemon-side CDP socket is loopback-only with a process secret
+    // (connector/hub.ts); neither has an app login.
+    if (url === '/ws/connector' || url.startsWith('/ws/connector/')) return;
     const gated = url.startsWith('/api/') || url.startsWith('/ws/');
     if (gated && !isAuthenticated(req)) {
       return reply.code(401).send({ error: 'unauthenticated' });
@@ -116,6 +122,8 @@ export async function createApp(opts: CreateAppOptions = {}): Promise<FastifyIns
   await app.register(screenshotsZipRoutes);
   await app.register(terminalWsRoute);
   await app.register(screencastWsRoute);
+  await app.register(connectorRoutes);
+  await app.register(connectorWsRoutes);
 
   // Static SPA: serve apps/web/dist/ when the build output exists. Skipped
   // silently in development, where Vite runs on its own port and proxies

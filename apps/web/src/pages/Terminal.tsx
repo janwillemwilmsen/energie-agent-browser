@@ -35,6 +35,12 @@ export function Terminal() {
             The session connects to your browserless instance over{' '}
             <code>BROWSERLESS_CDP_URL</code>, which the shell exports from the configured URL + token.
           </>
+        ) : health?.kind === 'connector' ? (
+          <>
+            The session connects to the Chrome on your PC through its connector, over{' '}
+            <code>CONNECTOR_CDP_URL</code>, which the shell exports when it opens. eab-connect not running when
+            you opened this page? Start it, then reload.
+          </>
         ) : health?.kind === 'chrome' ? (
           <>
             The session connects to your own Chrome over <code>CHROME_CDP_URL</code>, which the shell
@@ -119,6 +125,7 @@ function BrowserHealthPanel({
   const label =
     health?.kind === 'cdp' ? 'browserless'
       : health?.kind === 'chrome' ? 'your Chrome'
+      : health?.kind === 'connector' ? 'your PC'
       : health?.kind === 'browserless-cloud' ? 'browserless.io'
         : health?.kind === 'browserbase' ? 'browserbase'
           : health?.kind === 'kernel' ? 'kernel' : 'browser';
@@ -177,8 +184,12 @@ function BrowserHealthPanel({
               <dd>{remote.version.browser ?? '—'}</dd>
               <dt>CDP protocol</dt>
               <dd>{remote.version.protocolVersion ?? '—'}</dd>
-              <dt>{health?.kind === 'chrome' ? 'Connect URL' : 'wss debugger URL'}</dt>
-              <dd><code>{remote.version.webSocketDebuggerUrl ?? '—'}</code></dd>
+              {remote.version.webSocketDebuggerUrl && (
+                <>
+                  <dt>{health?.kind === 'chrome' ? 'Connect URL' : 'wss debugger URL'}</dt>
+                  <dd><code>{remote.version.webSocketDebuggerUrl}</code></dd>
+                </>
+              )}
             </>
           )}
         </dl>

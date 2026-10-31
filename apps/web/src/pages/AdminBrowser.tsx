@@ -9,6 +9,7 @@ import {
   type BrowserSettings,
   type BrowserStealth,
   type BrowserTestResult,
+  type ConnectorStatus,
   type DoctorResult,
   type InstallJob,
   type ProviderAccount,
@@ -24,11 +25,12 @@ import { useResource, usePolling } from '../lib/resource.js';
 // means retyping credentials. Save closes the shared session, so
 // scenarios/terminal pick it up immediately.
 
-const KINDS: BrowserBackendKind[] = ['local', 'chrome', 'cdp', 'browserless-cloud', 'browserbase', 'kernel'];
+const KINDS: BrowserBackendKind[] = ['local', 'connector', 'chrome', 'cdp', 'browserless-cloud', 'browserbase', 'kernel'];
 
 const KIND_LABEL: Record<BrowserBackendKind, string> = {
   local: 'Local browser',
-  chrome: 'Your own Chrome — on your PC, started with --remote-debugging-port',
+  connector: 'Your own PC — one command on the PC, nothing to open or install',
+  chrome: 'Your own Chrome — direct address (advanced: you provide the tunnel)',
   cdp: 'Browserless over CDP — your own instance (token) or browserless.io (API key)',
   'browserless-cloud': 'browserless.io via agent-browser provider',
   browserbase: 'Browserbase',
@@ -37,7 +39,8 @@ const KIND_LABEL: Record<BrowserBackendKind, string> = {
 
 const KIND_HELP: Record<BrowserBackendKind, string> = {
   local: "agent-browser's own installed Chrome (`agent-browser install`). Runs on this server; Chromium launch args come from the Stealth section below.",
-  chrome: 'The daemon connects to a Chrome you started yourself, usually on your own PC: your IP address, your logins, a window you can watch. The server looks up the current debugger URL from /json/version on every connect, so only host:port is stored here. Chrome is already running, so the Stealth launch args do not apply; user agent and init script do. Steps below.',
+  connector: 'Drives the Chrome on your own PC — your IP address, your logins, a window you can watch — through a small script (eab-connect) that runs on the PC and dials out to this app, like a browser tab would. No ports, no SSH, no server changes; it also starts Chrome for you. Chrome is already running, so the Stealth launch args do not apply; user agent and init script do.',
+  chrome: 'Same idea without the connector: the server connects straight to a Chrome started with --remote-debugging-port at an address you make reachable yourself (SSH tunnel). Only host:port is stored; the current debugger URL is looked up from /json/version on every connect. Prefer "Your own PC" above unless you already have a tunnel.',
   cdp: 'The daemon connects straight to a browserless Chrome over CDP (`connect wss://host/chromium?token=…`). Two ways to fill it in: a self-hosted browserless (its URL + the TOKEN it runs with), or browserless.io (a region URL + your API key — the key goes in the same token field). Gets the full stealth set: launch args, ignore-default-args, user agent, init script. This is the recommended way to use browserless.io.',
   'browserless-cloud': "browserless.io through agent-browser's built-in provider (REST session API, https:// URL). Uses browserless.io's own stealth; launch args and the user-agent override do not apply, and the target/ref handling has proven flaky in scenario runs — prefer the CDP option above.",
   browserbase: "Browserbase's hosted browsers through agent-browser's provider. Only the API key is needed (the project is read from the key). Launch args and the user-agent override do not apply.",
@@ -303,7 +306,7 @@ function BackendSection({
       </label>
       <p className="muted bb-kind-help">{KIND_HELP[kind]}</p>
       <BackendFields draft={backend} onChange={onChange} />
-      {kind !== 'local' && kind !== 'chrome' && <AccountLine account={account} onCheck={onCheckAccount} />}
+      {kind !== 'local' && kind !== 'connector' && kind !== 'chrome' && <AccountLine account={account} onCheck={onCheckAccount} />}
     </div>
   );
 }
@@ -363,7 +366,7 @@ function StealthSection({ stealth, envStealth, onChange }: { stealth: BrowserSte
       <div className="bb-fields" style={{ opacity: stealth.enabled ? 1 : 0.5 }}>
         {field(
           'User agent',
-          'local, your Chrome, CDP; providers set it but have ignored it',
+          'local, your PC / your Chrome, CDP; providers set it but have ignored it',
           <input value={stealth.userAgent} onChange={(e) => set('userAgent', e.target.value)} placeholder={envStealth.userAgent} style={mono} />,
           <>
             Keep it close to a current Chrome:{' '}
@@ -373,7 +376,7 @@ function StealthSection({ stealth, envStealth, onChange }: { stealth: BrowserSte
         )}
         {field(
           'Launch args',
-          'local (AGENT_BROWSER_ARGS), CDP (browserless launch query); not your Chrome (already running) or providers',
+          'local (AGENT_BROWSER_ARGS), CDP (browserless launch query); not your PC / your Chrome (already running) or providers',
           <textarea value={stealth.launchArgs} onChange={(e) => set('launchArgs', e.target.value)} rows={3} placeholder={envStealth.launchArgs} style={mono} />,
           'Whitespace-separated Chromium flags; a value may contain commas (--disable-features=A,B). Local adds --no-sandbox and --disable-dev-shm-usage itself.',
         )}
@@ -437,6 +440,12 @@ function BackendFields({ draft, onChange }: { draft: BrowserBackend; onChange: (
             />,
             'Sets AGENT_BROWSER_EXECUTABLE_PATH for the daemon. Leave empty unless you want a specific Chrome/Chromium binary.',
           )}
+        </div>
+      );
+    case 'connector':
+      return (
+        <div className="bb-fields">
+          <ConnectorSection pc={draft.pc} onChange={(pc) => onChange({ ...draft, pc })} />
         </div>
       );
     case 'chrome':
@@ -583,6 +592,120 @@ function BackendFields({ draft, onChange }: { draft: BrowserBackend; onChange: (
   }
 }
 
+const CONNECTOR_POLL_MS = 5_000;
+
+// Your own PC: the pairing code, the one command to run there, and who is
+// connected right now. The server keeps the live list (connector/hub.ts);
+// this polls it while the section is on screen.
+function ConnectorSection({ pc, onChange }: { pc: string; onChange: (pc: string) => void }) {
+  const [reveal, setReveal] = useState(false);
+  const [copied, setCopied] = useState<'code' | 'command' | null>(null);
+  const [busy, setBusy] = useState(false);
+  const { data: status, error, refresh } = useResource(() => api.connectorStatus(), { initial: null as ConnectorStatus | null });
+  usePolling(refresh, CONNECTOR_POLL_MS);
+
+  const origin = typeof window !== 'undefined' ? window.location.origin : 'https://your-app';
+  const code = status?.code ?? '…';
+  const command = `node eab-connect.mjs ${origin} ${code}`;
+
+  async function copy(what: 'code' | 'command', text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(what);
+      setTimeout(() => setCopied((c) => (c === what ? null : c)), 1_500);
+    } catch { /* clipboard blocked: the text is on screen to select */ }
+  }
+
+  async function newCode() {
+    setBusy(true);
+    try {
+      await api.regenerateConnectorCode();
+      await refresh();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const mono = { fontFamily: 'Consolas, monospace', fontSize: 12 } as const;
+  return (
+    <>
+      <ol className="bb-howto-steps">
+        <li>
+          <strong>Download the connector</strong> to the PC whose Chrome you want to use:{' '}
+          <a href="/api/admin/connector/script" download="eab-connect.mjs">eab-connect.mjs ↗</a>{' '}
+          <span className="muted">(one file, no dependencies; needs <a href="https://nodejs.org" target="_blank" rel="noreferrer">Node 22+</a>, which you have if you ever ran this project).</span>
+        </li>
+        <li>
+          <strong>Run it</strong> in a terminal in the folder you saved it to, and leave that window open:
+          <div className="bb-howto-cmd" style={mono}>
+            {command}{' '}
+            <button type="button" className="bb-account-check" onClick={() => void copy('command', command)} disabled={!status}>
+              {copied === 'command' ? 'Copied' : 'Copy'}
+            </button>
+          </div>
+          <span className="muted">
+            It starts Chrome for you (own profile, remote debugging on) if none is running, pairs with this app and
+            prints "Paired". Log in to the sites you need in that Chrome window once. Ctrl+C stops it; Chrome stays open.
+            Options: <code>--name</code>, <code>--port</code>, <code>--no-launch</code>.
+          </span>
+        </li>
+        <li>
+          <strong>Save</strong> with this backend active, then <strong>Test browser</strong>. A tab opens in that Chrome.
+        </li>
+      </ol>
+      {field(
+        'Pairing code',
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+          <code style={{ fontSize: 14, letterSpacing: 1 }}>{reveal ? code : code.replace(/[A-Z0-9]/g, '•')}</code>
+          <button type="button" className="bb-account-check" onClick={() => setReveal((r) => !r)}>{reveal ? 'Hide' : 'Show'}</button>
+          <button type="button" className="bb-account-check" onClick={() => void copy('code', code)} disabled={!status}>{copied === 'code' ? 'Copied' : 'Copy'}</button>
+          <button type="button" className="bb-account-check" onClick={() => void newCode()} disabled={busy || !status} title="Invalidate the current code; running connectors stay connected, new ones need the new code">
+            New code
+          </button>
+        </div>,
+        'The secret in the command above: it is what lets a PC attach to this app, so treat it like a password. Someone with it and this URL could expose their Chrome to this app — nothing more.',
+      )}
+      {field(
+        'Which PC (optional)',
+        <input value={pc} onChange={(e) => onChange(e.target.value)} placeholder="empty = the most recently connected PC" style={{ maxWidth: 320 }} />,
+        'The name a connector pairs with (its hostname, or --name). Only needed when several PCs are connected.',
+      )}
+      <div className="bb-account">
+        <span className="muted">Connected now:</span>{' '}
+        {error ? (
+          <span className="error">{error}</span>
+        ) : !status ? (
+          <span className="muted">checking…</span>
+        ) : status.pcs.length === 0 ? (
+          <span className="muted">no PC — run the command above</span>
+        ) : (
+          <span className="bb-account-facts">
+            {status.pcs.map((p) => (
+              <span key={p.id}>
+                <strong>{p.name}</strong>{' '}
+                <span className="muted">
+                  {p.version.browser ?? 'browser ?'} · {p.platform || '—'} · since {new Date(p.connectedAt).toLocaleTimeString()}
+                  {p.channels ? ` · ${p.channels} session${p.channels === 1 ? '' : 's'} attached` : ''}
+                </span>
+              </span>
+            ))}
+          </span>
+        )}
+      </div>
+    </>
+  );
+
+  function field(label: string, input: JSX.Element, hint?: string) {
+    return (
+      <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 13 }}>
+        <span>{label}</span>
+        {input}
+        {hint && <span className="muted" style={{ fontSize: 12 }}>{hint}</span>}
+      </label>
+    );
+  }
+}
+
 // The steps that make a Chrome on the user's own PC reachable from this
 // server. The server runs elsewhere (a VPS), a web page cannot start a program
 // on the visitor's machine, and Chrome's debugging port only listens on the
@@ -624,7 +747,10 @@ function ChromeHowTo() {
             {cmd(`ssh -N -R 9222:localhost:9222 root@${server}`)}
             <span className="muted">
               <code>root@{server}</code> = the user and host you already use to SSH into this server (the destination
-              is the server, never <code>localhost</code>); add <code>-p 2222</code> if its SSH port is not 22. While it
+              is the server, never <code>localhost</code>); add <code>-p 2222</code> if its SSH port is not 22.{' '}
+              <em>Permission denied</em>? The server wants a key: <code>ssh-keygen -t ed25519 -f ~/.ssh/vps</code> on your
+              PC, append the <code>.pub</code> line to <code>/root/.ssh/authorized_keys</code> on the server (Coolify →
+              Terminal gives a root shell), then add <code>-i ~/.ssh/vps</code> to the command. While it
               runs, <code>127.0.0.1:9222</code> on the server is your PC's Chrome. Nothing is opened to the internet —
               the debugging port stays on your PC and travels inside SSH. Optional:{' '}
               <code>-o ServerAliveInterval=30</code> keeps the tunnel alive on a flaky connection.

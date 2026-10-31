@@ -56,21 +56,37 @@ terminal to bootstrap reliably works around this.
 
 The `local` backend launches a browser **on the server** — a Windows path entered
 on a hosted (Linux) instance fails with `No such file or directory (os error 2)`,
-and no web page can start a program on the visitor's PC. To drive the Chrome on
-your own PC instead, pick **Your own Chrome** on Admin → Browser:
+and no web page can start a program on the visitor's PC. Two backends drive the
+Chrome on your own PC instead (your IP, your logins, a window you can watch):
 
-1. Start Chrome with remote debugging in a separate profile (Chrome 136+ ignores
-   the flag on the default profile):
-   `chrome.exe --remote-debugging-port=9222 --remote-allow-origins=* --user-data-dir="%LOCALAPPDATA%\chrome-agent"`
-2. Bring the port to the server: `ssh -N -R 9222:localhost:9222 user@your-server`
-   (leave it running). The debugging port never leaves your PC except inside SSH.
-3. Enter `http://127.0.0.1:9222` on the admin page, Save, Test.
+**Your own PC (connector)** — the simple one. On Admin → Browser download
+`eab-connect.mjs` and run, on the PC:
 
-The server asks `/json/version` for Chrome's current `webSocketDebuggerUrl` on
-every connect (`apps/server/src/agentBrowser/chromeRemote.ts`), so a restarted
-Chrome needs no re-configuration. Tabs open in your Chrome window with your
-logins; `close` disconnects without closing Chrome. The admin page has the
+```
+node eab-connect.mjs https://your-app.example.com <pairing code from the admin page>
+```
+
+It starts Chrome in its own profile with remote debugging if none is running,
+dials *out* to the app (`/ws/connector`, like a browser tab — nothing to open,
+no SSH, no server or Docker changes) and relays the DevTools protocol. The
+server-side hub (`apps/server/src/connector/hub.ts`) gives the daemon a
+loopback URL (`ws://127.0.0.1:$PORT/ws/connector/cdp/<pc>?key=…`, loopback-only
+with a per-process secret) and pipes each CDP connection to a channel on the
+PC's socket. Works with any instance of this app and any PC with Node 22+;
+several PCs can pair, the "Which PC" field picks one. The pairing code is a
+secret stored encrypted; "New code" invalidates it.
+
+**Your own Chrome (direct address)** — when you already have a tunnel. Start
+Chrome yourself (`chrome.exe --remote-debugging-port=9222 --remote-allow-origins=*
+--user-data-dir="%LOCALAPPDATA%\chrome-agent"`; Chrome 136+ ignores the flag on
+the default profile), make the port reachable from the server
+(`ssh -N -R 9222:localhost:9222 user@your-server`), enter `http://127.0.0.1:9222`.
+The server asks `/json/version` for the current `webSocketDebuggerUrl` on every
+connect (`apps/server/src/agentBrowser/chromeRemote.ts`). The admin page has the
 Docker/Coolify variant (`host.docker.internal` + `GatewayPorts`).
+
+Either way tabs open in your Chrome window and `close` disconnects without
+closing Chrome.
 
 ## Layout
 

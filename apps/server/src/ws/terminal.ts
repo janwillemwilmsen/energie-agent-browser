@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { agentBrowserEnv, DEFAULT_SESSION } from '../agentBrowser/driver.js';
-import { cdpConnectUrl, connectUrlEnvVar, currentBackend } from '../agentBrowser/backend.js';
+import { cdpConnectUrl, connectUrlEnvVar, connectorConnectUrl, currentBackend } from '../agentBrowser/backend.js';
 import { resolveChromeConnectUrl } from '../agentBrowser/chromeRemote.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -62,6 +62,13 @@ async function ptyEnv(): Promise<{ env: NodeJS.ProcessEnv; warning: string | nul
   const { backend, stealth } = currentBackend();
   const envVar = connectUrlEnvVar(backend);
   if (backend.kind === 'cdp' && envVar) env[envVar] = cdpConnectUrl(backend, stealth);
+  if (backend.kind === 'connector' && envVar) {
+    try {
+      env[envVar] = connectorConnectUrl(backend);
+    } catch (e: any) {
+      warning = `${envVar} not set — ${e?.message ?? e}`;
+    }
+  }
   if (backend.kind === 'chrome' && envVar) {
     // Resolved once, when the shell opens: the URL embeds Chrome's current
     // browser id. Restart Chrome → reopen the Terminal page (or Refresh).

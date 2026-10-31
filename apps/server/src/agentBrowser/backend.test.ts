@@ -150,14 +150,22 @@ describe('browser config', () => {
     expect(currentConfig().config.stealth).toEqual(envConfig().stealth);
   });
 
-  it('reads a blob saved before the chrome backend existed', () => {
+  it('reads a blob saved before the connector and chrome backends existed', () => {
     const cfg = kernelConfig('sk-1');
-    const { chrome: _c, ...backends } = cfg.backends;
+    const { chrome: _c, connector: _k, ...backends } = cfg.backends;
     setSetting('browser_backends', encryptSecret(JSON.stringify({ ...cfg, backends })));
     const now = currentConfig();
     expect(now.source).toBe('setting');
     expect(now.config.active).toBe('kernel');
     expect(now.config.backends.chrome).toEqual({ kind: 'chrome', url: '' });
+    expect(now.config.backends.connector).toEqual({ kind: 'connector', pc: '' });
+  });
+
+  it('boots the connector backend only when a PC is connected, with the message to run otherwise', async () => {
+    const connector = { kind: 'connector' as const, pc: '' };
+    await expect(bootstrapArgs(connector, envConfig().stealth)).rejects.toThrow(/No PC is connected — start eab-connect/);
+    const ref = process.platform === 'win32' ? '%CONNECTOR_CDP_URL%' : '$CONNECTOR_CDP_URL';
+    expect(bootstrapCommand(connector, 'default')).toBe(`agent-browser --session default connect "${ref}"`);
   });
 
   it('validates the chrome backend as host:port in a ws or http URL', () => {
@@ -204,6 +212,7 @@ describe('browser config', () => {
       active: 'local',
       backends: [
         { kind: 'local', configured: true },
+        { kind: 'connector', configured: true },
         { kind: 'chrome', configured: false },
         { kind: 'cdp', configured: false },
         { kind: 'browserless-cloud', configured: false },

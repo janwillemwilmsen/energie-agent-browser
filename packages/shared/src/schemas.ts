@@ -304,12 +304,13 @@ export type PreflightMode = z.infer<typeof PreflightMode>;
 // Where the browser a run drives lives (Admin → Browser configures each one;
 // the server's agentBrowser/backend.ts owns their settings). A Scenario may
 // pin one of these instead of the admin page's active choice.
-export const BrowserBackendKind = z.enum(['local', 'chrome', 'cdp', 'browserless-cloud', 'browserbase', 'kernel']);
+export const BrowserBackendKind = z.enum(['local', 'connector', 'chrome', 'cdp', 'browserless-cloud', 'browserbase', 'kernel']);
 export type BrowserBackendKind = z.infer<typeof BrowserBackendKind>;
 /** Short names for pickers; the admin page has the long descriptions. */
 export const BROWSER_BACKEND_LABEL: Record<BrowserBackendKind, string> = {
   local: 'Local browser',
-  chrome: 'Your own Chrome (remote debugging)',
+  connector: 'Your own PC (connector)',
+  chrome: 'Your own Chrome (direct address)',
   cdp: 'Browserless (CDP)',
   'browserless-cloud': 'browserless.io provider',
   browserbase: 'Browserbase',

@@ -124,6 +124,8 @@ export interface CompareRunsResult {
 // the owner's own, behind the app login — and are encrypted at rest.
 export type BrowserBackend =
   | { kind: 'local'; executablePath: string }
+  // The Chrome on a PC running eab-connect; `pc` = its name, '' = the most recently connected.
+  | { kind: 'connector'; pc: string }
   // host:port of a Chrome started with --remote-debugging-port (ws(s):// or http(s)://).
   | { kind: 'chrome'; url: string }
   | { kind: 'cdp'; url: string; token: string }
@@ -217,6 +219,20 @@ export interface BrowserHealth {
       webSocketDebuggerUrl: string | null;
     } | null;
   } | null;
+}
+
+// Admin → Browser → Your own PC: the pairing code and the PCs holding a
+// connector socket right now.
+export interface ConnectorStatus {
+  code: string;
+  pcs: Array<{
+    id: string;
+    name: string;
+    platform: string;
+    connectedAt: string;
+    version: { browser: string | null; protocolVersion: string | null; userAgent: string | null };
+    channels: number;
+  }>;
 }
 
 export interface BrowserTestResult {
@@ -865,6 +881,8 @@ export const api = {
       body: JSON.stringify({ withDeps }),
     }),
   browserInstallStatus: () => req<InstallJob>('/api/admin/browser/install'),
+  connectorStatus: () => req<ConnectorStatus>('/api/admin/connector'),
+  regenerateConnectorCode: () => req<{ code: string }>('/api/admin/connector/code', { method: 'POST' }),
   saveAskModel: (model: string) =>
     req<{ model: string; source: 'setting' | 'agent' }>('/api/admin/ai-settings/ask', {
       method: 'PUT',

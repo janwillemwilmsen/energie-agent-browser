@@ -19,6 +19,7 @@ import {
 } from '../agentBrowser/backend.js';
 import { providerAccount } from '../agentBrowser/providerAccount.js';
 import { chromeHttpBase, probeChrome } from '../agentBrowser/chromeRemote.js';
+import { listPcs, pickPc } from '../connector/hub.js';
 import {
   DEFAULT_SESSION,
   agentBrowserEnv,
@@ -180,6 +181,27 @@ async function health() {
     case 'local':
       // Nothing remote to probe; `doctor` is the real check and the page runs it on demand.
       return { ...base, ok: true, latencyMs: 0, executablePath: backend.executablePath || null, remote: null };
+    case 'connector': {
+      // No network probe: a PC is either holding its socket to the hub or not.
+      const pc = pickPc(backend.pc);
+      const others = listPcs().map((p) => p.name);
+      const error = pc
+        ? null
+        : others.length
+          ? `no connected PC named "${backend.pc}" (connected: ${others.join(', ')})`
+          : 'no PC connected — run eab-connect on your PC';
+      return {
+        ...base,
+        ok: !!pc,
+        latencyMs: 0,
+        executablePath: null,
+        remote: {
+          configuredUrl: pc ? `${pc.name} (${pc.platform || 'connector'})` : backend.pc ? `PC "${backend.pc}"` : 'most recently connected PC',
+          probe: { url: 'connector', status: pc ? 200 : null, ok: !!pc, error },
+          version: pc ? { ...pc.version, webSocketDebuggerUrl: null } : null,
+        },
+      };
+    }
     case 'chrome': {
       // /json/version is the one probe: reachable + it is a Chrome + the
       // WebSocket URL the next connect will use (its browser id changes on
