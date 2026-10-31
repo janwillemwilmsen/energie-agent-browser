@@ -650,7 +650,8 @@ function ChromeHowTo() {
               {cmd(`echo "GatewayPorts clientspecified" >> /etc/ssh/sshd_config\nsystemctl restart ssh   # or: systemctl restart sshd`)}
             </li>
             <li>
-              <strong>In Coolify, once:</strong> the app → Advanced → <em>Custom Docker Options</em>:
+              <strong>In Coolify, once:</strong> the app → Configuration → General → Build → <em>Custom Docker Options</em>{' '}
+              (<code>--add-host</code> is on Coolify's supported list; <code>--network host</code> is not):
               {cmd(`--add-host=host.docker.internal:host-gateway`)}
               <span className="muted">Save and redeploy — it only applies to a new container.</span>
             </li>
