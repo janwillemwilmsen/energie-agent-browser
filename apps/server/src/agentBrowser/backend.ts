@@ -3,11 +3,17 @@ import { BrowserBackendKind } from '@eab/shared';
 import { config } from '../config.js';
 import { getSetting, setSetting } from '../settings.js';
 import { decryptSecret, encryptSecret, isEncrypted } from '../secrets.js';
+import { resolveChromeConnectUrl } from './chromeRemote.js';
 
-// Which browser the agent-browser daemon drives, as a value. Five backends:
+// Which browser the agent-browser daemon drives, as a value. Six backends:
 //
 //   local            agent-browser's own installed browser (`agent-browser
 //                    install`). Chromium launch args travel via AGENT_BROWSER_ARGS.
+//   chrome           A Chrome the user started with --remote-debugging-port
+//                    (their own PC, reached over a tunnel). One field, host:port;
+//                    the daemon runs `connect ws://host:port/devtools/browser/<id>`
+//                    with the <id> looked up from /json/version at connect time
+//                    (chromeRemote.ts).
 //   cdp              A self-hosted browserless (or any CDP endpoint): the daemon
 //                    runs `connect wss://host/chromium?token=…`. Two fields.
 //   browserless-cloud browserless.io through agent-browser's built-in provider
@@ -31,6 +37,17 @@ const LocalSchema = z.object({
   kind: z.literal('local'),
   // Empty → agent-browser auto-detects its installed browser.
   executablePath: z.string().trim().max(1000).default(''),
+});
+// host:port of the remote-debugging Chrome. ws(s):// or http(s):// — only the
+// host and port matter (chromeRemote.ts builds the real URLs); no token, Chrome
+// has none, which is why it must only ever be reachable through a tunnel.
+const ChromeSchema = z.object({
+  kind: z.literal('chrome'),
+  url: z
+    .string()
+    .trim()
+    .url()
+    .refine((u) => /^(wss?|https?):\/\//.test(u), 'must be a ws://, wss://, http:// or https:// URL, e.g. http://127.0.0.1:9222'),
 });
 const CdpSchema = z.object({
   kind: z.literal('cdp'),
@@ -70,6 +87,7 @@ const KernelSchema = z.object({
 /** The strict schema: what a backend must look like to be USED. */
 export const BackendSchema = z.discriminatedUnion('kind', [
   LocalSchema,
+  ChromeSchema,
   CdpSchema,
   CloudSchema,
   BrowserbaseSchema,
@@ -109,6 +127,9 @@ export const BrowserConfigSchema = z.object({
   active: BrowserBackendKind,
   backends: z.object({
     local: LocalSchema,
+    // Defaulted: blobs saved before this backend existed must still parse,
+    // or currentConfig would silently fall back to env.
+    chrome: ChromeSchema.extend({ url: maybe }).default({ kind: 'chrome', url: '' }),
     cdp: CdpSchema.extend({ url: maybe }),
     'browserless-cloud': CloudSchema.extend({ apiKey: maybe }),
     browserbase: BrowserbaseSchema.extend({ apiKey: maybe }),
@@ -138,6 +159,8 @@ export function envConfig(): BrowserConfig {
     active: config.browser.mode === 'local' ? 'local' : 'cdp',
     backends: {
       local: { kind: 'local', executablePath: config.browser.executablePath },
+      // No env form: a tunnel to someone's PC is set up on the admin page, not in .env.
+      chrome: { kind: 'chrome', url: '' },
       cdp: { kind: 'cdp', url: config.browserless.url, token: config.browserless.token },
       'browserless-cloud': {
         kind: 'browserless-cloud',
@@ -318,6 +341,11 @@ export function backendEnv(backend: BrowserBackend, stealth: Stealth = envStealt
       if (backend.executablePath) env.AGENT_BROWSER_EXECUTABLE_PATH = backend.executablePath;
       else delete env.AGENT_BROWSER_EXECUTABLE_PATH;
       break;
+    case 'chrome':
+      // Nothing to pass: the daemon gets the resolved ws URL on its command
+      // line (bootstrapArgs), and Chrome is already running with whatever
+      // flags the user gave it — launch args cannot apply.
+      break;
     case 'cdp':
       // Make BROWSERLESS_API_KEY available so spawned commands never trigger an
       // auto-launch error, but do NOT set AGENT_BROWSER_PROVIDER — a self-hosted
@@ -361,21 +389,35 @@ export function isRemote(backend: BrowserBackend): boolean {
 /**
  * The CLI args that boot a session daemon. For local and the cloud provider,
  * opening a cheap page is what launches/creates the browser; for cdp the
- * daemon connects to the remote endpoint.
+ * daemon connects to the remote endpoint; for chrome it connects to the
+ * browser's current WebSocket URL, looked up now (throws when Chrome is not
+ * reachable, with the reason).
  */
-export function bootstrapArgs(backend: BrowserBackend, stealth: Stealth): string[] {
-  return backend.kind === 'cdp' ? ['connect', cdpConnectUrl(backend, stealth)] : ['open', 'about:blank'];
+export async function bootstrapArgs(backend: BrowserBackend, stealth: Stealth): Promise<string[]> {
+  switch (backend.kind) {
+    case 'cdp': return ['connect', cdpConnectUrl(backend, stealth)];
+    case 'chrome': return ['connect', await resolveChromeConnectUrl(backend.url)];
+    default: return ['open', 'about:blank'];
+  }
+}
+
+/** The env var the Terminal shell exports with the connect URL, per backend (null: the backend opens a page instead). */
+export function connectUrlEnvVar(backend: BrowserBackend): 'BROWSERLESS_CDP_URL' | 'CHROME_CDP_URL' | null {
+  return backend.kind === 'cdp' ? 'BROWSERLESS_CDP_URL' : backend.kind === 'chrome' ? 'CHROME_CDP_URL' : null;
 }
 
 /**
  * The same bootstrap as a line for the Terminal page. The terminal shell
- * exports BROWSERLESS_CDP_URL for the cdp backend so the token never reaches
- * the client.
+ * exports the connect URL (BROWSERLESS_CDP_URL / CHROME_CDP_URL) so the token
+ * never reaches the client and the line stays valid when Chrome restarts.
+ * cmd.exe and sh expand variables differently; the line follows the server's
+ * shell (ws/terminal.ts).
  */
 export function bootstrapCommand(backend: BrowserBackend, session: string): string {
-  return backend.kind === 'cdp'
-    ? `agent-browser --session ${session} connect "%BROWSERLESS_CDP_URL%"`
-    : `agent-browser --session ${session} open about:blank`;
+  const envVar = connectUrlEnvVar(backend);
+  if (!envVar) return `agent-browser --session ${session} open about:blank`;
+  const ref = process.platform === 'win32' ? `%${envVar}%` : `$${envVar}`;
+  return `agent-browser --session ${session} connect "${ref}"`;
 }
 
 // --- Secrets in API responses ---------------------------------------------------

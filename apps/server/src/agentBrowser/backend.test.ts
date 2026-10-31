@@ -9,6 +9,8 @@ import { _setSecretsKeyForTests, decryptSecret, encryptSecret, isEncrypted } fro
 import {
   backendAvailability,
   backendEnv,
+  bootstrapArgs,
+  bootstrapCommand,
   cdpConnectUrl,
   currentBackend,
   currentConfig,
@@ -148,6 +150,42 @@ describe('browser config', () => {
     expect(currentConfig().config.stealth).toEqual(envConfig().stealth);
   });
 
+  it('reads a blob saved before the chrome backend existed', () => {
+    const cfg = kernelConfig('sk-1');
+    const { chrome: _c, ...backends } = cfg.backends;
+    setSetting('browser_backends', encryptSecret(JSON.stringify({ ...cfg, backends })));
+    const now = currentConfig();
+    expect(now.source).toBe('setting');
+    expect(now.config.active).toBe('kernel');
+    expect(now.config.backends.chrome).toEqual({ kind: 'chrome', url: '' });
+  });
+
+  it('validates the chrome backend as host:port in a ws or http URL', () => {
+    const cfg = kernelConfig('sk-1');
+    cfg.active = 'chrome';
+    expect(validateActive(cfg)).toMatch(/^chrome: url/);
+    cfg.backends.chrome.url = 'C:\\Program Files\\Google\\Chrome\\chrome.exe';
+    expect(validateActive(cfg)).toMatch(/^chrome: url/);
+    cfg.backends.chrome.url = 'http://127.0.0.1:9222';
+    expect(validateActive(cfg)).toBeNull();
+    cfg.backends.chrome.url = 'ws://host.docker.internal:9222';
+    expect(validateActive(cfg)).toBeNull();
+  });
+
+  it('boots the chrome backend with a connect line and nothing provider-ish in its env', async () => {
+    const chrome = { kind: 'chrome' as const, url: 'http://127.0.0.1:1' };
+    const stealth = envConfig().stealth;
+    // Port 1 is never a Chrome: the lookup fails with its reason instead of spawning a dead daemon.
+    await expect(bootstrapArgs(chrome, stealth)).rejects.toThrow(/Chrome at http:\/\/127\.0\.0\.1:1 is not reachable/);
+    const ref = process.platform === 'win32' ? '%CHROME_CDP_URL%' : '$CHROME_CDP_URL';
+    expect(bootstrapCommand(chrome, 'default')).toBe(`agent-browser --session default connect "${ref}"`);
+    const env = backendEnv(chrome, stealth);
+    expect(env.AGENT_BROWSER_PROVIDER).toBeUndefined();
+    expect(env.AGENT_BROWSER_ARGS).toBeUndefined();
+    // Local still opens a page.
+    await expect(bootstrapArgs(envConfig().backends.local, stealth)).resolves.toEqual(['open', 'about:blank']);
+  });
+
   it('resolves a scenario override against the stored config, strictly', () => {
     const cfg = kernelConfig('sk-1');
     cfg.active = 'local';
@@ -166,6 +204,7 @@ describe('browser config', () => {
       active: 'local',
       backends: [
         { kind: 'local', configured: true },
+        { kind: 'chrome', configured: false },
         { kind: 'cdp', configured: false },
         { kind: 'browserless-cloud', configured: false },
         { kind: 'browserbase', configured: true },

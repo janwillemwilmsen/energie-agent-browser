@@ -33,7 +33,13 @@ export function Terminal() {
         {health?.kind === 'cdp' ? (
           <>
             The session connects to your browserless instance over{' '}
-            <code>%BROWSERLESS_CDP_URL%</code>, which the shell exports from the configured URL + token.
+            <code>BROWSERLESS_CDP_URL</code>, which the shell exports from the configured URL + token.
+          </>
+        ) : health?.kind === 'chrome' ? (
+          <>
+            The session connects to your own Chrome over <code>CHROME_CDP_URL</code>, which the shell
+            exports when it opens (Chrome's current debugger URL). Restarted Chrome or the tunnel? Reload
+            this page so the shell picks up the new URL.
           </>
         ) : health?.kind === 'browserless-cloud' || health?.kind === 'browserbase' || health?.kind === 'kernel' ? (
           <>The session is created on {PROVIDER_NAME[health.kind]} through agent-browser's provider; opening a page is what starts it.</>
@@ -112,6 +118,7 @@ function BrowserHealthPanel({
     state === 'ok' ? 'status-success' : state === 'fail' ? 'status-failed' : 'status-running';
   const label =
     health?.kind === 'cdp' ? 'browserless'
+      : health?.kind === 'chrome' ? 'your Chrome'
       : health?.kind === 'browserless-cloud' ? 'browserless.io'
         : health?.kind === 'browserbase' ? 'browserbase'
           : health?.kind === 'kernel' ? 'kernel' : 'browser';
@@ -154,13 +161,13 @@ function BrowserHealthPanel({
           <dt>Endpoint</dt>
           <dd><code>{remote.configuredUrl}</code></dd>
 
-          <dt>Probe (<code>/docs</code>)</dt>
+          <dt>Probe</dt>
           <dd>
-            <code>{remote.docs.url}</code>{' '}
-            {remote.docs.status != null ? (
-              <span className={remote.docs.ok ? 'muted' : 'error'}>→ {remote.docs.status}</span>
+            <code>{remote.probe.url}</code>{' '}
+            {remote.probe.status != null && remote.probe.ok ? (
+              <span className="muted">→ {remote.probe.status}</span>
             ) : (
-              <span className="error">→ {remote.docs.error}</span>
+              <span className="error">→ {remote.probe.error ?? `HTTP ${remote.probe.status}`}</span>
             )}
           </dd>
 
@@ -170,7 +177,7 @@ function BrowserHealthPanel({
               <dd>{remote.version.browser ?? '—'}</dd>
               <dt>CDP protocol</dt>
               <dd>{remote.version.protocolVersion ?? '—'}</dd>
-              <dt>wss debugger URL</dt>
+              <dt>{health?.kind === 'chrome' ? 'Connect URL' : 'wss debugger URL'}</dt>
               <dd><code>{remote.version.webSocketDebuggerUrl ?? '—'}</code></dd>
             </>
           )}

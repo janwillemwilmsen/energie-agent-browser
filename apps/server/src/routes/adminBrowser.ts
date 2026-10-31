@@ -18,6 +18,7 @@ import {
   type BrowserBackend,
 } from '../agentBrowser/backend.js';
 import { providerAccount } from '../agentBrowser/providerAccount.js';
+import { chromeHttpBase, probeChrome } from '../agentBrowser/chromeRemote.js';
 import {
   DEFAULT_SESSION,
   agentBrowserEnv,
@@ -125,7 +126,7 @@ async function probeBrowserless(httpsBase: string, token: string) {
   return {
     ok: docs.ok || version !== null,
     latencyMs: Date.now() - startedAt,
-    docs: { url: docsUrl, status: docs.status, ok: docs.ok, error: docs.error ?? null },
+    probe: { url: docsUrl, status: docs.status, ok: docs.ok, error: docs.error ?? null },
     version,
   };
 }
@@ -179,16 +180,34 @@ async function health() {
     case 'local':
       // Nothing remote to probe; `doctor` is the real check and the page runs it on demand.
       return { ...base, ok: true, latencyMs: 0, executablePath: backend.executablePath || null, remote: null };
+    case 'chrome': {
+      // /json/version is the one probe: reachable + it is a Chrome + the
+      // WebSocket URL the next connect will use (its browser id changes on
+      // every Chrome restart, so this is the live one).
+      const url = `${chromeHttpBase(backend.url)}/json/version`;
+      const r = await probeChrome(backend.url, PROBE_TIMEOUT_MS);
+      return {
+        ...base,
+        ok: r.ok,
+        latencyMs: r.latencyMs,
+        executablePath: null,
+        remote: {
+          configuredUrl: chromeHttpBase(backend.url),
+          probe: { url, status: r.status, ok: r.ok, error: r.error },
+          version: r.version,
+        },
+      };
+    }
     case 'cdp': {
       const r = await probeBrowserless(cdpApiBase(backend.url), backend.token);
       const cdp = new URL(cdpConnectUrl(backend, stealth));
       cdp.searchParams.delete('token');
       cdp.searchParams.delete('launch');
-      return { ...base, ok: r.ok, latencyMs: r.latencyMs, executablePath: null, remote: { configuredUrl: cdp.toString(), docs: r.docs, version: r.version } };
+      return { ...base, ok: r.ok, latencyMs: r.latencyMs, executablePath: null, remote: { configuredUrl: cdp.toString(), probe: r.probe, version: r.version } };
     }
     case 'browserless-cloud': {
       const r = await probeBrowserless(backend.apiUrl.replace(/\/+$/, ''), backend.apiKey);
-      return { ...base, ok: r.ok, latencyMs: r.latencyMs, executablePath: null, remote: { configuredUrl: backend.apiUrl, docs: r.docs, version: r.version } };
+      return { ...base, ok: r.ok, latencyMs: r.latencyMs, executablePath: null, remote: { configuredUrl: backend.apiUrl, probe: r.probe, version: r.version } };
     }
     case 'browserbase':
     case 'kernel':

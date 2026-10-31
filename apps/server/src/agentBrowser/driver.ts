@@ -505,6 +505,10 @@ async function spawnConnectDetached(
   // Resolve the backend first: an override that is not configured throws
   // here, before anything is killed or spawned, with the admin-page hint.
   const { backend, stealth } = currentBackend(backendKind);
+  // Likewise the connect args: for the chrome backend this asks the user's
+  // Chrome for its current WebSocket URL, and an unreachable Chrome should
+  // fail here with its reason, not leave a dead daemon behind.
+  const bootstrap = await bootstrapArgs(backend, stealth);
   await killStaleDaemons(session);
   const logDir = path.join(config.dataDir, 'agent-browser-logs');
   fs.mkdirSync(logDir, { recursive: true });
@@ -550,8 +554,8 @@ async function spawnConnectDetached(
   }
   // Local / cloud provider: opening a cheap, side-effect-free page is what
   // spawns the daemon + launches (or creates) the browser; the recorder's
-  // first real navigation replaces about:blank. cdp: connect to the remote.
-  cliArgs.push(...bootstrapArgs(backend, stealth));
+  // first real navigation replaces about:blank. cdp / chrome: connect to the remote.
+  cliArgs.push(...bootstrap);
 
   // Spawn the daemon via a PLAIN child spawn. Up to agent-browser 0.28 the
   // Windows exe needed a pty (conpty) to start its CDP client, but 0.29+

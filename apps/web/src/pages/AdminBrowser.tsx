@@ -16,17 +16,19 @@ import {
 import { useResource, usePolling } from '../lib/resource.js';
 
 // Admin → Browser: pick which browser the agent-browser session daemon drives
-// (local install, a self-hosted browserless over CDP, browserless.io,
-// Browserbase or Kernel through agent-browser's providers), check that it
-// works, and install the local one. Every backend's settings are shown and
-// saved together — the radio only picks the active one — and live in the
-// database (encrypted), so switching never means retyping credentials. Save
-// closes the shared session, so scenarios/terminal pick it up immediately.
+// (local install, the user's own Chrome over a tunnel, a self-hosted
+// browserless over CDP, browserless.io, Browserbase or Kernel through
+// agent-browser's providers), check that it works, and install the local one.
+// Every backend's settings are shown and saved together — the radio only picks
+// the active one — and live in the database (encrypted), so switching never
+// means retyping credentials. Save closes the shared session, so
+// scenarios/terminal pick it up immediately.
 
-const KINDS: BrowserBackendKind[] = ['local', 'cdp', 'browserless-cloud', 'browserbase', 'kernel'];
+const KINDS: BrowserBackendKind[] = ['local', 'chrome', 'cdp', 'browserless-cloud', 'browserbase', 'kernel'];
 
 const KIND_LABEL: Record<BrowserBackendKind, string> = {
   local: 'Local browser',
+  chrome: 'Your own Chrome — on your PC, started with --remote-debugging-port',
   cdp: 'Browserless over CDP — your own instance (token) or browserless.io (API key)',
   'browserless-cloud': 'browserless.io via agent-browser provider',
   browserbase: 'Browserbase',
@@ -35,6 +37,7 @@ const KIND_LABEL: Record<BrowserBackendKind, string> = {
 
 const KIND_HELP: Record<BrowserBackendKind, string> = {
   local: "agent-browser's own installed Chrome (`agent-browser install`). Runs on this server; Chromium launch args come from the Stealth section below.",
+  chrome: 'The daemon connects to a Chrome you started yourself, usually on your own PC: your IP address, your logins, a window you can watch. The server looks up the current debugger URL from /json/version on every connect, so only host:port is stored here. Chrome is already running, so the Stealth launch args do not apply; user agent and init script do. Steps below.',
   cdp: 'The daemon connects straight to a browserless Chrome over CDP (`connect wss://host/chromium?token=…`). Two ways to fill it in: a self-hosted browserless (its URL + the TOKEN it runs with), or browserless.io (a region URL + your API key — the key goes in the same token field). Gets the full stealth set: launch args, ignore-default-args, user agent, init script. This is the recommended way to use browserless.io.',
   'browserless-cloud': "browserless.io through agent-browser's built-in provider (REST session API, https:// URL). Uses browserless.io's own stealth; launch args and the user-agent override do not apply, and the target/ref handling has proven flaky in scenario runs — prefer the CDP option above.",
   browserbase: "Browserbase's hosted browsers through agent-browser's provider. Only the API key is needed (the project is read from the key). Launch args and the user-agent override do not apply.",
@@ -97,6 +100,7 @@ export function AdminBrowser() {
   const checkConfiguredAccounts = useCallback((cfg: BrowserConfig) => {
     for (const kind of KINDS) {
       const b = cfg.backends[kind];
+      // chrome has no account to ask about; the status panel's probe covers it.
       const configured =
         (b.kind === 'cdp' && !!b.url) ||
         ((b.kind === 'browserless-cloud' || b.kind === 'browserbase' || b.kind === 'kernel') && !!b.apiKey);
@@ -299,7 +303,7 @@ function BackendSection({
       </label>
       <p className="muted bb-kind-help">{KIND_HELP[kind]}</p>
       <BackendFields draft={backend} onChange={onChange} />
-      {kind !== 'local' && <AccountLine account={account} onCheck={onCheckAccount} />}
+      {kind !== 'local' && kind !== 'chrome' && <AccountLine account={account} onCheck={onCheckAccount} />}
     </div>
   );
 }
@@ -359,7 +363,7 @@ function StealthSection({ stealth, envStealth, onChange }: { stealth: BrowserSte
       <div className="bb-fields" style={{ opacity: stealth.enabled ? 1 : 0.5 }}>
         {field(
           'User agent',
-          'local, CDP; providers set it but have ignored it',
+          'local, your Chrome, CDP; providers set it but have ignored it',
           <input value={stealth.userAgent} onChange={(e) => set('userAgent', e.target.value)} placeholder={envStealth.userAgent} style={mono} />,
           <>
             Keep it close to a current Chrome:{' '}
@@ -369,7 +373,7 @@ function StealthSection({ stealth, envStealth, onChange }: { stealth: BrowserSte
         )}
         {field(
           'Launch args',
-          'local (AGENT_BROWSER_ARGS), CDP (browserless launch query); not providers',
+          'local (AGENT_BROWSER_ARGS), CDP (browserless launch query); not your Chrome (already running) or providers',
           <textarea value={stealth.launchArgs} onChange={(e) => set('launchArgs', e.target.value)} rows={3} placeholder={envStealth.launchArgs} style={mono} />,
           'Whitespace-separated Chromium flags; a value may contain commas (--disable-features=A,B). Local adds --no-sandbox and --disable-dev-shm-usage itself.',
         )}
@@ -433,6 +437,21 @@ function BackendFields({ draft, onChange }: { draft: BrowserBackend; onChange: (
             />,
             'Sets AGENT_BROWSER_EXECUTABLE_PATH for the daemon. Leave empty unless you want a specific Chrome/Chromium binary.',
           )}
+        </div>
+      );
+    case 'chrome':
+      return (
+        <div className="bb-fields">
+          {field(
+            'Chrome debugging address, as seen from this server',
+            <input
+              value={draft.url}
+              onChange={(e) => onChange({ ...draft, url: e.target.value })}
+              placeholder="http://127.0.0.1:9222"
+            />,
+            'host:port only — the server fetches /json/version there and connects to the ws://…/devtools/browser/<id> it returns. Through the SSH tunnel below this is http://127.0.0.1:9222.',
+          )}
+          <ChromeHowTo />
         </div>
       );
     case 'cdp': {
@@ -564,6 +583,101 @@ function BackendFields({ draft, onChange }: { draft: BrowserBackend; onChange: (
   }
 }
 
+// The steps that make a Chrome on the user's own PC reachable from this
+// server. The server runs elsewhere (a VPS), a web page cannot start a program
+// on the visitor's machine, and Chrome's debugging port only listens on the
+// PC itself — so: start Chrome with the flag, then bring the port to the
+// server with a reverse SSH tunnel (Windows 10+, macOS and Linux all ship
+// `ssh`). The tunnel command uses this page's host as the server name.
+function ChromeHowTo() {
+  const server = typeof window !== 'undefined' ? window.location.hostname : 'your-server';
+  // Opened on a local instance: the server IS this PC, so Chrome is reachable
+  // directly and `ssh user@localhost` would only ever hit the PC itself.
+  const sameMachine = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(server);
+  const mono = { fontSize: 11 } as const;
+  const cmd = (text: string) => (
+    <pre className="bb-howto-cmd" style={mono}>{text}</pre>
+  );
+  return (
+    <details className="bb-howto">
+      <summary>How to set it up — 3 steps on your PC, nothing to install</summary>
+      <ol>
+        <li>
+          <strong>Start Chrome with remote debugging, in a separate profile.</strong>{' '}
+          Chrome 136+ ignores the flag on your normal profile, so this gives it its own
+          (<code>chrome-agent</code>); log in to the sites you need in that window once — it remembers.
+          Close every Chrome window first if the command only opens a tab in your existing Chrome.
+          {cmd(`:: Windows (cmd / Run dialog)\n"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" --remote-debugging-port=9222 --remote-allow-origins=* --user-data-dir="%LOCALAPPDATA%\\chrome-agent"\n\n# macOS\n"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --remote-debugging-port=9222 --remote-allow-origins=* --user-data-dir="$HOME/chrome-agent"\n\n# Linux\ngoogle-chrome --remote-debugging-port=9222 --remote-allow-origins=* --user-data-dir="$HOME/chrome-agent"`)}
+          <span className="muted">On Windows the path may be <code>C:\Program Files (x86)\…</code>. Check: open <code>http://localhost:9222/json/version</code> in that Chrome — you should see JSON with a <code>"Browser"</code> line.</span>
+        </li>
+        {sameMachine ? (
+          <li>
+            <strong>No tunnel needed here.</strong>{' '}
+            This page is served from <code>{server}</code>, so the app runs on the same machine as Chrome and reaches
+            port 9222 directly. The reverse SSH tunnel below is only for a hosted instance (VPS); open this page there
+            and the command shows that server's name.
+          </li>
+        ) : (
+          <li>
+            <strong>Bring port 9222 to this server with a reverse SSH tunnel.</strong>{' '}
+            Run this in a second terminal on your PC and leave it open (it prints nothing while it works):
+            {cmd(`ssh -N -R 9222:localhost:9222 root@${server}`)}
+            <span className="muted">
+              <code>root@{server}</code> = the user and host you already use to SSH into this server (the destination
+              is the server, never <code>localhost</code>); add <code>-p 2222</code> if its SSH port is not 22. While it
+              runs, <code>127.0.0.1:9222</code> on the server is your PC's Chrome. Nothing is opened to the internet —
+              the debugging port stays on your PC and travels inside SSH. Optional:{' '}
+              <code>-o ServerAliveInterval=30</code> keeps the tunnel alive on a flaky connection.
+            </span>
+          </li>
+        )}
+        <li>
+          <strong>Enter <code>http://127.0.0.1:9222</code> above, Save, then Test browser.</strong>{' '}
+          A tab opens in your Chrome window. The status panel shows the Chrome version and the connect URL once it is reachable.
+        </li>
+      </ol>
+      {!sameMachine && (
+        <details className="bb-howto" style={{ marginTop: 8 }}>
+          <summary>App runs in Docker (Coolify)? Three extra one-time steps</summary>
+          <p className="muted">
+            In Docker the app has its own <code>127.0.0.1</code>, so a tunnel that lands on the server's loopback is
+            invisible to it. Land it on the Docker bridge address instead (normally <code>172.17.0.1</code>, check with{' '}
+            <code>ip addr show docker0</code>) and give the container a name for that address.
+          </p>
+          <ol>
+            <li>
+              <strong>On the server, once (as root):</strong> let SSH tunnels bind on other addresses than loopback.
+              {cmd(`echo "GatewayPorts clientspecified" >> /etc/ssh/sshd_config\nsystemctl restart ssh   # or: systemctl restart sshd`)}
+            </li>
+            <li>
+              <strong>In Coolify, once:</strong> the app → Advanced → <em>Custom Docker Options</em>:
+              {cmd(`--add-host=host.docker.internal:host-gateway`)}
+              <span className="muted">Save and redeploy — it only applies to a new container.</span>
+            </li>
+            <li>
+              <strong>Then, each time:</strong> use this tunnel command instead of the one above, and enter{' '}
+              <code>http://host.docker.internal:9222</code> in the field.
+              {cmd(`ssh -N -R 172.17.0.1:9222:localhost:9222 root@${server}`)}
+              <span className="muted">
+                Refresh the status panel: green + a Chrome version means the whole chain works. <em>connection refused</em> =
+                tunnel down or GatewayPorts not applied (on the server, <code>curl -H "Host: localhost" http://172.17.0.1:9222/json/version</code>{' '}
+                should print JSON); <em>host not found</em> = the Docker option is not on the running container yet.
+                While the tunnel is up, every container on this server can reach your Chrome — close the tunnel window when done.
+              </span>
+            </li>
+          </ol>
+        </details>
+      )}
+      <p className="muted">
+        <strong>Good to know.</strong> The debugging port is full control of that Chrome profile, so never forward it on your
+        router — only ever through the tunnel. Chrome restarted or tunnel dropped → the next connect looks up the new URL by
+        itself; the Terminal shell needs a page reload. Closing the session here disconnects but does not close your Chrome.
+        Scenarios run in your Chrome's window, so leave it open and don't click around in that tab while a run is active.
+      </p>
+    </details>
+  );
+}
+
 function StatusPanel({ health, checking, onRefresh }: { health: BrowserHealth | null; checking: boolean; onRefresh: () => void }) {
   const state: 'pending' | 'ok' | 'fail' = !health ? 'pending' : health.ok ? 'ok' : 'fail';
   const badgeClass = state === 'ok' ? 'status-success' : state === 'fail' ? 'status-failed' : 'status-running';
@@ -603,16 +717,22 @@ function StatusPanel({ health, checking, onRefresh }: { health: BrowserHealth | 
             <>
               <dt>Endpoint</dt>
               <dd><code>{remote.configuredUrl}</code></dd>
-              <dt>Probe (<code>/docs</code>)</dt>
+              <dt>Probe (<code>{probePath(remote.probe.url)}</code>)</dt>
               <dd>
-                {remote.docs.status != null
-                  ? <span className={remote.docs.ok ? 'muted' : 'error'}>HTTP {remote.docs.status}</span>
-                  : <span className="error">{remote.docs.error}</span>}
+                {remote.probe.status != null && remote.probe.ok
+                  ? <span className="muted">HTTP {remote.probe.status}</span>
+                  : <span className="error">{remote.probe.error ?? `HTTP ${remote.probe.status}`}</span>}
               </dd>
               {remote.version && (
                 <>
                   <dt>Browser</dt>
                   <dd>{remote.version.browser ?? '—'} <span className="muted">(CDP {remote.version.protocolVersion ?? '—'})</span></dd>
+                  {health.kind === 'chrome' && (
+                    <>
+                      <dt>Connect URL</dt>
+                      <dd><code>{remote.version.webSocketDebuggerUrl ?? '—'}</code> <span className="muted">— changes when Chrome restarts; looked up on every connect</span></dd>
+                    </>
+                  )}
                 </>
               )}
             </>
@@ -621,6 +741,11 @@ function StatusPanel({ health, checking, onRefresh }: { health: BrowserHealth | 
       )}
     </div>
   );
+}
+
+/** The path of a probe URL (/docs, /json/version) for the label; the URL itself may carry a token. */
+function probePath(url: string): string {
+  try { return new URL(url).pathname; } catch { return url; }
 }
 
 function TestReport({ result }: { result: BrowserTestResult }) {

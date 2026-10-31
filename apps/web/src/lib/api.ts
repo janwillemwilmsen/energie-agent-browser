@@ -124,6 +124,8 @@ export interface CompareRunsResult {
 // the owner's own, behind the app login — and are encrypted at rest.
 export type BrowserBackend =
   | { kind: 'local'; executablePath: string }
+  // host:port of a Chrome started with --remote-debugging-port (ws(s):// or http(s)://).
+  | { kind: 'chrome'; url: string }
   | { kind: 'cdp'; url: string; token: string }
   | {
       kind: 'browserless-cloud';
@@ -200,7 +202,8 @@ export interface BrowserHealth {
   executablePath: string | null;
   remote: {
     configuredUrl: string;
-    docs: {
+    // The reachability request: browserless /docs, Chrome /json/version.
+    probe: {
       url: string;
       status: number | null;
       ok: boolean;
@@ -210,6 +213,7 @@ export interface BrowserHealth {
       browser: string | null;
       protocolVersion: string | null;
       userAgent: string | null;
+      // chrome: the exact URL the next `connect` uses (rebased onto the configured host).
       webSocketDebuggerUrl: string | null;
     } | null;
   } | null;

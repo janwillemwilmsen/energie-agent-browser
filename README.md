@@ -52,6 +52,26 @@ On Windows, daemons bootstrapped from the Fastify server process itself
 occasionally fail the outbound wss handshake with OS error 10060. Using the
 terminal to bootstrap reliably works around this.
 
+## Using your own Chrome from a hosted instance
+
+The `local` backend launches a browser **on the server** — a Windows path entered
+on a hosted (Linux) instance fails with `No such file or directory (os error 2)`,
+and no web page can start a program on the visitor's PC. To drive the Chrome on
+your own PC instead, pick **Your own Chrome** on Admin → Browser:
+
+1. Start Chrome with remote debugging in a separate profile (Chrome 136+ ignores
+   the flag on the default profile):
+   `chrome.exe --remote-debugging-port=9222 --remote-allow-origins=* --user-data-dir="%LOCALAPPDATA%\chrome-agent"`
+2. Bring the port to the server: `ssh -N -R 9222:localhost:9222 user@your-server`
+   (leave it running). The debugging port never leaves your PC except inside SSH.
+3. Enter `http://127.0.0.1:9222` on the admin page, Save, Test.
+
+The server asks `/json/version` for Chrome's current `webSocketDebuggerUrl` on
+every connect (`apps/server/src/agentBrowser/chromeRemote.ts`), so a restarted
+Chrome needs no re-configuration. Tabs open in your Chrome window with your
+logins; `close` disconnects without closing Chrome. The admin page has the
+Docker/Coolify variant (`host.docker.internal` + `GatewayPorts`).
+
 ## Layout
 
 ```
