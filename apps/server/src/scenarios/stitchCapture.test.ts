@@ -21,17 +21,25 @@ afterEach(() => { fs.rmSync(dir, { recursive: true, force: true }); });
  * capture is a solid colour picked from the scroll position, so the composed
  * image can be checked band by band.
  */
-function fakePage(opts: { pageHeight: number; viewportHeight: number; viewportWidth?: number; dpr?: number }) {
+function fakePage(opts: {
+  pageHeight: number;
+  viewportHeight: number;
+  viewportWidth?: number;
+  dpr?: number;
+  /** Animate scrolling: the position only catches up on the NEXT read, as `scroll-behavior: smooth` does. */
+  smooth?: boolean;
+}) {
   const width = opts.viewportWidth ?? 100;
   const dpr = opts.dpr ?? 1;
-  const state = { y: 0, hidden: false, restored: false, shots: 0 };
+  const state = { y: 0, pending: 0, hidden: false, restored: false, shots: 0, instant: false, behaviorRestored: false };
   const colourFor = (y: number) => ({ r: Math.min(255, y % 256), g: 120, b: 200, alpha: 1 });
+  const smoothNow = () => opts.smooth === true;
 
   const browser: Browser = {
     async run(args): Promise<RunResult> {
       if (args[0] === 'eval') {
         const js = args[1] ?? '';
-        if (js.includes('scrollHeight')) {
+        if (js.includes('scrollHeight:')) {
           return OK(JSON.stringify(JSON.stringify({
             scrollHeight: opts.pageHeight,
             viewportHeight: opts.viewportHeight,
@@ -39,10 +47,19 @@ function fakePage(opts: { pageHeight: number; viewportHeight: number; viewportWi
             dpr,
           })));
         }
+        if (js.includes('__eabScrollBehavior =')) { state.instant = true; return OK(JSON.stringify(JSON.stringify({ count: 2 }))); }
+        if (js.includes('delete window.__eabScrollBehavior')) { state.behaviorRestored = true; return OK(JSON.stringify(JSON.stringify({ count: 2 }))); }
         if (js.includes('window.scrollTo')) {
-          const want = Number(/window\.scrollTo\(0, (-?\d+)\)/.exec(js)?.[1] ?? 0);
+          const want = Number(/top:\s*(-?\d+)/.exec(js)?.[1] ?? 0);
           // A real page clamps at the bottom of the document.
-          state.y = Math.max(0, Math.min(want, opts.pageHeight - opts.viewportHeight));
+          const landed = Math.max(0, Math.min(want, opts.pageHeight - opts.viewportHeight));
+          if (smoothNow()) state.pending = landed; // still animating
+          else state.y = landed;
+          return OK(JSON.stringify(JSON.stringify({ ok: true })));
+        }
+        if (js.includes('window.scrollY')) {
+          // A smooth scroll has arrived by the time the position is read again.
+          if (smoothNow()) state.y = state.pending;
           return OK(JSON.stringify(JSON.stringify({ y: state.y })));
         }
         if (js.includes('__eabHidden = hidden')) { state.hidden = true; return OK(JSON.stringify(JSON.stringify({ count: 2 }))); }
@@ -132,16 +149,32 @@ describe('stitched full-page capture', () => {
     expect({ w: meta.width, h: meta.height }).toEqual({ w: 100, h: 1800 });
   });
 
-  it('stops instead of looping when the page refuses to scroll', async () => {
+  it('captures the whole page when it scrolls smoothly', async () => {
+    // essent.nl sets `scroll-behavior: smooth`, so the position read in the
+    // same breath as the scroll is still the OLD one. Reading it that way
+    // looked like "this page will not scroll" and produced a single slice on
+    // a 12709 px page — the rest of the image came out white.
+    const { browser, state, colourFor } = fakePage({ pageHeight: 1000, viewportHeight: 400, smooth: true });
+    const out = path.join(dir, 'smooth.png');
+    const r = await captureStitchedFullPage(browser, out, noop);
+
+    expect(r.slices).toBe(3);
+    expect(await pixelAt(out, 50, 10)).toMatchObject({ r: colourFor(0).r });
+    expect(await pixelAt(out, 50, 410)).toMatchObject({ r: colourFor(400).r });
+    expect(await pixelAt(out, 50, 999)).toMatchObject({ r: colourFor(600).r });
+    // The page's own scroll behaviour is put back.
+    expect(state.instant).toBe(true);
+    expect(state.behaviorRestored).toBe(true);
+  });
+
+  it('stops instead of looping when the page really refuses to scroll', async () => {
+    // An overlay locking the body, say: the position never moves off zero.
     const { browser, state } = fakePage({ pageHeight: 5000, viewportHeight: 500 });
-    // A page that ignores scrolling entirely (an overlay locking the body, say).
     const original = browser.run.bind(browser);
-    browser.run = async (args, o) => {
-      if (args[0] === 'eval' && (args[1] ?? '').includes('window.scrollTo')) {
-        return OK(JSON.stringify(JSON.stringify({ y: 0 })));
-      }
-      return original(args, o);
-    };
+    browser.run = async (args, o) =>
+      args[0] === 'eval' && (args[1] ?? '').includes('window.scrollY')
+        ? OK(JSON.stringify(JSON.stringify({ y: 0 })))
+        : original(args, o);
     const out = path.join(dir, 'stuck.png');
     const r = await captureStitchedFullPage(browser, out, noop);
     // One real slice, then the repeat is detected and the loop ends.

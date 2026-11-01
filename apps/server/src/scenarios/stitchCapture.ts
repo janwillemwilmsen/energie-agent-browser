@@ -97,9 +97,36 @@ async function readMetrics(browser: Browser, timeoutMs: number): Promise<PageMet
   return m;
 }
 
-/** Scroll to `y` and return where the page actually ended up (it clamps at the bottom). */
-async function scrollTo(browser: Browser, y: number, timeoutMs: number): Promise<number> {
-  const js = `(() => { window.scrollTo(0, ${y}); return JSON.stringify({ y: window.scrollY || window.pageYOffset || 0 }); })()`;
+// Many sites set `scroll-behavior: smooth`, which makes window.scrollTo
+// ANIMATE: the position read straight afterwards is still the old one. That
+// reads as "this page will not scroll" and collapses the capture to a single
+// slice. Force instant scrolling for the duration, remembering the page's own
+// inline value so it can be put back.
+const FORCE_INSTANT_SCROLL_JS =
+  '(() => { const els = [document.documentElement, document.body].filter(Boolean); ' +
+  'window.__eabScrollBehavior = els.map((el) => [el, el.style.scrollBehavior]); ' +
+  'for (const el of els) el.style.scrollBehavior = "auto"; ' +
+  'return JSON.stringify({ count: els.length }); })()';
+
+const RESTORE_SCROLL_BEHAVIOR_JS =
+  '(() => { const s = window.__eabScrollBehavior || []; for (const [el, v] of s) { el.style.scrollBehavior = v; } ' +
+  'delete window.__eabScrollBehavior; return JSON.stringify({ count: s.length }); })()';
+
+/** Ask the page to scroll to `y`. Where it really lands is read separately, after it settles. */
+async function requestScrollTo(browser: Browser, y: number, timeoutMs: number): Promise<void> {
+  const js =
+    `(() => { const se = document.scrollingElement || document.documentElement; ` +
+    `try { window.scrollTo({ top: ${y}, left: 0, behavior: "instant" }); } catch (e) { window.scrollTo(0, ${y}); } ` +
+    `if (se && Math.abs((se.scrollTop || 0) - ${y}) > 1) se.scrollTop = ${y}; ` +
+    `return JSON.stringify({ ok: true }); })()`;
+  await evaluate(browser, js, timeoutMs);
+}
+
+/** Where the page is scrolled to now, in CSS pixels. */
+async function readScrollY(browser: Browser, timeoutMs: number): Promise<number> {
+  const js =
+    '(() => { const se = document.scrollingElement || document.documentElement; ' +
+    'return JSON.stringify({ y: Math.round(window.scrollY || window.pageYOffset || (se ? se.scrollTop : 0) || 0) }); })()';
   return parseEvalJson<{ y: number }>(await evaluate(browser, js, timeoutMs)).y;
 }
 
@@ -146,7 +173,14 @@ export async function captureStitchedFullPage(
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'eab-stitch-'));
   const parts: Array<{ input: string; top: number; left: number }> = [];
   let hid = false;
+  let forcedInstant = false;
   try {
+    try {
+      await evaluate(browser, FORCE_INSTANT_SCROLL_JS, timeoutMs);
+      forcedInstant = true;
+    } catch (e: any) {
+      log(`stitch: could not disable smooth scrolling (${e?.message ?? e})`);
+    }
     // The captures, not the page's own devicePixelRatio, decide the scale: an
     // emulated viewport or a mismatched window would otherwise compose every
     // slice at the wrong offset. Measured from the first slice below.
@@ -167,7 +201,11 @@ export async function captureStitchedFullPage(
     let index = 0;
     let previousTop = -1;
     for (const target of targets) {
-      const actual = await scrollTo(browser, target, timeoutMs);
+      await requestScrollTo(browser, target, timeoutMs);
+      // Let the scroll land before asking where it landed: a smooth or
+      // JS-driven scroll does not finish within the call that started it.
+      await sleep(settleMs);
+      const actual = await readScrollY(browser, timeoutMs);
       // A page that refuses to scroll any further would otherwise spin out
       // slice after identical slice.
       if (actual === previousTop && index > 0) break;
@@ -219,8 +257,10 @@ export async function captureStitchedFullPage(
     if (hid) {
       await evaluate(browser, RESTORE_FIXED_JS, timeoutMs).catch(() => undefined);
     }
-    // Put the page back where a full-page capture would have left it.
-    await scrollTo(browser, 0, timeoutMs).catch(() => 0);
+    // Put the page back where a full-page capture would have left it, then
+    // give it its own scrolling behaviour back.
+    await requestScrollTo(browser, 0, timeoutMs).catch(() => undefined);
+    if (forcedInstant) await evaluate(browser, RESTORE_SCROLL_BEHAVIOR_JS, timeoutMs).catch(() => undefined);
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 }
