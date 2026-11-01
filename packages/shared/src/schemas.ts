@@ -160,28 +160,34 @@ export const AuthProfileName = z
   .max(64)
   .regex(/^[A-Za-z0-9._-]+$/, 'use letters, digits, dot, dash, underscore only');
 
-const StepNavigate = z.object({ kind: z.literal('navigate'), url: z.string().url() });
-const StepClick = z.object({ kind: z.literal('click'), selector: SelectorStrategy });
-const StepType = z.object({
+// Every Step may carry `optional`: when it fails after its retries, the run
+// logs the failure and continues with the next Step instead of failing (a
+// cookie banner that only shows the first time). The executor reads it; the
+// step editor's modal sets it.
+const StepBase = z.object({ optional: z.boolean().optional() });
+
+const StepNavigate = StepBase.extend({ kind: z.literal('navigate'), url: z.string().url() });
+const StepClick = StepBase.extend({ kind: z.literal('click'), selector: SelectorStrategy });
+const StepType = StepBase.extend({
   kind: z.literal('type'),
   selector: SelectorStrategy,
   text: z.string(),
 });
-const StepFill = z.object({
+const StepFill = StepBase.extend({
   kind: z.literal('fill'),
   selector: SelectorStrategy,
   value: z.string(),
 });
 // selector targets the <select> element itself (role "combobox" in the
 // snapshot), NOT one of its options; value is the option's label or value.
-const StepSelect = z.object({
+const StepSelect = StepBase.extend({
   kind: z.literal('select'),
   selector: SelectorStrategy,
   value: z.string(),
 });
-const StepCheck = z.object({ kind: z.literal('check'), selector: SelectorStrategy });
-const StepUncheck = z.object({ kind: z.literal('uncheck'), selector: SelectorStrategy });
-const StepScroll = z.object({
+const StepCheck = StepBase.extend({ kind: z.literal('check'), selector: SelectorStrategy });
+const StepUncheck = StepBase.extend({ kind: z.literal('uncheck'), selector: SelectorStrategy });
+const StepScroll = StepBase.extend({
   kind: z.literal('scroll'),
   selector: SelectorStrategy.optional(),
   dx: z.number().optional(),
@@ -193,7 +199,7 @@ const StepScroll = z.object({
   // When true, jump back to the top of the page in one call.
   toTop: z.boolean().optional(),
 });
-const StepScreenshot = z.object({
+const StepScreenshot = StepBase.extend({
   kind: z.literal('screenshot'),
   // Falls back to `step-<position>` when absent.
   label: z.string().optional(),
@@ -226,14 +232,14 @@ const StepScreenshot = z.object({
   // Lossy quality 1-100 (jpeg/webp only; ignored for png). Default 80.
   quality: z.number().int().min(1).max(100).optional(),
 });
-const StepWait = z.object({
+const StepWait = StepBase.extend({
   kind: z.literal('wait'),
   // Either a fixed delay (ms) or wait until a selector resolves.
   ms: z.number().int().positive().optional(),
   selector: SelectorStrategy.optional(),
 });
-const StepEvaluate = z.object({ kind: z.literal('evaluate'), js: z.string() });
-const StepRecordStart = z.object({
+const StepEvaluate = StepBase.extend({ kind: z.literal('evaluate'), js: z.string() });
+const StepRecordStart = StepBase.extend({
   kind: z.literal('record_start'),
   // Draw an animated pointer (and click ripple) in the page while recording,
   // so the video shows where the mouse is. Removed at record_stop.
@@ -242,15 +248,15 @@ const StepRecordStart = z.object({
   // previous interaction (agent-browser `click --human`) instead of jumping.
   human: z.boolean().optional(),
 });
-const StepRecordStop = z.object({ kind: z.literal('record_stop') });
-const StepClose = z.object({ kind: z.literal('close') });
+const StepRecordStop = StepBase.extend({ kind: z.literal('record_stop') });
+const StepClose = StepBase.extend({ kind: z.literal('close') });
 // Key names follow agent-browser / Playwright: "Enter", "Tab", "Escape",
 // "Space", "ArrowDown", "F5", a single character, or a chord joined with "+"
 // ("Control+a", "Shift+Tab").
-const StepPress = z.object({ kind: z.literal('press'), key: z.string().trim().min(1) });
+const StepPress = StepBase.extend({ kind: z.literal('press'), key: z.string().trim().min(1) });
 // Falls back to `step-<position>` when absent, like screenshot.
-const StepSaveText = z.object({ kind: z.literal('save_text'), label: z.string().optional() });
-const StepPause = z.object({
+const StepSaveText = StepBase.extend({ kind: z.literal('save_text'), label: z.string().optional() });
+const StepPause = StepBase.extend({
   kind: z.literal('pause'),
   label: z.string().optional(),
   // How long to wait for Resume before the run is aborted. Default 10 minutes.
@@ -260,7 +266,7 @@ const StepPause = z.object({
 // password live in ~/.agent-browser/auth/<name>.json (AES-GCM encrypted), so
 // credentials never appear in a step payload. Only Preflights may contain this
 // kind today: the scenario_steps CHECK constraint (and StepKind) exclude it.
-const StepAuthLogin = z.object({ kind: z.literal('auth-login'), name: AuthProfileName });
+const StepAuthLogin = StepBase.extend({ kind: z.literal('auth-login'), name: AuthProfileName });
 
 // The Steps a Scenario may store: exactly the kinds in StepKind (and in the
 // scenario_steps CHECK constraint). This is what the scenario write seam
@@ -365,18 +371,18 @@ export const PreflightName = z
 // The subset of StepPayload a Preflight may contain, validated at the preflight
 // write seam. Every PreflightStep is a valid StepPayload.
 export const PreflightStep = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('navigate'), url: z.string().url() }),
-  z.object({ kind: z.literal('wait'), ms: z.number().int().positive() }),
-  z.object({ kind: z.literal('click'), selector: SelectorStrategy }),
-  z.object({ kind: z.literal('type'), selector: SelectorStrategy, text: z.string() }),
+  StepBase.extend({ kind: z.literal('navigate'), url: z.string().url() }),
+  StepBase.extend({ kind: z.literal('wait'), ms: z.number().int().positive() }),
+  StepBase.extend({ kind: z.literal('click'), selector: SelectorStrategy }),
+  StepBase.extend({ kind: z.literal('type'), selector: SelectorStrategy, text: z.string() }),
   // Pick an option in a native <select>; selector targets the combobox itself.
-  z.object({ kind: z.literal('select'), selector: SelectorStrategy, value: z.string() }),
+  StepBase.extend({ kind: z.literal('select'), selector: SelectorStrategy, value: z.string() }),
   // Enter to submit a login form, Escape to dismiss a dialog.
   StepPress,
   // Single-form login via agent-browser's encrypted Auth Vault. The actual
   // username + password live in ~/.agent-browser/auth/<name>.json (AES-GCM
   // encrypted), keeping credentials out of preflight steps_json in the DB.
-  z.object({ kind: z.literal('auth-login'), name: AuthProfileName }),
+  StepBase.extend({ kind: z.literal('auth-login'), name: AuthProfileName }),
 ]);
 export type PreflightStep = z.infer<typeof PreflightStep>;
 

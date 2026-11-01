@@ -161,6 +161,11 @@ function StepRow({
       </button>
       <span className="step-body">
         <code className={`step-kind step-kind-${step.kind}`}>{step.kind}</code>{' '}
+        {step.payload.optional === true && (
+          <span className="muted" title="Optional: a failure is logged and the run continues with the next step" style={{ fontSize: 11, marginRight: 4 }}>
+            (optional)
+          </span>
+        )}
         {step.invalid ? (
           <span className="error" title="Edit the payload JSON with ✎, or delete the step">
             invalid step — {step.invalid}

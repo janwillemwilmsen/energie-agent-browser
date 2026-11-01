@@ -300,7 +300,16 @@ async function executeStepWithRetries(
       return;
     } catch (e: any) {
       // An abort is a decision, not a flaky step: no retries.
-      if (e instanceof RunAbortedError || attempt >= retries) throw e;
+      if (e instanceof RunAbortedError) throw e;
+      if (attempt >= retries) {
+        // An optional Step (a cookie banner that is not always there) is
+        // skipped once its retries are spent; the run goes on.
+        if (step.optional) {
+          ctx.log(`step #${position} (${step.kind}) failed: ${e?.message ?? e} — optional, skipped`);
+          return;
+        }
+        throw e;
+      }
       ctx.log(
         `step #${position} (${step.kind}) failed: ${e?.message ?? e} — retry ${attempt + 1}/${retries}`,
       );

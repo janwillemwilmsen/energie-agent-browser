@@ -202,6 +202,24 @@ describe('Step executor', () => {
     expect(ctx.lines.filter((l) => /retry 1\/2|retry 2\/2/.test(l))).toHaveLength(2);
   });
 
+  it('skips an optional step that keeps failing and runs the next one', async () => {
+    const b = fakeBrowser([], [(a) => (a[0] === 'click' && a[1] === '#consent' ? { stdout: '', stderr: 'not found', exitCode: 1 } : undefined)]);
+    const ctx = context(b);
+    await executeSteps(
+      ctx,
+      [
+        { position: 1, step: parseStep('click', { selector: { role: '', name: '', locator: '#consent' }, optional: true }) },
+        { position: 2, step: parseStep('click', { selector: { role: '', name: '', locator: '#go' } }) },
+      ],
+      { retries: 1, retryWaitBeforeMs: 0, retryWaitAfterMs: 0 },
+    );
+    // Its retries are still spent, then the run moves on.
+    expect(ran(b, 'click')).toEqual([['click', '#consent'], ['click', '#consent'], ['click', '#go']]);
+    expect(ctx.lines.some((l) => /step #1 \(click\) failed: click failed: not found — optional, skipped/.test(l))).toBe(true);
+    // The flag survives the schema (it would be stripped otherwise).
+    expect(parseStep('click', { selector: { role: 'button', name: 'OK' }, optional: true }).optional).toBe(true);
+  });
+
   it('gives up after the last retry with the step error', async () => {
     const b = fakeBrowser([], [(a) => (a[0] === 'click' ? { stdout: '', stderr: 'boom', exitCode: 1 } : undefined)]);
     await expect(

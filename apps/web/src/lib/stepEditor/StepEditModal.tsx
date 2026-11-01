@@ -71,8 +71,14 @@ export function StepEditModal({
     Number.isFinite(Number(initial.quality)) && Number(initial.quality) > 0 ? Number(initial.quality) : 80,
   );
 
+  // Every kind: a failed optional step is skipped instead of failing the run
+  // (a cookie banner that is not always there). Kept out of the JSON editor
+  // so the checkbox is the one place it is set.
+  const [optional, setOptional] = useState(initial.optional === true);
+  const { optional: _optional, ...initialJson } = initial;
+
   // Raw JSON editor for all other step kinds.
-  const [json, setJson] = useState(() => JSON.stringify(initial, null, 2));
+  const [json, setJson] = useState(() => JSON.stringify(initialJson, null, 2));
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -111,6 +117,7 @@ export function StepEditModal({
         return;
       }
     }
+    if (optional) payload.optional = true; else delete payload.optional;
     setBusy(true);
     setError(null);
     try {
@@ -324,6 +331,17 @@ export function StepEditModal({
             />
           </label>
         )}
+        <label style={{ ...row, alignItems: 'flex-start' }}>
+          <input type="checkbox" checked={optional} onChange={(e) => setOptional(e.target.checked)} style={{ marginTop: 2 }} />
+          <span>
+            Optional — skip this step if it fails
+            <span className="muted" style={{ display: 'block', fontSize: 12 }}>
+              When the element is not there (a cookie banner that only shows the first time, say) the run logs
+              the failure and continues with the next step instead of failing. The scenario&apos;s retries still
+              apply first.
+            </span>
+          </span>
+        </label>
         {error && <p className="error" style={{ margin: 0 }}>{error}</p>}
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', alignItems: 'center' }}>
           <span className="muted" style={{ marginRight: 'auto', fontSize: 12 }}>Esc to cancel · Ctrl+Enter to save</span>
