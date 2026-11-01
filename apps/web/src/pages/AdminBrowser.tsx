@@ -683,10 +683,16 @@ function ConnectorSection({ pc, onChange }: { pc: string; onChange: (pc: string)
             {status.pcs.map((p) => (
               <span key={p.id}>
                 <strong>{p.name}</strong>{' '}
-                <span className="muted">
-                  {p.version.browser ?? 'browser ?'} · {p.platform || '—'} · since {new Date(p.connectedAt).toLocaleTimeString()}
-                  {p.channels ? ` · ${p.channels} session${p.channels === 1 ? '' : 's'} attached` : ''}
-                </span>
+                {p.chromeOk ? (
+                  <span className="muted">
+                    {p.version.browser ?? 'browser ?'} · {p.platform || '—'} · since {new Date(p.connectedAt).toLocaleTimeString()}
+                    {p.channels ? ` · ${p.channels} session${p.channels === 1 ? '' : 's'} attached` : ''}
+                  </span>
+                ) : (
+                  <span className="error" title="eab-connect is running there, but nothing answers on its Chrome debugging port. Runs are refused until Chrome is back; the connector restarts it on its own unless started with --no-launch.">
+                    Chrome not running on this PC
+                  </span>
+                )}
               </span>
             ))}
           </span>

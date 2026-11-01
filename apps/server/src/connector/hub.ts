@@ -26,7 +26,8 @@ import { decryptSecret, encryptSecret, isEncrypted } from '../secrets.js';
 //   hub → PC   {t:'open', ch}            the daemon connected; dial Chrome
 //   PC → hub   {t:'opened', ch} | {t:'openfail', ch, error}
 //   both       {t:'msg', ch, data} · {t:'close', ch}
-//   PC → hub   {t:'version', version}    Chrome restarted / changed
+//   PC → hub   {t:'version', version}    Chrome changed; version null = nothing
+//                                        answers on the PC's port right now
 // Keepalive is WebSocket ping/pong from the hub.
 
 export interface PcVersion {
@@ -41,6 +42,8 @@ export interface PcInfo {
   platform: string;
   connectedAt: string;
   version: PcVersion;
+  /** Whether the PC's Chrome answered its last probe; false = paired, but nothing to drive. */
+  chromeOk: boolean;
   /** Open CDP channels (daemons currently attached through this PC). */
   channels: number;
 }
@@ -136,7 +139,7 @@ function noteFailure(ip: string): void {
 
 export function listPcs(): PcInfo[] {
   return [...pcs.values()]
-    .map(({ socket: _s, alive: _a, channels, nextCh: _n, ...info }) => ({ ...info, channels: channels.size }))
+    .map(({ socket: _s, alive: _a, channels, nextCh: _n, ...info }) => ({ ...info, channels: channels.size }) as PcInfo)
     .sort((a, b) => b.connectedAt.localeCompare(a.connectedAt));
 }
 
@@ -156,13 +159,29 @@ export function cdpUrlFor(pcId: string): string {
   return `ws://127.0.0.1:${config.port}/ws/connector/cdp/${encodeURIComponent(pcId)}?key=${CDP_KEY}`;
 }
 
-/** The PC for a backend, or an error that tells the user what to run. */
+/**
+ * The PC for a backend, with a Chrome to drive, or an error that tells the
+ * user what to do. A paired PC whose Chrome is gone is refused here, before
+ * any daemon starts: a `connect` that fails later kills the daemon and the
+ * next command would launch a local browser instead.
+ */
 export function requirePc(name: string): PcInfo {
   const pc = pickPc(name);
-  if (pc) return pc;
+  if (pc) {
+    if (!pc.chromeOk) throw new Error(`"${pc.name}" is connected but nothing answers on its Chrome debugging port — start Chrome there (eab-connect restarts it on its own within a few seconds unless it was run with --no-launch).`);
+    return pc;
+  }
   const have = listPcs();
   if (!have.length) throw new Error('No PC is connected — start eab-connect on your PC (Admin → Browser → Your own PC has the command).');
   throw new Error(`No connected PC is named "${name}" (connected: ${have.map((p) => p.name).join(', ')}).`);
+}
+
+function readVersion(v: any): { version: PcVersion; chromeOk: boolean } {
+  if (!v || typeof v !== 'object') return { version: { browser: null, protocolVersion: null, userAgent: null }, chromeOk: false };
+  return {
+    version: { browser: v.browser ?? null, protocolVersion: v.protocolVersion ?? null, userAgent: v.userAgent ?? null },
+    chromeOk: true,
+  };
 }
 
 function send(socket: WebSocket, msg: unknown): void {
@@ -215,13 +234,12 @@ export async function connectorWsRoutes(app: FastifyInstance) {
           return;
         }
         const name = String(msg.name ?? 'pc').slice(0, 60) || 'pc';
-        const v = msg.version ?? {};
         pc = {
           id: crypto.randomBytes(6).toString('hex'),
           name,
           platform: String(msg.platform ?? '').slice(0, 40),
           connectedAt: new Date().toISOString(),
-          version: { browser: v.browser ?? null, protocolVersion: v.protocolVersion ?? null, userAgent: v.userAgent ?? null },
+          ...readVersion(msg.version),
           socket,
           alive: true,
           channels: new Map(),
@@ -229,7 +247,7 @@ export async function connectorWsRoutes(app: FastifyInstance) {
         };
         pcs.set(pc.id, pc);
         send(socket, { t: 'welcome', id: pc.id, name });
-        app.log.info({ pc: name, id: pc.id, ip }, 'connector: PC paired');
+        app.log.info({ pc: name, id: pc.id, ip, browser: pc.version.browser, chromeOk: pc.chromeOk }, 'connector: PC paired');
         return;
       }
 
@@ -238,10 +256,12 @@ export async function connectorWsRoutes(app: FastifyInstance) {
           const channel = pc.channels.get(msg.ch);
           if (!channel) return;
           channel.ready = true;
+          app.log.info({ pc: pc.name, ch: msg.ch, queued: channel.queue.length }, 'connector: channel open to Chrome');
           for (const data of channel.queue.splice(0)) send(pc.socket, { t: 'msg', ch: msg.ch, data });
           return;
         }
         case 'openfail':
+          app.log.warn({ pc: pc.name, ch: msg.ch, error: msg.error }, 'connector: PC could not reach its Chrome');
           closeChannel(pc, msg.ch, 1011, `Chrome on ${pc.name}: ${msg.error ?? 'could not connect'}`, false);
           return;
         case 'msg': {
@@ -253,8 +273,9 @@ export async function connectorWsRoutes(app: FastifyInstance) {
           closeChannel(pc, msg.ch, 1000, 'closed by PC', false);
           return;
         case 'version': {
-          const v = msg.version ?? {};
-          pc.version = { browser: v.browser ?? null, protocolVersion: v.protocolVersion ?? null, userAgent: v.userAgent ?? null };
+          const was = pc.chromeOk;
+          Object.assign(pc, readVersion(msg.version));
+          if (was !== pc.chromeOk) app.log.info({ pc: pc.name, browser: pc.version.browser }, pc.chromeOk ? 'connector: Chrome reachable on PC' : 'connector: Chrome gone on PC');
           return;
         }
       }
@@ -298,6 +319,7 @@ export async function connectorWsRoutes(app: FastifyInstance) {
       const ch = pc.nextCh++;
       const channel: Channel = { socket, ready: false, queue: [] };
       pc.channels.set(ch, channel);
+      app.log.info({ pc: pc.name, ch }, 'connector: daemon attached, asking PC to dial Chrome');
       send(pc.socket, { t: 'open', ch });
 
       socket.on('message', (raw) => {
@@ -305,9 +327,10 @@ export async function connectorWsRoutes(app: FastifyInstance) {
         if (channel.ready) send(pc.socket, { t: 'msg', ch, data });
         else channel.queue.push(data);
       });
-      socket.on('close', () => {
+      socket.on('close', (code) => {
         if (pc.channels.get(ch) === channel) {
           pc.channels.delete(ch);
+          app.log.info({ pc: pc.name, ch, code }, 'connector: daemon detached');
           send(pc.socket, { t: 'close', ch });
         }
       });

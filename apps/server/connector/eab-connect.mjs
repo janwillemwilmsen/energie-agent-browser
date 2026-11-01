@@ -19,14 +19,17 @@
 // Protocol (JSON text frames), mirrored in apps/server/src/connector/hub.ts:
 //   → {t:'hello', code, name, platform, version}   ← {t:'welcome', id, name}
 //   ← {t:'open', ch}   → {t:'opened', ch} | {t:'openfail', ch, error}
-//   ↔ {t:'msg', ch, data} · {t:'close', ch}        → {t:'version', version}
+//   ↔ {t:'msg', ch, data} · {t:'close', ch}        → {t:'version', version|null}
+// Chrome is probed every few seconds while paired, so the app knows when it is
+// gone (and refuses to start a run on this PC until it is back) rather than
+// finding out mid-connect; when allowed, it is started again on its own.
 
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const VERSION = '1.0.0';
+const VERSION = '1.1.0';
 
 // --- Arguments -----------------------------------------------------------------------
 
@@ -171,8 +174,29 @@ function connectOnce(version) {
   return new Promise((resolve) => {
     const hub = new WebSocket(hubUrl);
     const channels = new Map(); // ch → { chrome, ready, queue }
-    let lastBrowser = version.browser;
+    let lastBrowser = version.browser; // null while nothing answers on the port
     const sendHub = (msg) => { if (hub.readyState === WebSocket.OPEN) hub.send(JSON.stringify(msg)); };
+
+    // Tell the hub when Chrome appears, changes or disappears; restart it when it is gone.
+    const report = (v) => {
+      const browser = v ? v.browser : null;
+      if (browser === lastBrowser) return;
+      lastBrowser = browser;
+      sendHub({ t: 'version', version: publicVersion(v) });
+      log(v ? `Chrome reachable: ${v.browser}` : `Chrome is gone from port ${opts.port} — runs on this PC are refused until it is back`);
+    };
+    let probing = false;
+    const probe = setInterval(async () => {
+      if (probing || hub.readyState !== WebSocket.OPEN) return;
+      probing = true;
+      try {
+        let v = await chromeVersion();
+        if (!v && opts.launch && channels.size === 0) v = await ensureChrome();
+        report(v);
+      } finally {
+        probing = false;
+      }
+    }, 5_000);
 
     hub.onopen = () => {
       sendHub({ t: 'hello', code, name: opts.name, platform: `${process.platform} node ${process.version}`, version: publicVersion(version), connector: VERSION });
@@ -188,11 +212,12 @@ function connectOnce(version) {
         case 'open': {
           const ch = msg.ch;
           const v = await chromeVersion();
+          report(v);
           if (!v) {
+            log(`App asked for a browser session but nothing answers on port ${opts.port}.`);
             sendHub({ t: 'openfail', ch, error: `nothing answers on port ${opts.port} — is Chrome still running?` });
             return;
           }
-          if (v.browser !== lastBrowser) { lastBrowser = v.browser; sendHub({ t: 'version', version: publicVersion(v) }); }
           const entry = { chrome: null, ready: false, queue: [] };
           channels.set(ch, entry);
           let chrome;
@@ -206,6 +231,7 @@ function connectOnce(version) {
           entry.chrome = chrome;
           chrome.onopen = () => {
             entry.ready = true;
+            log(`App session #${ch} attached to Chrome (${channels.size} open).`);
             sendHub({ t: 'opened', ch });
             for (const data of entry.queue.splice(0)) chrome.send(data);
           };
@@ -213,12 +239,14 @@ function connectOnce(version) {
           chrome.onerror = () => {
             if (!entry.ready && channels.get(ch) === entry) {
               channels.delete(ch);
+              log(`App session #${ch}: Chrome refused the DevTools connection.`);
               sendHub({ t: 'openfail', ch, error: 'Chrome refused the DevTools connection (start it with --remote-allow-origins=*)' });
             }
           };
           chrome.onclose = () => {
             if (channels.get(ch) === entry) {
               channels.delete(ch);
+              log(`App session #${ch}: Chrome closed the connection.`);
               sendHub({ t: 'close', ch });
             }
           };
@@ -235,6 +263,7 @@ function connectOnce(version) {
           const entry = channels.get(msg.ch);
           if (!entry) return;
           channels.delete(msg.ch);
+          log(`App session #${msg.ch} ended (${channels.size} open).`);
           try { entry.chrome?.close(); } catch { /* ignore */ }
           return;
         }
@@ -243,6 +272,7 @@ function connectOnce(version) {
 
     hub.onerror = () => { /* onclose follows with the reason */ };
     hub.onclose = (ev) => {
+      clearInterval(probe);
       for (const entry of channels.values()) { try { entry.chrome?.close(); } catch { /* ignore */ } }
       channels.clear();
       // 4xxx codes are the hub's verdicts; anything else is the network.

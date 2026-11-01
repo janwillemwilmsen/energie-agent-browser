@@ -185,20 +185,21 @@ async function health() {
       // No network probe: a PC is either holding its socket to the hub or not.
       const pc = pickPc(backend.pc);
       const others = listPcs().map((p) => p.name);
+      const ok = !!pc && pc.chromeOk;
       const error = pc
-        ? null
+        ? pc.chromeOk ? null : `"${pc.name}" is connected but its Chrome is not running — start Chrome on that PC`
         : others.length
           ? `no connected PC named "${backend.pc}" (connected: ${others.join(', ')})`
           : 'no PC connected — run eab-connect on your PC';
       return {
         ...base,
-        ok: !!pc,
+        ok,
         latencyMs: 0,
         executablePath: null,
         remote: {
           configuredUrl: pc ? `${pc.name} (${pc.platform || 'connector'})` : backend.pc ? `PC "${backend.pc}"` : 'most recently connected PC',
-          probe: { url: 'connector', status: pc ? 200 : null, ok: !!pc, error },
-          version: pc ? { ...pc.version, webSocketDebuggerUrl: null } : null,
+          probe: { url: 'connector', status: ok ? 200 : null, ok, error },
+          version: pc && pc.chromeOk ? { ...pc.version, webSocketDebuggerUrl: null } : null,
         },
       };
     }

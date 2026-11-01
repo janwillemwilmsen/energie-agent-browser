@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config } from '../config.js';
-import { BACKEND_KINDS, backendEnv, bootstrapArgs, currentBackend, isRemote, type BackendKind } from './backend.js';
+import { BACKEND_KINDS, backendEnv, bootstrapArgs, currentBackend, isRemote, isUsersOwnBrowser, type BackendKind } from './backend.js';
 import { planOpen, type OpenIntent } from './sessionPlan.js';
 export type { OpenIntent } from './sessionPlan.js';
 
@@ -591,7 +591,12 @@ async function spawnConnectDetached(
 // exits when it can't complete the wss handshake with browserless. Without
 // log-tailing we'd burn the full READY_TIMEOUT_MS waiting for a pid file that
 // will never appear; with it, we surface the actual cause in ~1s.
-const FAIL_LINE_RE = /✗\s*(Could not configure browser:[^\r\n]+|[^\r\n]+(?:error|fail(?:ed)?)[^\r\n]*)/i;
+// Any ✗ line counts: a `connect` that is cut off ends with "✗ CDP response
+// channel closed" — no "error"/"fail" in it — and the daemon exits; the next
+// command would then auto-launch a local headless browser and a run meant for
+// the user's own Chrome would quietly continue on the server's. The grace
+// window in connectSession still tolerates the local launcher's transient ✗.
+const FAIL_LINE_RE = /✗\s*([^\r\n]+)/;
 const ANSI_ESC_RE = /\x1b(?:\[[0-9;?]*[a-zA-Z]|\][^\x07]*\x07)/g;
 function detectBootstrapFailure(logPath: string): string | null {
   let text = '';
@@ -622,6 +627,30 @@ async function loadPersistedStateIntoDaemon(session: string, sessionName: string
   } catch (e: any) {
     if (DEBUG) console.log(`[ab] state load threw: ${e?.message ?? e}`);
   }
+}
+
+// A user's-own-browser backend (connector / chrome) must end up driving THAT
+// browser. When agent-browser's `connect` to the relay or tunnel fails, it
+// quietly launches a local headless Chrome and still writes its pid file — so
+// the daemon looks "ready", but a run meant for the user's own Chrome would run
+// on the server's instead, and look like a bot (HeadlessChrome UA) to
+// Cloudflare. A real user Chrome is never headless, so a HeadlessChrome UA here
+// means the connect did not stick. Tear the bogus daemon down and fail loudly.
+async function verifyUsersOwnBrowser(session: string, backendKind: BackendKind | null): Promise<void> {
+  const { backend } = currentBackend(backendKind);
+  if (!isUsersOwnBrowser(backend)) return;
+  const r = await runRaw(session, ['--session', session, 'eval', 'navigator.userAgent'], 15_000);
+  const ua = (r.stdout || '').trim();
+  if (r.exitCode === 0 && ua && !/headless/i.test(ua)) return; // the real browser
+  await closeSessionLocked(session).catch(() => undefined);
+  const why = /headless/i.test(ua)
+    ? `a local browser came up instead (${ua.replace(/^"|"$/g, '')})`
+    : `could not read the browser (${(r.stderr || r.stdout || 'no response').trim().slice(0, 160)})`;
+  throw new Error(
+    backend.kind === 'connector'
+      ? `the connect to your PC's Chrome did not stick — ${why}. Is eab-connect still running, with Chrome open, on that PC?`
+      : `the connect to your Chrome did not stick — ${why}. Is the tunnel up and Chrome reachable at the address you gave?`,
+  );
 }
 
 async function connectSession(
@@ -656,6 +685,7 @@ async function connectSession(
       if (sessionName && !skipStateLoad) {
         await loadPersistedStateIntoDaemon(session, sessionName);
       }
+      await verifyUsersOwnBrowser(session, backendKind);
       return;
     }
     const fail = detectBootstrapFailure(logPath);

@@ -231,6 +231,8 @@ export interface ConnectorStatus {
     platform: string;
     connectedAt: string;
     version: { browser: string | null; protocolVersion: string | null; userAgent: string | null };
+    /** False: paired, but nothing answers on the PC's Chrome port right now. */
+    chromeOk: boolean;
     channels: number;
   }>;
 }

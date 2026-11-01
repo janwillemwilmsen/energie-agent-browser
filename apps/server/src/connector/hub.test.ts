@@ -111,11 +111,19 @@ describe('the relay', () => {
   it('accepts the code with dashes or lowercase and lists the PC', async () => {
     const loose = pairingCode().toLowerCase().replace(/-/g, ' ');
     const { ws, id } = await pair('laptop', loose);
-    expect(listPcs()).toMatchObject([{ id, name: 'laptop', platform: 'test', channels: 0, version: { browser: 'Chrome/1' } }]);
+    expect(listPcs()).toMatchObject([{ id, name: 'laptop', platform: 'test', channels: 0, chromeOk: true, version: { browser: 'Chrome/1' } }]);
     expect(pickPc('')?.id).toBe(id);
     expect(pickPc('LAPTOP')?.id).toBe(id);
     expect(pickPc('desktop')).toBeNull();
+    expect(requirePc('').id).toBe(id);
     expect(() => requirePc('desktop')).toThrow(/No connected PC is named "desktop" \(connected: laptop\)/);
+    // Chrome gone on the PC: still listed, but refused as a run target until it is back.
+    send(ws, { t: 'version', version: null });
+    await until(() => listPcs()[0]?.chromeOk === false);
+    expect(() => requirePc('')).toThrow(/"laptop" is connected but nothing answers on its Chrome debugging port/);
+    send(ws, { t: 'version', version: { browser: 'Chrome/2' } });
+    await until(() => listPcs()[0]?.chromeOk === true);
+    expect(listPcs()[0]?.version.browser).toBe('Chrome/2');
     ws.close();
     await closed(ws);
     await until(() => listPcs().length === 0);
