@@ -237,6 +237,13 @@ export interface ConnectorStatus {
   }>;
 }
 
+// The relay walked hop by hop (server → hub → PC → Chrome), so a failure
+// names the hop instead of surfacing as a browser that is quietly the wrong one.
+export interface RelayDiagnosis {
+  ok: boolean;
+  steps: Array<{ step: string; ok: boolean; detail: string; ms: number }>;
+}
+
 export interface BrowserTestResult {
   ok: boolean;
   kind: BrowserBackendKind;
@@ -884,6 +891,8 @@ export const api = {
     }),
   browserInstallStatus: () => req<InstallJob>('/api/admin/browser/install'),
   connectorStatus: () => req<ConnectorStatus>('/api/admin/connector'),
+  diagnoseConnector: (pc: string) =>
+    req<RelayDiagnosis>('/api/admin/connector/diagnose', { method: 'POST', body: JSON.stringify({ pc }) }),
   regenerateConnectorCode: () => req<{ code: string }>('/api/admin/connector/code', { method: 'POST' }),
   saveAskModel: (model: string) =>
     req<{ model: string; source: 'setting' | 'agent' }>('/api/admin/ai-settings/ask', {

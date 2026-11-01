@@ -164,8 +164,10 @@ describe('browser config', () => {
   it('boots the connector backend only when a PC is connected, with the message to run otherwise', async () => {
     const connector = { kind: 'connector' as const, pc: '' };
     await expect(bootstrapArgs(connector, envConfig().stealth)).rejects.toThrow(/No PC is connected — start eab-connect/);
-    const ref = process.platform === 'win32' ? '%CONNECTOR_CDP_URL%' : '$CONNECTOR_CDP_URL';
-    expect(bootstrapCommand(connector, 'default')).toBe(`agent-browser --session default connect "${ref}"`);
+    // The endpoint rides on AGENT_BROWSER_CDP (every command), so the bootstrap is a plain open.
+    expect(bootstrapCommand(connector, 'default')).toBe('agent-browser --session default open about:blank');
+    // No PC paired → no endpoint claimed, rather than a stale or bogus one.
+    expect(backendEnv(connector, envConfig().stealth).AGENT_BROWSER_CDP).toBeUndefined();
   });
 
   it('validates the chrome backend as host:port in a ws or http URL', () => {
@@ -180,16 +182,17 @@ describe('browser config', () => {
     expect(validateActive(cfg)).toBeNull();
   });
 
-  it('boots the chrome backend with a connect line and nothing provider-ish in its env', async () => {
+  it('boots the chrome backend with a plain open and nothing provider-ish in its env', async () => {
     const chrome = { kind: 'chrome' as const, url: 'http://127.0.0.1:1' };
     const stealth = envConfig().stealth;
     // Port 1 is never a Chrome: the lookup fails with its reason instead of spawning a dead daemon.
     await expect(bootstrapArgs(chrome, stealth)).rejects.toThrow(/Chrome at http:\/\/127\.0\.0\.1:1 is not reachable/);
-    const ref = process.platform === 'win32' ? '%CHROME_CDP_URL%' : '$CHROME_CDP_URL';
-    expect(bootstrapCommand(chrome, 'default')).toBe(`agent-browser --session default connect "${ref}"`);
+    expect(bootstrapCommand(chrome, 'default')).toBe('agent-browser --session default open about:blank');
     const env = backendEnv(chrome, stealth);
     expect(env.AGENT_BROWSER_PROVIDER).toBeUndefined();
     expect(env.AGENT_BROWSER_ARGS).toBeUndefined();
+    // Nothing resolvable on port 1, so no endpoint is claimed either.
+    expect(env.AGENT_BROWSER_CDP).toBeUndefined();
     // The user's own browser is left alone: no UA override, no init script, even with stealth on.
     const on = { ...stealth, enabled: true, userAgent: 'UA/1', initScript: '/init.js' };
     for (const own of [chrome, { kind: 'connector' as const, pc: '' }]) {

@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
-import type { WebSocket } from 'ws';
+import { WebSocket } from 'ws';
 import { config } from '../config.js';
 import { getSetting, setSetting } from '../settings.js';
 import { decryptSecret, encryptSecret, isEncrypted } from '../secrets.js';
@@ -154,9 +154,21 @@ export function pickPc(name: string): PcInfo | null {
   return all.find((p) => p.name.toLowerCase() === wanted) ?? null;
 }
 
+// The port the server actually bound, not what PORT said it should be. A host
+// that rewrites PORT (or an app told to listen on 0 in a test) would otherwise
+// send the daemon to a port nothing is listening on, and its connect would
+// fail — which, before the fallback guard, showed up as a local headless
+// browser. config.port is only the pre-listen fallback.
+let appRef: FastifyInstance | null = null;
+function boundPort(): number {
+  const addr = appRef?.server?.address?.();
+  if (addr && typeof addr === 'object' && typeof addr.port === 'number' && addr.port > 0) return addr.port;
+  return config.port;
+}
+
 /** The loopback URL the daemon `connect`s to for a PC; the hub turns it into a channel. */
 export function cdpUrlFor(pcId: string): string {
-  return `ws://127.0.0.1:${config.port}/ws/connector/cdp/${encodeURIComponent(pcId)}?key=${CDP_KEY}`;
+  return `ws://127.0.0.1:${boundPort()}/ws/connector/cdp/${encodeURIComponent(pcId)}?key=${CDP_KEY}`;
 }
 
 /**
@@ -188,6 +200,86 @@ function send(socket: WebSocket, msg: unknown): void {
   if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(msg));
 }
 
+// --- Relay self-test ----------------------------------------------------------------
+
+export interface RelayStep {
+  step: string;
+  ok: boolean;
+  detail: string;
+  ms: number;
+}
+
+const DIAGNOSE_OPEN_MS = 10_000;
+const DIAGNOSE_CDP_MS = 20_000;
+
+/**
+ * Walk the exact path a daemon takes — loopback CDP endpoint → hub → PC →
+ * Chrome — and say which hop breaks. This is what the daemon does, minus
+ * agent-browser, so a pass here means the relay itself is sound and anything
+ * still failing is the CLI's own connect; a fail names the hop.
+ */
+export async function diagnoseRelay(name: string): Promise<{ ok: boolean; steps: RelayStep[] }> {
+  const steps: RelayStep[] = [];
+  const at = async <T>(step: string, fn: () => Promise<T>): Promise<T | null> => {
+    const t = Date.now();
+    try {
+      const r = await fn();
+      steps.push({ step, ok: true, detail: typeof r === 'string' ? r : 'ok', ms: Date.now() - t });
+      return r;
+    } catch (e: any) {
+      steps.push({ step, ok: false, detail: e?.message ?? String(e), ms: Date.now() - t });
+      return null;
+    }
+  };
+
+  const pc = await at('find the paired PC', async () => {
+    const found = requirePc(name); // throws with the user-facing reason
+    return `${found.name} — ${found.version.browser ?? 'browser ?'} (${found.platform || 'connector'})`;
+  });
+  if (!pc) return { ok: false, steps };
+
+  const target = pickPc(name)!;
+  const url = cdpUrlFor(target.id);
+  let socket: WebSocket | null = null;
+  try {
+    const opened = await at('open a relay channel on this server', async () => {
+      // The URL the daemon is given, verbatim — so a wrong port or a blocked
+      // loopback endpoint shows up here rather than as a mystery fallback.
+      const ws = new WebSocket(url);
+      socket = ws;
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error(`no answer from ${url.replace(/\?key=.*/, '')} within ${DIAGNOSE_OPEN_MS}ms`)), DIAGNOSE_OPEN_MS);
+        ws.once('open', () => { clearTimeout(timer); resolve(); });
+        ws.once('error', (e: Error) => { clearTimeout(timer); reject(new Error(`${e.message} (${url.replace(/\?key=.*/, '')})`)); });
+        ws.once('close', (code, reason) => { clearTimeout(timer); reject(new Error(`refused: ${code} ${reason.toString() || ''}`.trim())); });
+      });
+      return `connected to ${url.replace(/\?key=.*/, '')}`;
+    });
+    if (!opened) return { ok: false, steps };
+
+    await at("reach Chrome on the PC (CDP Browser.getVersion)", async () => {
+      const ws = socket!;
+      return await new Promise<string>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error(`the PC did not answer within ${DIAGNOSE_CDP_MS}ms — the channel opened here but Chrome never replied`)), DIAGNOSE_CDP_MS);
+        ws.on('message', (raw) => {
+          try {
+            const m = JSON.parse(raw.toString());
+            if (m.id !== 1) return;
+            clearTimeout(timer);
+            if (m.error) return reject(new Error(`Chrome returned an error: ${JSON.stringify(m.error).slice(0, 200)}`));
+            resolve(`${m.result?.product ?? 'Chrome'} — ${m.result?.userAgent ?? 'no user agent'}`);
+          } catch { /* not ours */ }
+        });
+        ws.once('close', (code, reason) => { clearTimeout(timer); reject(new Error(`the channel closed before Chrome answered: ${code} ${reason.toString() || ''}`.trim())); });
+        ws.send(JSON.stringify({ id: 1, method: 'Browser.getVersion' }));
+      });
+    });
+  } finally {
+    try { (socket as WebSocket | null)?.close(); } catch { /* already gone */ }
+  }
+  return { ok: steps.every((s) => s.ok), steps };
+}
+
 function isLoopback(address: string | undefined): boolean {
   return address === '127.0.0.1' || address === '::1' || address === '::ffff:127.0.0.1';
 }
@@ -209,6 +301,7 @@ function dropPc(pc: Pc, reason: string): void {
 // --- Routes ------------------------------------------------------------------------
 
 export async function connectorWsRoutes(app: FastifyInstance) {
+  appRef = app;
   // The PC's socket. Not behind the app login (app.ts exempts it): the pairing
   // code is its credential.
   app.get('/ws/connector', { websocket: true }, (socket, req) => {

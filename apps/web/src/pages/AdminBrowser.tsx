@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useState } from 'react';
+﻿import { Fragment, useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   api,
@@ -11,6 +11,7 @@ import {
   type BrowserTestResult,
   type ConnectorStatus,
   type DoctorResult,
+  type RelayDiagnosis,
   type InstallJob,
   type ProviderAccount,
 } from '../lib/api.js';
@@ -601,6 +602,7 @@ function ConnectorSection({ pc, onChange }: { pc: string; onChange: (pc: string)
   const [reveal, setReveal] = useState(false);
   const [copied, setCopied] = useState<'code' | 'command' | null>(null);
   const [busy, setBusy] = useState(false);
+  const [diagnosis, setDiagnosis] = useState<RelayDiagnosis | 'running' | null>(null);
   const { data: status, error, refresh } = useResource(() => api.connectorStatus(), { initial: null as ConnectorStatus | null });
   usePolling(refresh, CONNECTOR_POLL_MS);
 
@@ -697,7 +699,36 @@ function ConnectorSection({ pc, onChange }: { pc: string; onChange: (pc: string)
             ))}
           </span>
         )}
+        <button
+          type="button"
+          className="bb-account-check"
+          disabled={diagnosis === 'running' || !status?.pcs.length}
+          title="Walk the path a run takes — this server → the PC → its Chrome — and report which hop breaks"
+          onClick={async () => {
+            setDiagnosis('running');
+            try {
+              setDiagnosis(await api.diagnoseConnector(pc));
+            } catch (e: any) {
+              setDiagnosis({ ok: false, steps: [{ step: 'ask the server', ok: false, detail: e?.message ?? String(e), ms: 0 }] });
+            }
+          }}
+        >
+          {diagnosis === 'running' ? 'Testing…' : 'Test the relay'}
+        </button>
       </div>
+      {diagnosis && diagnosis !== 'running' && (
+        <dl className="bl-health-grid" style={{ marginTop: 0 }}>
+          {diagnosis.steps.map((s) => (
+            <Fragment key={s.step}>
+              <dt>{s.ok ? '✅' : '❌'} {s.step}</dt>
+              <dd>
+                <span className={s.ok ? undefined : 'error'} style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{s.detail}</span>
+                <span className="muted"> · {s.ms}ms</span>
+              </dd>
+            </Fragment>
+          ))}
+        </dl>
+      )}
     </>
   );
 

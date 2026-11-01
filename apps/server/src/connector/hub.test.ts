@@ -14,6 +14,7 @@ import { resetRunStore } from '../runs/index.js';
 import { _setSecretsKeyForTests } from '../secrets.js';
 import { createApp } from '../app.js';
 import { cdpUrlFor, listPcs, pairingCode, pickPc, regeneratePairingCode, requirePc } from './hub.js';
+import { backendEnv } from '../agentBrowser/backend.js';
 
 // The relay end to end over a real listening app: a fake PC pairs with the
 // code, a fake daemon connects to the loopback CDP endpoint, frames cross in
@@ -117,6 +118,11 @@ describe('the relay', () => {
     expect(pickPc('desktop')).toBeNull();
     expect(requirePc('').id).toBe(id);
     expect(() => requirePc('desktop')).toThrow(/No connected PC is named "desktop" \(connected: laptop\)/);
+    // Every command carries the endpoint: `connect <url>` does not stick, and on
+    // Linux it silently launches a local browser instead of connecting.
+    expect(backendEnv({ kind: 'connector', pc: '' }).AGENT_BROWSER_CDP).toBe(cdpUrlFor(id));
+    expect(backendEnv({ kind: 'connector', pc: 'laptop' }).AGENT_BROWSER_CDP).toBe(cdpUrlFor(id));
+    expect(backendEnv({ kind: 'connector', pc: 'desktop' }).AGENT_BROWSER_CDP).toBeUndefined();
     // Chrome gone on the PC: still listed, but refused as a run target until it is back.
     send(ws, { t: 'version', version: null });
     await until(() => listPcs()[0]?.chromeOk === false);

@@ -124,9 +124,21 @@ export function probeChrome(url: string, timeoutMs: number): Promise<ChromeProbe
 
 const RESOLVE_TIMEOUT_MS = 5_000;
 
-/** The WebSocket URL for `connect`, looked up now; throws a message fit for the UI when Chrome is unreachable. */
+// The last successful lookup, so the sync env builder (backendEnv) can put the
+// endpoint on every command without a network round-trip. Chrome's browser id
+// changes when it restarts, so every bootstrap refreshes this.
+let lastResolved: { configured: string; ws: string } | null = null;
+
+/** The WebSocket URL for `--cdp`, looked up now; throws a message fit for the UI when Chrome is unreachable. */
 export async function resolveChromeConnectUrl(url: string): Promise<string> {
   const r = await probeChrome(url, RESOLVE_TIMEOUT_MS);
   if (!r.ok) throw new Error(`Chrome at ${chromeHttpBase(url)} is not reachable: ${r.error}`);
-  return r.version.webSocketDebuggerUrl!;
+  const ws = r.version.webSocketDebuggerUrl!;
+  lastResolved = { configured: url, ws };
+  return ws;
+}
+
+/** What the last bootstrap resolved for `url`, or null when it has not been looked up yet. */
+export function cachedChromeConnectUrl(url: string): string | null {
+  return lastResolved && lastResolved.configured === url ? lastResolved.ws : null;
 }

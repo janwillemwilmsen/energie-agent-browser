@@ -636,6 +636,17 @@ async function loadPersistedStateIntoDaemon(session: string, sessionName: string
 // on the server's instead, and look like a bot (HeadlessChrome UA) to
 // Cloudflare. A real user Chrome is never headless, so a HeadlessChrome UA here
 // means the connect did not stick. Tear the bogus daemon down and fail loudly.
+/** The last few meaningful lines the daemon logged — what it says about a connect that failed. */
+function daemonLogTail(session: string, maxLines = 4): string {
+  try {
+    const text = fs.readFileSync(path.join(config.dataDir, 'agent-browser-logs', `${session}.log`), 'utf-8');
+    const lines = text.replace(ANSI_ESC_RE, '').split(/[\r\n]+/).map((l) => l.trim()).filter(Boolean);
+    return lines.slice(-maxLines).join(' | ');
+  } catch {
+    return '';
+  }
+}
+
 async function verifyUsersOwnBrowser(session: string, backendKind: BackendKind | null): Promise<void> {
   const { backend } = currentBackend(backendKind);
   if (!isUsersOwnBrowser(backend)) return;
@@ -646,10 +657,14 @@ async function verifyUsersOwnBrowser(session: string, backendKind: BackendKind |
   const why = /headless/i.test(ua)
     ? `a local browser came up instead (${ua.replace(/^"|"$/g, '')})`
     : `could not read the browser (${(r.stderr || r.stdout || 'no response').trim().slice(0, 160)})`;
+  // What the daemon itself logged is the one clue that says WHICH hop broke.
+  const tail = daemonLogTail(session);
+  const hint = backend.kind === 'connector'
+    ? 'Is eab-connect still running, with Chrome open, on that PC? Use "Test the relay" on Admin → Browser to see which hop breaks.'
+    : 'Is the tunnel up and Chrome reachable at the address you gave?';
   throw new Error(
-    backend.kind === 'connector'
-      ? `the connect to your PC's Chrome did not stick — ${why}. Is eab-connect still running, with Chrome open, on that PC?`
-      : `the connect to your Chrome did not stick — ${why}. Is the tunnel up and Chrome reachable at the address you gave?`,
+    `the connect to your ${backend.kind === 'connector' ? "PC's Chrome" : 'Chrome'} did not stick — ${why}. ${hint}` +
+      (tail ? ` Daemon log: ${tail}` : ''),
   );
 }
 

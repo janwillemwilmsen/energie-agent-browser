@@ -3,7 +3,7 @@ import { BrowserBackendKind } from '@eab/shared';
 import { config } from '../config.js';
 import { getSetting, setSetting } from '../settings.js';
 import { decryptSecret, encryptSecret, isEncrypted } from '../secrets.js';
-import { resolveChromeConnectUrl } from './chromeRemote.js';
+import { cachedChromeConnectUrl, resolveChromeConnectUrl } from './chromeRemote.js';
 import { cdpUrlFor, requirePc } from '../connector/hub.js';
 
 // Which browser the agent-browser daemon drives, as a value. Seven backends:
@@ -363,11 +363,22 @@ export function backendEnv(backend: BrowserBackend, stealth: Stealth = envStealt
       else delete env.AGENT_BROWSER_EXECUTABLE_PATH;
       break;
     case 'connector':
-    case 'chrome':
-      // Nothing to pass: the daemon gets the connect URL on its command line
-      // (bootstrapArgs), and the user's Chrome is already running with
-      // whatever flags it was given — launch args cannot apply.
+    case 'chrome': {
+      // The endpoint goes on EVERY command, as AGENT_BROWSER_CDP (the --cdp
+      // flag's env form). Two reasons, both measured against 0.38.1:
+      //   - `connect <url>` does not stick. The next command without a
+      //     connection flag runs on a DIFFERENT browser that agent-browser
+      //     launches itself.
+      //   - On Linux `connect <url>` does not even try: it logs "launched
+      //     browser" and exits 0, so a hosted run silently drove the server's
+      //     own headless Chromium (and got blocked as a bot) while reporting
+      //     success.
+      // The user's Chrome is already running, so launch args cannot apply.
+      const url = usersOwnCdpUrl(backend);
+      if (url) env.AGENT_BROWSER_CDP = url;
+      else delete env.AGENT_BROWSER_CDP;
       break;
+    }
     case 'cdp':
       // Make BROWSERLESS_API_KEY available so spawned commands never trigger an
       // auto-launch error, but do NOT set AGENT_BROWSER_PROVIDER — a self-hosted
@@ -423,8 +434,13 @@ export function isUsersOwnBrowser(backend: BrowserBackend): boolean {
 export async function bootstrapArgs(backend: BrowserBackend, stealth: Stealth): Promise<string[]> {
   switch (backend.kind) {
     case 'cdp': return ['connect', cdpConnectUrl(backend, stealth)];
-    case 'chrome': return ['connect', await resolveChromeConnectUrl(backend.url)];
-    case 'connector': return ['connect', connectorConnectUrl(backend)];
+    // These two reach their browser through AGENT_BROWSER_CDP (backendEnv), so
+    // the bootstrap is the same cheap page the local backend opens. Resolving
+    // here is still what validates the backend — it throws, before anything is
+    // spawned, when no PC is paired or the Chrome address is unreachable — and
+    // it refreshes the cached endpoint the env builder hands to every command.
+    case 'chrome': await resolveChromeConnectUrl(backend.url); return ['open', 'about:blank'];
+    case 'connector': connectorConnectUrl(backend); return ['open', 'about:blank'];
     default: return ['open', 'about:blank'];
   }
 }
@@ -434,7 +450,32 @@ export function connectorConnectUrl(backend: Extract<BrowserBackend, { kind: 'co
   return cdpUrlFor(requirePc(backend.pc).id);
 }
 
-/** The env var the Terminal shell exports with the connect URL, per backend (null: the backend opens a page instead). */
+/**
+ * The CDP endpoint a user's-own-browser backend drives, for AGENT_BROWSER_CDP.
+ * Never throws — it runs for every command, including the `close` of a session
+ * whose PC has already gone away. Null leaves the variable unset; the bootstrap
+ * path (bootstrapArgs) is where an unusable backend is reported.
+ */
+export function usersOwnCdpUrl(backend: BrowserBackend): string | null {
+  if (backend.kind === 'connector') {
+    try {
+      return connectorConnectUrl(backend);
+    } catch {
+      return null;
+    }
+  }
+  // Resolved (and cached) by the bootstrap, which runs before any command.
+  if (backend.kind === 'chrome') return backend.url ? cachedChromeConnectUrl(backend.url) : null;
+  return null;
+}
+
+/**
+ * The env var the Terminal shell exports with the connect URL, per backend.
+ * Only the cdp backend bootstraps with an explicit `connect <url>`; the
+ * user's-own-browser backends get AGENT_BROWSER_CDP from backendEnv instead,
+ * so their shell still exports the URL (handy when diagnosing) but their
+ * bootstrap line is a plain `open`.
+ */
 export function connectUrlEnvVar(backend: BrowserBackend): 'BROWSERLESS_CDP_URL' | 'CHROME_CDP_URL' | 'CONNECTOR_CDP_URL' | null {
   switch (backend.kind) {
     case 'cdp': return 'BROWSERLESS_CDP_URL';
@@ -452,8 +493,8 @@ export function connectUrlEnvVar(backend: BrowserBackend): 'BROWSERLESS_CDP_URL'
  * shell (ws/terminal.ts).
  */
 export function bootstrapCommand(backend: BrowserBackend, session: string): string {
-  const envVar = connectUrlEnvVar(backend);
-  if (!envVar) return `agent-browser --session ${session} open about:blank`;
+  if (backend.kind !== 'cdp') return `agent-browser --session ${session} open about:blank`;
+  const envVar = connectUrlEnvVar(backend)!;
   const ref = process.platform === 'win32' ? `%${envVar}%` : `$${envVar}`;
   return `agent-browser --session ${session} connect "${ref}"`;
 }
