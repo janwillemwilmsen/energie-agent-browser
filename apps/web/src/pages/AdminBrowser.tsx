@@ -39,8 +39,8 @@ const KIND_LABEL: Record<BrowserBackendKind, string> = {
 
 const KIND_HELP: Record<BrowserBackendKind, string> = {
   local: "agent-browser's own installed Chrome (`agent-browser install`). Runs on this server; Chromium launch args come from the Stealth section below.",
-  connector: 'Drives the Chrome on your own PC — your IP address, your logins, a window you can watch — through a small script (eab-connect) that runs on the PC and dials out to this app, like a browser tab would. No ports, no SSH, no server changes; it also starts Chrome for you. Chrome is already running, so the Stealth launch args do not apply; user agent and init script do.',
-  chrome: 'Same idea without the connector: the server connects straight to a Chrome started with --remote-debugging-port at an address you make reachable yourself (SSH tunnel). Only host:port is stored; the current debugger URL is looked up from /json/version on every connect. Prefer "Your own PC" above unless you already have a tunnel.',
+  connector: 'Drives the Chrome on your own PC — your IP address, your logins, a window you can watch — through a small script (eab-connect) that runs on the PC and dials out to this app, like a browser tab would. No ports, no SSH, no server changes; it also starts Chrome for you. The Stealth section does not apply here on purpose: a real Chrome with a real profile is its own stealth, and a user-agent override or patched navigator only makes it inconsistent (the version in the UA vs. the client hints, say) — the kind of thing Cloudflare checks.',
+  chrome: 'Same idea without the connector: the server connects straight to a Chrome started with --remote-debugging-port at an address you make reachable yourself (SSH tunnel). Only host:port is stored; the current debugger URL is looked up from /json/version on every connect. Stealth is not applied, as for "Your own PC". Prefer that one unless you already have a tunnel.',
   cdp: 'The daemon connects straight to a browserless Chrome over CDP (`connect wss://host/chromium?token=…`). Two ways to fill it in: a self-hosted browserless (its URL + the TOKEN it runs with), or browserless.io (a region URL + your API key — the key goes in the same token field). Gets the full stealth set: launch args, ignore-default-args, user agent, init script. This is the recommended way to use browserless.io.',
   'browserless-cloud': "browserless.io through agent-browser's built-in provider (REST session API, https:// URL). Uses browserless.io's own stealth; launch args and the user-agent override do not apply, and the target/ref handling has proven flaky in scenario runs — prefer the CDP option above.",
   browserbase: "Browserbase's hosted browsers through agent-browser's provider. Only the API key is needed (the project is read from the key). Launch args and the user-agent override do not apply.",
@@ -357,7 +357,7 @@ function StealthSection({ stealth, envStealth, onChange }: { stealth: BrowserSte
   const mono = { fontFamily: 'Consolas, monospace', fontSize: 12 } as const;
   return (
     <fieldset className="bb-kinds bb-stealth" disabled={false}>
-      <legend>Stealth — fingerprint tweaks applied to the active backend (where it supports them)</legend>
+      <legend>Stealth — fingerprint tweaks for a bare automation Chromium (local, CDP, providers); never applied to your own PC / Chrome</legend>
       <label style={{ display: 'flex', gap: 8, alignItems: 'center', cursor: 'pointer' }}>
         <input type="checkbox" checked={stealth.enabled} onChange={(e) => set('enabled', e.target.checked)} />
         <strong>Enabled</strong>
@@ -366,7 +366,7 @@ function StealthSection({ stealth, envStealth, onChange }: { stealth: BrowserSte
       <div className="bb-fields" style={{ opacity: stealth.enabled ? 1 : 0.5 }}>
         {field(
           'User agent',
-          'local, your PC / your Chrome, CDP; providers set it but have ignored it',
+          'local, CDP; providers set it but have ignored it; not your PC / your Chrome',
           <input value={stealth.userAgent} onChange={(e) => set('userAgent', e.target.value)} placeholder={envStealth.userAgent} style={mono} />,
           <>
             Keep it close to a current Chrome:{' '}
@@ -388,7 +388,7 @@ function StealthSection({ stealth, envStealth, onChange }: { stealth: BrowserSte
         )}
         {field(
           'Init script path',
-          'every backend (injected into each page by agent-browser)',
+          'local, CDP, providers (injected into each page by agent-browser); not your PC / your Chrome',
           <input value={stealth.initScript} onChange={(e) => set('initScript', e.target.value)} placeholder={envStealth.initScript} style={mono} />,
           'A JavaScript file on this server, run before any page script (navigator.webdriver, plugins, languages…). Empty = none.',
         )}

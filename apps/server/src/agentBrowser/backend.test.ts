@@ -190,6 +190,14 @@ describe('browser config', () => {
     const env = backendEnv(chrome, stealth);
     expect(env.AGENT_BROWSER_PROVIDER).toBeUndefined();
     expect(env.AGENT_BROWSER_ARGS).toBeUndefined();
+    // The user's own browser is left alone: no UA override, no init script, even with stealth on.
+    const on = { ...stealth, enabled: true, userAgent: 'UA/1', initScript: '/init.js' };
+    for (const own of [chrome, { kind: 'connector' as const, pc: '' }]) {
+      const e = backendEnv(own, on);
+      expect(e.AGENT_BROWSER_USER_AGENT).toBeUndefined();
+      expect(e.AGENT_BROWSER_INIT_SCRIPTS).toBeUndefined();
+    }
+    expect(backendEnv(envConfig().backends.local, on).AGENT_BROWSER_USER_AGENT).toBe('UA/1');
     // Local still opens a page.
     await expect(bootstrapArgs(envConfig().backends.local, stealth)).resolves.toEqual(['open', 'about:blank']);
   });

@@ -343,9 +343,15 @@ export function backendEnv(backend: BrowserBackend, stealth: Stealth = envStealt
     if (/^(BROWSERLESS|BROWSERBASE|BROWSER_USE|KERNEL)_/.test(k) || k === 'AGENT_BROWSER_PROVIDER') continue;
     env[k] = v;
   }
-  // The two runtime-applied stealth knobs apply to every backend — agent-browser
-  // sets them on the page after connecting, wherever the browser runs.
-  if (stealth.enabled) {
+  // The two runtime-applied stealth knobs apply to every backend that is a
+  // bare automation Chromium — agent-browser sets them on the page after
+  // connecting, wherever the browser runs. NOT to the user's own Chrome
+  // (connector / chrome): that is a real browser with a real profile, and
+  // every patch makes it less consistent — a UA override says one version
+  // while the Sec-CH-UA client hints Chrome still sends say the real one, the
+  // init script's WebGL/plugins/languages contradict the machine's own — which
+  // is exactly what Cloudflare-style checks look for.
+  if (stealth.enabled && !isUsersOwnBrowser(backend)) {
     if (stealth.userAgent) env.AGENT_BROWSER_USER_AGENT = stealth.userAgent;
     if (stealth.initScript) env.AGENT_BROWSER_INIT_SCRIPTS = stealth.initScript;
   }
@@ -400,6 +406,11 @@ export function backendEnv(backend: BrowserBackend, stealth: Stealth = envStealt
 /** Whether the daemon drives a remote browser (affects --session-name handling in the driver). */
 export function isRemote(backend: BrowserBackend): boolean {
   return backend.kind !== 'local';
+}
+
+/** The user's own Chrome, already running with their profile: no stealth patching applies. */
+export function isUsersOwnBrowser(backend: BrowserBackend): boolean {
+  return backend.kind === 'connector' || backend.kind === 'chrome';
 }
 
 /**
