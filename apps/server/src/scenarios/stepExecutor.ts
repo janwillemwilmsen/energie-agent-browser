@@ -18,6 +18,7 @@ import type { AuthSelectors } from '../authSelectors.js';
 import { resolveSelector } from './selector.js';
 import { isOptionSelector, execSelectOptionFallback } from './selectFallback.js';
 import { expandScrollers, restoreScrollers } from './expandScrollers.js';
+import { captureStitchedFullPage } from './stitchCapture.js';
 import { isElementNotFound, runLocatorFallback, waitForLocatorFallback } from './shadowFallback.js';
 
 // The Step executor: the ONE place a Step is carried out against a Browser.
@@ -172,6 +173,13 @@ export interface StepContext {
    * and skipped. The navigation/interaction steps still run as usual.
    */
   skipResources?: boolean;
+  /**
+   * Build a full-page screenshot from viewport captures instead of asking the
+   * browser for one (stitchCapture.ts). The runner sets this for the backends
+   * that drive the user's own, headed Chrome: there `--full` renders the whole
+   * page into one surface, which times out or wedges the tab on a long page.
+   */
+  stitchFullPage?: boolean;
 }
 
 /** Step kinds that leave a file behind (screenshots, texts, video). */
@@ -1000,33 +1008,46 @@ async function screenshot(
       await timing.sleep(50);
     }
 
+    // Stitching composes viewport captures itself, so it cannot also ask
+    // agent-browser for a jpeg or for the annotation overlay; those keep the
+    // browser's own full-page capture.
+    const stitch = fullPage && ctx.stitchFullPage === true && !annotate && format !== 'jpeg';
+
     // Global flags must precede the subcommand.
     const args: string[] = [];
     if (format === 'jpeg') args.push('--screenshot-format', 'jpeg', '--screenshot-quality', String(quality));
     args.push('screenshot');
-    if (fullPage) args.push('--full');
+    if (fullPage && !stitch) args.push('--full');
     if (annotate) args.push('--annotate');
     args.push(capturePath);
     log(
-      `screenshot${fullPage ? ' (full)' : ' (viewport)'}${expand ? ' (expanded)' : ''}${device ? ` (mobile: ${device.name})` : ''}${zoom ? ` (zoom ${zoom}%)` : ''}${annotate ? ' (annotated)' : ''}${format !== 'png' ? ` (${format} q${quality})` : ''} → ${filename}`,
+      `screenshot${fullPage ? (stitch ? ' (full, stitched)' : ' (full)') : ' (viewport)'}${expand ? ' (expanded)' : ''}${device ? ` (mobile: ${device.name})` : ''}${zoom ? ` (zoom ${zoom}%)` : ''}${annotate ? ' (annotated)' : ''}${format !== 'png' ? ` (${format} q${quality})` : ''} → ${filename}`,
     );
     if (expand) {
       log(`expand scrollers: ${await expandScrollers(browser)}`);
       // Give the browser a frame to relayout at the new document height.
       await timing.sleep(100);
     }
-    let r;
+    let r: RunResult = { stdout: '', stderr: '', exitCode: 0 };
     try {
-      // Chrome refuses to capture while a navigation is mid-flight (the new
-      // document has no layout yet). That's transient — typically the step right
-      // after a click that navigated elsewhere. Wait for the load state and retry
-      // a few times before giving up.
-      r = await browser.run(args, { timeoutMs: 60_000 });
-      for (let attempt = 1; r.exitCode !== 0 && isPageNotReadyError(r.stderr, r.stdout) && attempt <= SCREENSHOT_NOT_READY_RETRIES; attempt++) {
-        log(`screenshot: page not ready yet (${(r.stderr || r.stdout).trim().split('\n')[0]}) — waiting for load and retrying (${attempt}/${SCREENSHOT_NOT_READY_RETRIES})`);
-        await timing.sleep(500);
-        await waitForLoad(browser, 10_000);
+      if (stitch) {
+        await captureStitchedFullPage(browser, capturePath, {
+          log,
+          sleep: (ms) => timing.sleep(ms),
+          timeoutMs: 60_000,
+        });
+      } else {
+        // Chrome refuses to capture while a navigation is mid-flight (the new
+        // document has no layout yet). That's transient — typically the step right
+        // after a click that navigated elsewhere. Wait for the load state and retry
+        // a few times before giving up.
         r = await browser.run(args, { timeoutMs: 60_000 });
+        for (let attempt = 1; r.exitCode !== 0 && isPageNotReadyError(r.stderr, r.stdout) && attempt <= SCREENSHOT_NOT_READY_RETRIES; attempt++) {
+          log(`screenshot: page not ready yet (${(r.stderr || r.stdout).trim().split('\n')[0]}) — waiting for load and retrying (${attempt}/${SCREENSHOT_NOT_READY_RETRIES})`);
+          await timing.sleep(500);
+          await waitForLoad(browser, 10_000);
+          r = await browser.run(args, { timeoutMs: 60_000 });
+        }
       }
     } finally {
       // Always put the page's layout back, even when the capture failed —
@@ -1035,7 +1056,8 @@ async function screenshot(
     }
     if (r.exitCode !== 0) throw new Error(`screenshot failed: ${r.stderr || r.stdout}`);
     const size = await imageSize(capturePath);
-    if (fullPage && size) warnIfOversize(size, log);
+    // A stitched capture is composed here, so Chrome's one-surface cap never applied to it.
+    if (fullPage && size && !stitch) warnIfOversize(size, log);
     if (format === 'webp') {
       // agent-browser can't emit webp — convert the png capture and drop it.
       await sharp(capturePath).webp({ quality }).toFile(filepath);

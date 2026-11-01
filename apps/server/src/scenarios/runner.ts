@@ -3,6 +3,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { getDb } from '../db/index.js';
 import { closeSession, openSession, DEFAULT_SESSION } from '../agentBrowser/driver.js';
+import { currentBackend, isUsersOwnBrowser } from '../agentBrowser/backend.js';
 import { cliBrowser } from '../agentBrowser/cliBrowser.js';
 import { getAuthSelectors } from '../authSelectors.js';
 import {
@@ -308,6 +309,17 @@ export function startRun(scenarioId: number, opts: StartRunOptions = {}): Starte
   // override, or null for the admin default. Every openSession below says so,
   // so a daemon left on another backend by the previous run is restarted.
   const backend = scenario.browser_backend ?? null;
+  // The user's own, headed Chrome cannot render a whole long page into one
+  // capture surface — Page.captureScreenshot times out or wedges the tab — so
+  // full-page shots on those backends are composed from viewport captures
+  // (stitchCapture.ts). Read per run: the admin default can change between runs.
+  const stitchFullPage = () => {
+    try {
+      return isUsersOwnBrowser(currentBackend(backend).backend);
+    } catch {
+      return false; // an unusable backend fails later, with its own message
+    }
+  };
   const maxRestarts = Math.max(0, scenario.restart_on_failure ?? 0);
   // Video recording is opened/closed by `record_start` / `record_stop` steps;
   // this holder is shared across viewports and restart attempts so a recording
@@ -556,6 +568,10 @@ export function startRun(scenarioId: number, opts: StartRunOptions = {}): Starte
             pause,
             settle,
             devices,
+            // The user's own, headed Chrome cannot render a whole long page
+            // into one capture surface — it times out or wedges the tab — so
+            // a full-page shot there is composed from viewport captures.
+            stitchFullPage: stitchFullPage(),
             // The recording's pointer overlay lives in the page; a navigation
             // drops it, so it is put back after every Step while recording.
             afterStep: async () => { await ctx.recording.cursor?.refresh(); },
