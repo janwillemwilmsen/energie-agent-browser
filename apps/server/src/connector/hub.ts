@@ -25,10 +25,19 @@ import { decryptSecret, encryptSecret, isEncrypted } from '../secrets.js';
 //   hub → PC   {t:'welcome', id} | {t:'error', message} (then close)
 //   hub → PC   {t:'open', ch}            the daemon connected; dial Chrome
 //   PC → hub   {t:'opened', ch} | {t:'openfail', ch, error}
-//   both       {t:'msg', ch, data} · {t:'close', ch}
+//   both       {t:'msg', ch, data, more?} · {t:'close', ch}
 //   PC → hub   {t:'version', version}    Chrome changed; version null = nothing
 //                                        answers on the PC's port right now
 // Keepalive is WebSocket ping/pong from the hub.
+//
+// A CDP message is split across several `msg` frames when it is big: every
+// frame but the last carries `more: true`, and the receiver joins them. A
+// full-page screenshot is 4-11 MB of PNG, so ~6-15 MB of base64 in ONE CDP
+// response, and sending that as a single WebSocket frame breaks the relay:
+// a control frame cannot interleave inside a data frame, so the PC's pong is
+// stuck behind a multi-megabyte upload and the keepalive below kills the
+// socket mid-screenshot ("CDP response channel closed"). Chunks also keep
+// proxies and the client's own frame limits out of it.
 
 export interface PcVersion {
   browser: string | null;
@@ -53,11 +62,17 @@ interface Channel {
   ready: boolean;
   /** CDP-side frames that arrived before the PC reported the channel open. */
   queue: string[];
+  /** Parts of a chunked message from the PC, waiting for the one without `more`. */
+  inbound: string[];
+  inboundBytes: number;
 }
 
 interface Pc extends Omit<PcInfo, 'channels'> {
   socket: WebSocket;
-  alive: boolean;
+  /** Keepalive misses since the last pong; see PING_MISSES_ALLOWED. */
+  missed: number;
+  /** The connector understands chunked frames (1.2.0+); older ones get whole messages. */
+  chunks: boolean;
   channels: Map<number, Channel>;
   nextCh: number;
 }
@@ -68,7 +83,14 @@ const pcs = new Map<string, Pc>();
 const CDP_KEY = crypto.randomBytes(24).toString('base64url');
 
 const PING_INTERVAL_MS = 25_000;
+// Chunking keeps pongs flowing, but a PC on a slow uplink can still be a few
+// seconds late; only give up after several silent intervals.
+const PING_MISSES_ALLOWED = 3;
 const HELLO_TIMEOUT_MS = 10_000;
+/** Split a CDP message above this into `more` frames (see the note at the top). */
+const CHUNK_BYTES = 256 * 1024;
+/** Refuse to buffer more than this for one reassembled message. */
+const MAX_MESSAGE_BYTES = 96 * 1024 * 1024;
 
 // --- Pairing code ------------------------------------------------------------------
 
@@ -139,7 +161,7 @@ function noteFailure(ip: string): void {
 
 export function listPcs(): PcInfo[] {
   return [...pcs.values()]
-    .map(({ socket: _s, alive: _a, channels, nextCh: _n, ...info }) => ({ ...info, channels: channels.size }) as PcInfo)
+    .map(({ socket: _s, missed: _m, chunks: _c, channels, nextCh: _n, ...info }) => ({ ...info, channels: channels.size }) as PcInfo)
     .sort((a, b) => b.connectedAt.localeCompare(a.connectedAt));
 }
 
@@ -198,6 +220,19 @@ function readVersion(v: any): { version: PcVersion; chromeOk: boolean } {
 
 function send(socket: WebSocket, msg: unknown): void {
   if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(msg));
+}
+
+/** One CDP message to the PC, split into `more` frames when it is big. */
+function sendChannelData(pc: Pc, ch: number, data: string): void {
+  if (!pc.chunks || data.length <= CHUNK_BYTES) {
+    send(pc.socket, { t: 'msg', ch, data });
+    return;
+  }
+  for (let i = 0; i < data.length; i += CHUNK_BYTES) {
+    const part = data.slice(i, i + CHUNK_BYTES);
+    const more = i + CHUNK_BYTES < data.length;
+    send(pc.socket, more ? { t: 'msg', ch, data: part, more: true } : { t: 'msg', ch, data: part });
+  }
 }
 
 // --- Relay self-test ----------------------------------------------------------------
@@ -334,7 +369,8 @@ export async function connectorWsRoutes(app: FastifyInstance) {
           connectedAt: new Date().toISOString(),
           ...readVersion(msg.version),
           socket,
-          alive: true,
+          missed: 0,
+          chunks: msg.chunks === true,
           channels: new Map(),
           nextCh: 1,
         };
@@ -350,7 +386,7 @@ export async function connectorWsRoutes(app: FastifyInstance) {
           if (!channel) return;
           channel.ready = true;
           app.log.info({ pc: pc.name, ch: msg.ch, queued: channel.queue.length }, 'connector: channel open to Chrome');
-          for (const data of channel.queue.splice(0)) send(pc.socket, { t: 'msg', ch: msg.ch, data });
+          for (const data of channel.queue.splice(0)) sendChannelData(pc, msg.ch, data);
           return;
         }
         case 'openfail':
@@ -359,7 +395,25 @@ export async function connectorWsRoutes(app: FastifyInstance) {
           return;
         case 'msg': {
           const channel = pc.channels.get(msg.ch);
-          if (channel && typeof msg.data === 'string' && channel.socket.readyState === channel.socket.OPEN) channel.socket.send(msg.data);
+          if (!channel || typeof msg.data !== 'string') return;
+          if (msg.more === true) {
+            channel.inboundBytes += msg.data.length;
+            if (channel.inboundBytes > MAX_MESSAGE_BYTES) {
+              app.log.warn({ pc: pc.name, ch: msg.ch, bytes: channel.inboundBytes }, 'connector: oversized CDP message');
+              closeChannel(pc, msg.ch, 1009, 'the PC sent a CDP message that is too big to relay', true);
+              return;
+            }
+            channel.inbound.push(msg.data);
+            return;
+          }
+          let full = msg.data;
+          if (channel.inbound.length) {
+            channel.inbound.push(msg.data);
+            full = channel.inbound.join('');
+            channel.inbound.length = 0;
+            channel.inboundBytes = 0;
+          }
+          if (channel.socket.readyState === channel.socket.OPEN) channel.socket.send(full);
           return;
         }
         case 'close':
@@ -374,11 +428,15 @@ export async function connectorWsRoutes(app: FastifyInstance) {
       }
     });
 
-    socket.on('pong', () => { if (pc) pc.alive = true; });
+    socket.on('pong', () => { if (pc) pc.missed = 0; });
     const ping = setInterval(() => {
       if (!pc) return;
-      if (!pc.alive) { socket.terminate(); return; }
-      pc.alive = false;
+      if (pc.missed >= PING_MISSES_ALLOWED) {
+        app.log.warn({ pc: pc.name, misses: pc.missed }, 'connector: PC stopped answering keepalives');
+        socket.terminate();
+        return;
+      }
+      pc.missed += 1;
       try { socket.ping(); } catch { /* closing */ }
     }, PING_INTERVAL_MS);
 
@@ -410,14 +468,14 @@ export async function connectorWsRoutes(app: FastifyInstance) {
         return;
       }
       const ch = pc.nextCh++;
-      const channel: Channel = { socket, ready: false, queue: [] };
+      const channel: Channel = { socket, ready: false, queue: [], inbound: [], inboundBytes: 0 };
       pc.channels.set(ch, channel);
       app.log.info({ pc: pc.name, ch }, 'connector: daemon attached, asking PC to dial Chrome');
       send(pc.socket, { t: 'open', ch });
 
       socket.on('message', (raw) => {
         const data = raw.toString();
-        if (channel.ready) send(pc.socket, { t: 'msg', ch, data });
+        if (channel.ready) sendChannelData(pc, ch, data);
         else channel.queue.push(data);
       });
       socket.on('close', (code) => {

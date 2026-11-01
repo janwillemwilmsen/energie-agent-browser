@@ -85,7 +85,7 @@ async function until(cond: () => boolean, ms = 2_000): Promise<void> {
 
 async function pair(name: string, code = pairingCode()): Promise<{ ws: WebSocket; id: string }> {
   const ws = await open(`ws://127.0.0.1:${port}/ws/connector`);
-  send(ws, { t: 'hello', code, name, platform: 'test', version: { browser: 'Chrome/1', protocolVersion: '1.3', userAgent: 'UA' } });
+  send(ws, { t: 'hello', code, name, platform: 'test', chunks: true, version: { browser: 'Chrome/1', protocolVersion: '1.3', userAgent: 'UA' } });
   const welcome = await next(ws);
   expect(welcome).toMatchObject({ t: 'welcome', name });
   return { ws, id: welcome.id };
@@ -165,6 +165,59 @@ describe('the relay', () => {
     await next(pc);
     pc.close();
     expect((await closed(daemon3)).code).toBe(1001);
+    await until(() => listPcs().length === 0);
+  });
+
+  it('splits a big CDP message into frames and reassembles it, both ways', async () => {
+    // A full-page screenshot is megabytes of base64 in ONE CDP message; sent as
+    // a single frame it starves this socket's pong and the keepalive kills it.
+    const { ws: pc, id } = await pair('laptop');
+    const daemon = await open(cdpUrlFor(id));
+    expect(await next(pc)).toEqual({ t: 'open', ch: 1 });
+    send(pc, { t: 'opened', ch: 1 });
+
+    // PC → daemon: the screenshot direction. Arrives whole, in order.
+    const big = 'x'.repeat(600_000) + 'END';
+    send(pc, { t: 'msg', ch: 1, data: big.slice(0, 300_000), more: true });
+    send(pc, { t: 'msg', ch: 1, data: big.slice(300_000, 600_000), more: true });
+    send(pc, { t: 'msg', ch: 1, data: big.slice(600_000) });
+    expect(await nextRaw(daemon)).toBe(big);
+    // A small one still arrives as a single frame.
+    send(pc, { t: 'msg', ch: 1, data: '{"id":9}' });
+    expect(await nextRaw(daemon)).toBe('{"id":9}');
+
+    // daemon → PC: the hub chunks it, because this PC said it understands chunks.
+    const outbound = 'y'.repeat(700_000);
+    daemon.send(outbound);
+    let got = '';
+    for (;;) {
+      const m = await next(pc);
+      expect(m).toMatchObject({ t: 'msg', ch: 1 });
+      got += m.data;
+      expect(m.data.length).toBeLessThanOrEqual(256 * 1024);
+      if (!m.more) break;
+    }
+    expect(got).toBe(outbound);
+
+    daemon.close();
+    expect(await next(pc)).toEqual({ t: 'close', ch: 1 });
+    pc.close();
+    await until(() => listPcs().length === 0);
+  });
+
+  it('sends whole messages to a connector that predates chunking', async () => {
+    const ws = await open(`ws://127.0.0.1:${port}/ws/connector`);
+    send(ws, { t: 'hello', code: pairingCode(), name: 'old', version: { browser: 'Chrome/1' } }); // no chunks: true
+    const welcome = await next(ws);
+    const daemon = await open(cdpUrlFor(welcome.id));
+    expect(await next(ws)).toEqual({ t: 'open', ch: 1 });
+    send(ws, { t: 'opened', ch: 1 });
+    const outbound = 'z'.repeat(700_000);
+    daemon.send(outbound);
+    const m = await next(ws);
+    expect(m).toEqual({ t: 'msg', ch: 1, data: outbound });
+    daemon.close();
+    ws.close();
     await until(() => listPcs().length === 0);
   });
 

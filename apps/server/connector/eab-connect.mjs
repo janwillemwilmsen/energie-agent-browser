@@ -19,7 +19,11 @@
 // Protocol (JSON text frames), mirrored in apps/server/src/connector/hub.ts:
 //   → {t:'hello', code, name, platform, version}   ← {t:'welcome', id, name}
 //   ← {t:'open', ch}   → {t:'opened', ch} | {t:'openfail', ch, error}
-//   ↔ {t:'msg', ch, data} · {t:'close', ch}        → {t:'version', version|null}
+//   ↔ {t:'msg', ch, data, more?} · {t:'close', ch} → {t:'version', version|null}
+// A big CDP message (a full-page screenshot is 4-11 MB of PNG, so ~6-15 MB of
+// base64) is split across several `msg` frames, each but the last carrying
+// `more: true`. One giant frame would block this socket's pong behind a
+// multi-megabyte upload — the app's keepalive then drops us mid-screenshot.
 // Chrome is probed every few seconds while paired, so the app knows when it is
 // gone (and refuses to start a run on this PC until it is back) rather than
 // finding out mid-connect; when allowed, it is started again on its own.
@@ -29,7 +33,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const VERSION = '1.1.0';
+const VERSION = '1.2.0';
+/** Split a CDP message above this into `more` frames (see the protocol note above). */
+const CHUNK_BYTES = 256 * 1024;
 
 // --- Arguments -----------------------------------------------------------------------
 
@@ -176,6 +182,15 @@ function connectOnce(version) {
     const channels = new Map(); // ch → { chrome, ready, queue }
     let lastBrowser = version.browser; // null while nothing answers on the port
     const sendHub = (msg) => { if (hub.readyState === WebSocket.OPEN) hub.send(JSON.stringify(msg)); };
+    // One CDP message to the app, split into `more` frames when it is big.
+    const sendChannelData = (ch, data) => {
+      if (data.length <= CHUNK_BYTES) { sendHub({ t: 'msg', ch, data }); return; }
+      for (let i = 0; i < data.length; i += CHUNK_BYTES) {
+        const part = data.slice(i, i + CHUNK_BYTES);
+        if (i + CHUNK_BYTES < data.length) sendHub({ t: 'msg', ch, data: part, more: true });
+        else sendHub({ t: 'msg', ch, data: part });
+      }
+    };
 
     // Tell the hub when Chrome appears, changes or disappears; restart it when it is gone.
     const report = (v) => {
@@ -199,7 +214,7 @@ function connectOnce(version) {
     }, 5_000);
 
     hub.onopen = () => {
-      sendHub({ t: 'hello', code, name: opts.name, platform: `${process.platform} node ${process.version}`, version: publicVersion(version), connector: VERSION });
+      sendHub({ t: 'hello', code, name: opts.name, platform: `${process.platform} node ${process.version}`, version: publicVersion(version), connector: VERSION, chunks: true });
     };
 
     hub.onmessage = async (ev) => {
@@ -218,7 +233,7 @@ function connectOnce(version) {
             sendHub({ t: 'openfail', ch, error: `nothing answers on port ${opts.port} — is Chrome still running?` });
             return;
           }
-          const entry = { chrome: null, ready: false, queue: [] };
+          const entry = { chrome: null, ready: false, queue: [], inbound: [] };
           channels.set(ch, entry);
           let chrome;
           try {
@@ -235,7 +250,7 @@ function connectOnce(version) {
             sendHub({ t: 'opened', ch });
             for (const data of entry.queue.splice(0)) chrome.send(data);
           };
-          chrome.onmessage = (e) => sendHub({ t: 'msg', ch, data: String(e.data) });
+          chrome.onmessage = (e) => sendChannelData(ch, String(e.data));
           chrome.onerror = () => {
             if (!entry.ready && channels.get(ch) === entry) {
               channels.delete(ch);
@@ -255,8 +270,11 @@ function connectOnce(version) {
         case 'msg': {
           const entry = channels.get(msg.ch);
           if (!entry || typeof msg.data !== 'string') return;
-          if (entry.ready) entry.chrome.send(msg.data);
-          else entry.queue.push(msg.data);
+          if (msg.more === true) { entry.inbound.push(msg.data); return; }
+          let full = msg.data;
+          if (entry.inbound.length) { entry.inbound.push(msg.data); full = entry.inbound.join(''); entry.inbound.length = 0; }
+          if (entry.ready) entry.chrome.send(full);
+          else entry.queue.push(full);
           return;
         }
         case 'close': {
