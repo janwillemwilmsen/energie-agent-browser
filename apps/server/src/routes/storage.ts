@@ -67,13 +67,13 @@ function fileSize(abs: string): number {
   }
 }
 
-// The text files a run's save_text steps wrote: the .md files at the top of
-// its screenshot directory (see routes/runs.ts). Reported apart from the
-// images they sit next to.
+// The text files a run's save_text steps wrote: the .md (text, a11y report)
+// and .html files at the top of its screenshot directory (see
+// routes/runs.ts). Reported apart from the images they sit next to.
 function textStats(runDir: string): DirStats {
   const out: DirStats = { bytes: 0, files: 0 };
   for (const name of listFiles(runDir)) {
-    if (!name.toLowerCase().endsWith('.md')) continue;
+    if (!/\.(md|html)$/i.test(name)) continue;
     out.bytes += fileSize(path.join(runDir, name));
     out.files += 1;
   }
@@ -218,7 +218,7 @@ function groupsReport(): StorageGroup[] {
 
   return [
     { key: 'screenshots', label: 'Run screenshots', dir: 'screenshots', bytes: shots.bytes, files: shots.files },
-    { key: 'texts', label: 'Saved page texts', dir: 'screenshots/*/*.md', bytes: texts.bytes, files: texts.files },
+    { key: 'texts', label: 'Saved page texts', dir: 'screenshots/*/*.{md,html}', bytes: texts.bytes, files: texts.files },
     { key: 'recordings', label: 'Video recordings', dir: 'recordings', bytes: rec.bytes, files: rec.files },
     { key: 'diffs', label: 'Diff artifacts', dir: 'diffs', bytes: diffs.bytes, files: diffs.files },
     { key: 'thumbs', label: 'Thumbnail cache', dir: 'screenshots/*/thumbs', bytes: thumbs.bytes, files: thumbs.files, cache: true },

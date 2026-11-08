@@ -2364,6 +2364,9 @@ button.ask-danger:hover { color: var(--error); border-color: var(--error); filte
 .texts-reader-head { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; font-size: 12px; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
 .texts-raw { white-space: pre-wrap; word-break: break-word; font-size: 12.5px; margin: 0; }
 .texts-md { font-size: 14px; line-height: 1.5; }
+.texts-details { margin-top: 14px; border-top: 1px solid var(--border); padding-top: 8px; }
+.texts-details > summary { cursor: pointer; font-weight: 600; font-size: 15px; color: var(--text); }
+.texts-details > summary:hover { color: var(--accent); }
 .button-link { display: inline-block; background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 4px 10px; font-size: 12px; font-weight: 600; text-decoration: none; }
 .button-link:hover { border-color: var(--accent); }
 @media (max-width: 900px) { .texts-layout { grid-template-columns: 1fr; } .texts-list { max-height: 240px; } }

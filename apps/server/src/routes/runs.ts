@@ -154,11 +154,12 @@ export async function runsRoutes(app: FastifyInstance) {
     },
   );
 
-  // Text files saved by save_text steps live beside the screenshots and are
-  // served the same way (path-checked by the store). Unlike screenshots they
-  // are editable (PUT below), so they revalidate instead of caching forever.
+  // Text files saved by save_text steps (.md texts and a11y reports, .html
+  // page HTML) live beside the screenshots and are served the same way
+  // (path-checked by the store). Unlike screenshots they are editable (PUT
+  // below), so they revalidate instead of caching forever.
   const textPath = (runId: number, name: string): string | null => {
-    if (!name.endsWith('.md')) return null;
+    if (!/\.(md|html)$/i.test(name)) return null;
     const p = runStore().screenshotPath(runId, name);
     return p && fs.existsSync(p) ? p : null;
   };
@@ -172,7 +173,9 @@ export async function runsRoutes(app: FastifyInstance) {
     if (ims && !Number.isNaN(Date.parse(ims)) && stat.mtimeMs < Date.parse(ims) + 1000) {
       return reply.code(304).send();
     }
-    reply.type('text/markdown; charset=utf-8');
+    // Saved HTML is a captured foreign page: served as plain text so its
+    // scripts never run on this origin.
+    reply.type(/\.html$/i.test(filepath) ? 'text/plain; charset=utf-8' : 'text/markdown; charset=utf-8');
     return reply.send(fs.createReadStream(filepath));
   });
 

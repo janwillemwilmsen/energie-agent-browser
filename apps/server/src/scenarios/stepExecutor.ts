@@ -242,7 +242,7 @@ export function describeStep(step: StepPayload): string {
     case 'record_stop': return 'record stop';
     case 'close': return 'close browser session';
     case 'press': return `press ${step.key}`;
-    case 'save_text': return `save text${step.label ? ` ${step.label}` : ''}`;
+    case 'save_text': return `save ${saveTextWord(step.mode ?? 'text')}${step.label ? ` ${step.label}` : ''}`;
     case 'pause': return `pause${step.label ? ` ${step.label}` : ''}`;
   }
 }
@@ -899,11 +899,14 @@ function isPageNotReadyError(stderr: string, stdout: string): boolean {
   return /Cannot take screenshot with 0 (width|height)/i.test(s) || /Unable to capture screenshot/i.test(s);
 }
 
-// The textual counterpart of a screenshot: agent-browser `read` (no URL)
-// extracts the readable text of the active tab's rendered DOM — auth state
-// and client-side updates included — as Markdown-ish text. Saved under the
-// run's artifact dir with the same slot filename protocol as screenshots, so
-// a text pairs with the screenshot of the same label across runs.
+// The textual counterpart of a screenshot, in one of three modes. 'text':
+// agent-browser `read` (no URL) extracts the readable text of the active
+// tab's rendered DOM — auth state and client-side updates included — as
+// Markdown-ish text. 'html': the document's full HTML after rendering.
+// 'a11y': an axe-core audit (agent-browser `a11y --json`) rendered as a
+// Markdown report. Saved under the run's artifact dir with the same slot
+// filename protocol as screenshots, so a file pairs with the screenshot of
+// the same label across runs.
 async function saveText(
   ctx: StepContext,
   step: Extract<StepPayload, { kind: 'save_text' }>,
@@ -911,22 +914,210 @@ async function saveText(
 ): Promise<void> {
   const { browser, log } = ctx;
   const artifacts = requireArtifacts(ctx, step.kind);
+  const mode = step.mode ?? 'text';
+  const what = saveTextWord(mode);
   const label = step.label ?? `step-${position}`;
-  const filename = slotFilename(artifacts, { label, viewport: artifacts.viewport, ext: 'md' });
+  const filename = slotFilename(artifacts, { label, viewport: artifacts.viewport, ext: mode === 'html' ? 'html' : 'md' });
   const filepath = path.join(artifacts.screenshotDir, filename);
-  const r = await browser.run(['read'], { timeoutMs: 60_000 });
-  if (r.exitCode !== 0) throw new Error(`save text failed: ${failureText(r)}`);
-  const text = r.stdout.replace(/\r\n/g, '\n').trim();
-  if (!text) throw new Error('save text failed: the page yielded no readable text');
   let url = '';
   try {
     const u = await browser.run(['get', 'url'], { timeoutMs: 10_000 });
     if (u.exitCode === 0) url = u.stdout.trim();
   } catch { /* header is best-effort */ }
-  const header = `<!-- ${label} · ${artifacts.viewport} · ${url || 'unknown url'} · ${new Date().toISOString()} -->\n\n`;
-  fs.writeFileSync(filepath, `${header}${text}\n`, 'utf-8');
-  log(`save text → ${filename} (${text.length.toLocaleString()} chars)`);
+  let body: string;
+  let detail = '';
+  if (mode === 'html') {
+    body = await capturePageHtml(browser);
+  } else if (mode === 'a11y') {
+    const report = await captureA11yReport(browser, { url, tags: step.tags });
+    body = report.markdown;
+    detail = report.summary;
+  } else {
+    const r = await browser.run(['read'], { timeoutMs: 60_000 });
+    if (r.exitCode !== 0) throw new Error(`save text failed: ${failureText(r)}`);
+    body = r.stdout.replace(/\r\n/g, '\n').trim();
+    if (!body) throw new Error('save text failed: the page yielded no readable text');
+  }
+  const header = `<!-- ${label} · ${what} · ${artifacts.viewport} · ${url || 'unknown url'} · ${new Date().toISOString()} -->\n\n`;
+  fs.writeFileSync(filepath, `${header}${body}\n`, 'utf-8');
+  log(`save ${what} → ${filename} (${body.length.toLocaleString()} chars${detail ? `; ${detail}` : ''})`);
   artifacts.texts.push(filename);
+}
+
+function saveTextWord(mode: 'text' | 'html' | 'a11y'): string {
+  return mode === 'html' ? 'html' : mode === 'a11y' ? 'a11y report' : 'text';
+}
+
+// The document as the browser has it now: doctype + outerHTML of <html>,
+// client-side rendering included (unlike the server's response body). An
+// eval result arrives JSON-encoded, so the string is unquoted once.
+async function capturePageHtml(browser: Browser): Promise<string> {
+  const js =
+    "(document.doctype ? '<!DOCTYPE ' + document.doctype.name" +
+    " + (document.doctype.publicId ? ' PUBLIC \"' + document.doctype.publicId + '\"' : '')" +
+    " + (document.doctype.systemId ? ' \"' + document.doctype.systemId + '\"' : '') + '>\\n' : '')" +
+    ' + document.documentElement.outerHTML';
+  const r = await browser.run(['eval', js], { timeoutMs: 60_000 });
+  if (r.exitCode !== 0) throw new Error(`save html failed: ${failureText(r)}`);
+  let html = r.stdout.trim();
+  try {
+    const once = JSON.parse(html) as unknown;
+    if (typeof once === 'string') html = once;
+  } catch { /* not JSON-quoted: take it as is */ }
+  html = html.replace(/\r\n/g, '\n').trim();
+  if (!html) throw new Error('save html failed: the page yielded no HTML');
+  return html;
+}
+
+// axe-core's structured result (agent-browser a11y --json): counts plus
+// violations / incomplete, each rule with its failing nodes.
+interface AxeNode { target?: unknown; html?: string; failureSummary?: string }
+interface AxeRule {
+  id?: string; impact?: string | null; help?: string; description?: string; helpUrl?: string;
+  tags?: string[]; nodeCount?: number; nodes?: AxeNode[];
+}
+interface AxeResult {
+  counts?: Record<string, unknown>;
+  violations?: AxeRule[];
+  incomplete?: AxeRule[];
+  [k: string]: unknown;
+}
+
+const IMPACT_ORDER = ['critical', 'serious', 'moderate', 'minor'];
+
+// Every rule (no --tags) unless the Step narrows it: the fullest report axe
+// gives. The Markdown carries each violation and incomplete check with its
+// impact, tags, help link and failing nodes, and ends with the raw JSON so
+// nothing the engine reported is lost. Falls back to the plain-text report
+// when the JSON cannot be parsed (an older agent-browser, say).
+async function captureA11yReport(
+  browser: Browser,
+  opts: { url: string; tags?: string },
+): Promise<{ markdown: string; summary: string }> {
+  const tags = opts.tags?.trim() || '';
+  const base = tags ? ['a11y', '--tags', tags] : ['a11y'];
+  // The global --json (before the subcommand) wraps the result as
+  // {success, data}; the subcommand's own --json flag is not honoured.
+  const r = await browser.run(['--json', ...base], { timeoutMs: 120_000 });
+  if (r.exitCode !== 0) throw new Error(`a11y report failed: ${failureText(r)}`);
+  let result: AxeResult | null = null;
+  try {
+    const parsed = JSON.parse(r.stdout.trim()) as { success?: boolean; error?: string; data?: unknown } | null;
+    if (parsed && typeof parsed === 'object' && parsed.success === false) {
+      throw new Error(`a11y report failed: ${parsed.error ?? 'unknown error'}`);
+    }
+    const data = parsed && typeof parsed === 'object' && 'data' in parsed ? parsed.data : parsed;
+    if (data && typeof data === 'object' && !Array.isArray(data)) result = data as AxeResult;
+  } catch (e) {
+    if (e instanceof Error && e.message.startsWith('a11y report failed')) throw e;
+    /* not JSON: fall through to the text report */
+  }
+  if (!result || (!Array.isArray(result.violations) && !Array.isArray(result.incomplete))) {
+    const plain = await browser.run(base, { timeoutMs: 120_000 });
+    if (plain.exitCode !== 0) throw new Error(`a11y report failed: ${failureText(plain)}`);
+    const text = plain.stdout.replace(/\r\n/g, '\n').trim();
+    return {
+      markdown: `# Accessibility audit\n\n${opts.url ? `${opts.url}\n\n` : ''}\`\`\`\n${text}\n\`\`\`\n`,
+      summary: 'plain-text report',
+    };
+  }
+  const violations = Array.isArray(result.violations) ? result.violations : [];
+  const incomplete = Array.isArray(result.incomplete) ? result.incomplete : [];
+  const nodeTotal = (rules: AxeRule[]) => rules.reduce((n, v) => n + (v.nodeCount ?? v.nodes?.length ?? 0), 0);
+  const byImpact = (rules: AxeRule[]) => [...rules].sort((a, b) => impactRank(a.impact) - impactRank(b.impact));
+  const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+  const out: string[] = [];
+  out.push('# Accessibility audit');
+  out.push('');
+  if (opts.url) out.push(`**Page:** ${opts.url}  `);
+  out.push('**Engine:** axe-core via agent-browser `a11y --json`  ');
+  out.push(`**Rules:** ${tags ? `tags \`${tags}\`` : 'all rules (no tag filter)'}  `);
+  out.push(`**Result:** ${plural(violations.length, 'violation')} (${plural(nodeTotal(violations), 'failing node')}) · ${plural(incomplete.length, 'incomplete check')} needing manual review`);
+  out.push('');
+
+  out.push('## Summary by impact');
+  out.push('');
+  out.push('| Impact | Violations (rules) | Failing nodes | Incomplete (rules) |');
+  out.push('|---|---:|---:|---:|');
+  for (const imp of [...IMPACT_ORDER, 'unknown']) {
+    const v = violations.filter((x) => impactName(x.impact) === imp);
+    const i = incomplete.filter((x) => impactName(x.impact) === imp);
+    if (v.length === 0 && i.length === 0) continue;
+    out.push(`| ${imp} | ${v.length} | ${nodeTotal(v)} | ${i.length} |`);
+  }
+  if (result.counts && typeof result.counts === 'object') {
+    const entries = Object.entries(result.counts).filter(([, v]) => typeof v !== 'object');
+    if (entries.length) {
+      out.push('');
+      out.push(`Engine counts: ${entries.map(([k, v]) => `${k} ${String(v)}`).join(' · ')}`);
+    }
+  }
+  out.push('');
+
+  const section = (title: string, rules: AxeRule[], empty: string) => {
+    out.push(`## ${title} (${rules.length})`);
+    out.push('');
+    if (rules.length === 0) { out.push(`_${empty}_`); out.push(''); return; }
+    byImpact(rules).forEach((rule, i) => {
+      out.push(`### ${i + 1}. ${rule.help ?? rule.id ?? 'rule'}`);
+      out.push('');
+      out.push(`- **Rule:** \`${rule.id ?? '?'}\``);
+      out.push(`- **Impact:** ${impactName(rule.impact)}`);
+      if (rule.description && rule.description !== rule.help) out.push(`- **Description:** ${rule.description}`);
+      if (rule.tags?.length) out.push(`- **Tags:** ${rule.tags.map((t) => `\`${t}\``).join(', ')}`);
+      if (rule.helpUrl) out.push(`- **Help:** <${rule.helpUrl}>`);
+      const nodes = rule.nodes ?? [];
+      const count = rule.nodeCount ?? nodes.length;
+      out.push(`- **Affected elements:** ${count}${nodes.length < count ? ` (first ${nodes.length} listed)` : ''}`);
+      out.push('');
+      nodes.forEach((node, j) => {
+        const marker = `${j + 1}. `;
+        // Continuation lines are indented to the marker's width so they stay
+        // inside the list item (3 spaces for 1–9, 4 for 10 and up).
+        const pad = ' '.repeat(marker.length);
+        out.push(`${marker}\`${formatTarget(node.target)}\``);
+        if (node.html) {
+          out.push('');
+          out.push(`${pad}\`\`\`html`);
+          for (const line of node.html.replace(/\r\n/g, '\n').split('\n')) out.push(`${pad}${line}`);
+          out.push(`${pad}\`\`\``);
+        }
+        if (node.failureSummary) {
+          out.push('');
+          for (const line of node.failureSummary.replace(/\r\n/g, '\n').split('\n')) out.push(`${pad}> ${line}`);
+        }
+        out.push('');
+      });
+    });
+  };
+  section('Violations', violations, 'No violations found.');
+  section('Incomplete — needs manual review', incomplete, 'Nothing left for manual review.');
+
+  out.push('## Raw result (JSON)');
+  out.push('');
+  out.push('```json');
+  out.push(JSON.stringify(result, null, 2));
+  out.push('```');
+  return {
+    markdown: out.join('\n'),
+    summary: `${violations.length} violations, ${incomplete.length} incomplete`,
+  };
+}
+
+function impactName(impact: unknown): string {
+  return typeof impact === 'string' && impact ? impact : 'unknown';
+}
+function impactRank(impact: unknown): number {
+  const i = IMPACT_ORDER.indexOf(impactName(impact));
+  return i < 0 ? IMPACT_ORDER.length : i;
+}
+// axe targets are selector path arrays; a nested array crosses a shadow root,
+// several entries cross frames.
+function formatTarget(target: unknown): string {
+  if (typeof target === 'string') return target;
+  if (Array.isArray(target)) return target.map((t) => (Array.isArray(t) ? t.join(' >>> ') : String(t))).join(' » ');
+  return target == null ? '?' : JSON.stringify(target);
 }
 
 async function screenshot(

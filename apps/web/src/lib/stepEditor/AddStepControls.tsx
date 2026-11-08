@@ -285,8 +285,16 @@ export function AddStepControls(props: AddStepControlsProps) {
           {/* An annotated screenshot is still available: edit a screenshot step and tick `annotate`. */}
         </>
       )}
-      {allowed.has('save_text') && fixed('save-text', 'save_text', 'save text', () => ({ label: artifactLabel() }), '+ save text',
-        "Save the page's readable text (agent-browser read) as a Markdown file beside the run's screenshots")}
+      {allowed.has('save_text') && (
+        <>
+          {fixed('save-text', 'save_text', 'save text', () => ({ label: artifactLabel() }), '+ save text',
+            "Save the page's readable text (agent-browser read) as a Markdown file beside the run's screenshots")}
+          {fixed('save-html', 'save_text', 'save html', () => ({ label: artifactLabel(), mode: 'html' }), '+ save html',
+            "Save the page's full HTML as the browser has it now (after client-side rendering) beside the run's screenshots")}
+          {fixed('save-a11y', 'save_text', 'a11y report', () => ({ label: artifactLabel(), mode: 'a11y' }), '+ a11y report',
+            'Run an axe-core accessibility audit of the page (agent-browser a11y, every rule) and save the report as Markdown beside the run\'s screenshots')}
+        </>
+      )}
       {allowed.has('scroll') && (
         <>
           {fixed('scroll-bottom', 'scroll', 'scroll to bottom', () => ({ toBottom: true }), '+ scroll to bottom',

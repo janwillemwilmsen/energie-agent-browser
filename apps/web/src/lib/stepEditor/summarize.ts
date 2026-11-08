@@ -104,8 +104,11 @@ export function summarizeStep(kind: string, p: Record<string, unknown>): string 
       return '✕ close browser session';
     case 'press':
       return `⌨ ${p.key ?? ''}`;
-    case 'save_text':
-      return `📄 save text${p.label ? ` "${p.label}"` : ''}`;
+    case 'save_text': {
+      const what = p.mode === 'html' ? '🧾 save html' : p.mode === 'a11y' ? '♿ a11y report' : '📄 save text';
+      const tags = p.mode === 'a11y' && p.tags ? ` · tags ${p.tags}` : '';
+      return `${what}${p.label ? ` "${p.label}"` : ''}${tags}`;
+    }
     case 'pause':
       return `⏸ pause${p.label ? ` "${p.label}"` : ''} — wait for Resume${p.timeoutMs ? ` (max ${Math.round(Number(p.timeoutMs) / 60000)} min)` : ''}`;
     default:

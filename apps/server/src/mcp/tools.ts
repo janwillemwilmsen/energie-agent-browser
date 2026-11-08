@@ -135,7 +135,7 @@ const STEP_GUIDE = `A Step is {"kind": …, …payload}. Kinds and payloads:
 - wait {ms} or wait {selector} (until it resolves)
 - screenshot {label?, fullPage?: boolean (default true → full page; false → viewport only), viewport?: "mobile", device?, zoom?: 125|150|200|300|400, format?: "png"|"jpeg"|"webp", quality?, annotate?, expandScrollers?}
 - record_start {cursor?: boolean, human?: boolean} … record_stop {}  (video of the steps in between)
-- save_text {label?}  (page text as Markdown beside the screenshots)
+- save_text {label?, mode?: "text"|"html"|"a11y", tags?}  (beside the screenshots: the page text as Markdown (default), its full HTML, or an axe-core accessibility report — tags narrows the audit to axe rule tags, absent = every rule)
 - evaluate {js}
 - pause {label?, timeoutMs?}  (wait for a human to click Resume; skipped on schedules)
 - close {}

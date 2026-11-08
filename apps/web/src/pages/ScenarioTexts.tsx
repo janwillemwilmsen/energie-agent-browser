@@ -1,13 +1,31 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { api, errorMessage, type Scenario, type ScenarioText } from '../lib/api.js';
 
-// /scenarios/:id/texts — every page text a scenario's runs saved (save_text
-// steps), grouped by run, newest first, with a reader pane. Texts are
-// Markdown-ish (agent-browser read), so they render as Markdown with a raw
-// toggle for copy/paste.
+// /scenarios/:id/texts — every file a scenario's save_text steps saved,
+// grouped by run, newest first, with a reader pane. Texts (agent-browser
+// read) and accessibility reports are Markdown, so they render as Markdown
+// with a raw toggle for copy/paste; saved page HTML (.html) is shown raw.
+
+// An accessibility report ends with the engine's raw JSON under this heading
+// (see stepExecutor's captureA11yReport). It is long and rarely read, so the
+// reader folds it into a closed <details> below the rendered report.
+const RAW_HEADING = /^## Raw result \(JSON\)\s*$/m;
+function splitRawSection(md: string): { main: string; raw: string | null } {
+  const m = RAW_HEADING.exec(md);
+  if (!m) return { main: md, raw: null };
+  return { main: md.slice(0, m.index).replace(/\s+$/, ''), raw: md.slice(m.index + m[0].length).trim() };
+}
+
+// Every link in a saved text points out of the app (the audited page, a
+// deque help page), so they open in a new tab and leave the reader in place.
+const mdComponents: Components = {
+  a: ({ node: _node, children, ...props }) => (
+    <a {...props} target="_blank" rel="noreferrer noopener">{children}</a>
+  ),
+};
 
 function fmtBytes(n: number): string {
   return n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`;
@@ -56,10 +74,13 @@ export function ScenarioTexts() {
     return [...groups.entries()];
   }, [texts]);
 
-  // The file starts with an HTML comment header (label · viewport · url · time);
+  // The file starts with an HTML comment header (label · what · viewport · url · time);
   // show it as a caption rather than letting Markdown swallow it.
   const header = /^<!--\s*(.*?)\s*-->\n*/.exec(content);
   const body = header ? content.slice(header[0].length) : content;
+  const isHtml = !!selected && /\.html$/i.test(selected.file);
+  const showRaw = raw || isHtml;
+  const sections = useMemo(() => splitRawSection(body), [body]);
 
   // Editing touches the body only; the header is re-attached on save.
   function startEdit() {
@@ -94,7 +115,8 @@ export function ScenarioTexts() {
       </p>
       <h1>Saved texts{scenario ? ` — ${scenario.name}` : ''}</h1>
       <p className="muted">
-        Page text captured by <strong>save text</strong> steps, one file per step per run. Add the step in the
+        Files captured by <strong>save text</strong> steps, one per step per run: the page&apos;s readable text,
+        its full HTML, or an axe-core accessibility report (edit the step to choose). Add the step in the
         scenario editor below the step list; the Ask page also feeds these to the model.
       </p>
       {error && <p className="error">{error}</p>}
@@ -117,7 +139,10 @@ export function ScenarioTexts() {
                     onClick={() => setSelected(t)}
                     title={t.file}
                   >
-                    <span>{t.label} <span className="muted">({t.viewport})</span></span>
+                    <span>
+                      {t.label} <span className="muted">({t.viewport})</span>
+                      {/\.html$/i.test(t.file) && <span className="tag tag-type" style={{ marginLeft: 6 }}>html</span>}
+                    </span>
                     <span className="muted">{fmtBytes(t.bytes)}</span>
                   </button>
                 ))}
@@ -138,7 +163,7 @@ export function ScenarioTexts() {
                   ) : (
                     <>
                       <button className="ask-secondary" onClick={startEdit} disabled={!content} title="Edit the text, e.g. strip navigation and footer links">✎ Edit</button>
-                      <button className="ask-secondary" onClick={() => setRaw((r) => !r)}>{raw ? 'Rendered' : 'Raw'}</button>
+                      {!isHtml && <button className="ask-secondary" onClick={() => setRaw((r) => !r)}>{raw ? 'Rendered' : 'Raw'}</button>}
                       <a className="button-link" href={`/api/runs/${selected.runId}/texts/${encodeURIComponent(selected.file)}`} target="_blank" rel="noreferrer">
                         Open file ↗
                       </a>
@@ -157,9 +182,19 @@ export function ScenarioTexts() {
                 spellCheck={false}
                 autoFocus
               />
-            ) : content && (raw
+            ) : content && (showRaw
               ? <pre className="texts-raw">{body}</pre>
-              : <div className="aui-md texts-md"><ReactMarkdown remarkPlugins={[remarkGfm]}>{body}</ReactMarkdown></div>)}
+              : (
+                <div className="aui-md texts-md">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>{sections.main}</ReactMarkdown>
+                  {sections.raw !== null && (
+                    <details className="texts-details">
+                      <summary>Raw result (JSON)</summary>
+                      <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>{sections.raw}</ReactMarkdown>
+                    </details>
+                  )}
+                </div>
+              ))}
           </div>
         </div>
       )}

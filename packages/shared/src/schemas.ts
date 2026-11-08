@@ -144,8 +144,9 @@ export const StepKind = z.enum([
   // Enter, Tab, Escape, Space, ArrowDown, Control+a, … No selector — focus
   // comes from the previous step (a click or fill).
   'press',
-  // Save the rendered page's readable text (agent-browser read) as a Markdown
-  // file beside the run's screenshots — the textual counterpart of a screenshot.
+  // Save the rendered page beside the run's screenshots — the textual
+  // counterpart of a screenshot: its readable text (agent-browser read) as
+  // Markdown, its full HTML, or an axe-core accessibility report (agent-browser a11y).
   'save_text',
   // Stop the run here and keep the browser as it is until the user clicks
   // Resume (or Abort, or the timeout passes). Unattended (scheduled) runs skip it.
@@ -254,8 +255,21 @@ const StepClose = StepBase.extend({ kind: z.literal('close') });
 // "Space", "ArrowDown", "F5", a single character, or a chord joined with "+"
 // ("Control+a", "Shift+Tab").
 const StepPress = StepBase.extend({ kind: z.literal('press'), key: z.string().trim().min(1) });
-// Falls back to `step-<position>` when absent, like screenshot.
-const StepSaveText = StepBase.extend({ kind: z.literal('save_text'), label: z.string().optional() });
+// What to save: 'text' (default) is the page's readable text as Markdown,
+// 'html' the document's full HTML (doctype + outerHTML, after client-side
+// rendering), 'a11y' an axe-core accessibility report (agent-browser a11y
+// --json, rendered as Markdown with the raw result appended). The label falls
+// back to `step-<position>` when absent, like screenshot.
+export const SaveTextMode = z.enum(['text', 'html', 'a11y']);
+export type SaveTextMode = z.infer<typeof SaveTextMode>;
+const StepSaveText = StepBase.extend({
+  kind: z.literal('save_text'),
+  label: z.string().optional(),
+  mode: SaveTextMode.optional(),
+  // a11y only: comma-separated axe rule tags (wcag2a,wcag2aa,best-practice…)
+  // to restrict the audit to. Absent = every rule, the fullest report.
+  tags: z.string().trim().optional(),
+});
 const StepPause = StepBase.extend({
   kind: z.literal('pause'),
   label: z.string().optional(),

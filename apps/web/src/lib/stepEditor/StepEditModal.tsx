@@ -4,6 +4,25 @@ import { DEFAULT_MOBILE_DEVICE, DEVICE_NAMES, DESKTOP_VIEWPORT, ZOOM_LEVELS, bui
 import { api } from '../api.js';
 import type { EditableStep } from './store.js';
 
+type SaveMode = 'text' | 'html' | 'a11y';
+const SAVE_MODES: { value: SaveMode; label: string; help: string }[] = [
+  {
+    value: 'text',
+    label: 'Page text — readable text as Markdown',
+    help: 'agent-browser read: the rendered page\'s readable text (headings, paragraphs, links, lists), auth state and client-side updates included. Shown on the Texts page and fed to the Ask page.',
+  },
+  {
+    value: 'html',
+    label: 'Page HTML — the full document',
+    help: 'The DOM as the browser has it now: doctype plus the whole <html> element after client-side rendering. Saved as an .html file and shown raw on the Texts page.',
+  },
+  {
+    value: 'a11y',
+    label: 'Accessibility report — axe-core audit',
+    help: 'agent-browser a11y: an axe-core audit of the page and its frames. The report lists every violation and every check that needs manual review with impact, rule, tags, help link and the failing elements, and ends with the engine\'s raw JSON result.',
+  },
+];
+
 // The device dropdown grouped by family word (iPhone / iPad / Pixel / …), in
 // the list's own order within a group.
 function groupDevices(list: DeviceProfile[]): [string, DeviceProfile[]][] {
@@ -17,7 +36,8 @@ function groupDevices(list: DeviceProfile[]): [string, DeviceProfile[]][] {
 
 // Modal for the ✎ button on a step row. Screenshot steps get friendly fields —
 // label, full page, mobile, annotate, plus output format and quality (smaller
-// files with jpeg/webp) — and record_start gets its pointer checkbox, while
+// files with jpeg/webp) — save_text gets its label and what to save (text,
+// HTML, accessibility report), record_start gets its pointer checkbox, while
 // every other kind exposes the payload JSON directly. Unknown payload keys are
 // preserved on save. The kind itself is not editable here (the admin raw
 // editor does that).
@@ -36,6 +56,13 @@ export function StepEditModal({
   const dialogRef = useRef<HTMLDivElement | null>(null);
   useFocusTrap(dialogRef);
   const isRecordStart = step.kind === 'record_start';
+  const isSaveText = step.kind === 'save_text';
+
+  // save_text: what to save, and for the audit, which axe rule tags.
+  const [saveMode, setSaveMode] = useState<SaveMode>(
+    initial.mode === 'html' || initial.mode === 'a11y' ? initial.mode : 'text',
+  );
+  const [a11yTags, setA11yTags] = useState(typeof initial.tags === 'string' ? initial.tags : '');
 
   // record_start: show a pointer in the video; move it like a person.
   const [cursor, setCursor] = useState(initial.cursor === true);
@@ -106,6 +133,13 @@ export function StepEditModal({
       const next: Record<string, unknown> = { ...initial };
       if (cursor) next.cursor = true; else delete next.cursor;
       if (human) next.human = true; else delete next.human;
+      payload = next;
+    } else if (isSaveText) {
+      const next: Record<string, unknown> = { ...initial };
+      if (label.trim()) next.label = label.trim(); else delete next.label;
+      if (saveMode === 'text') delete next.mode; else next.mode = saveMode;
+      const tags = a11yTags.split(',').map((t) => t.trim()).filter(Boolean).join(',');
+      if (saveMode === 'a11y' && tags) next.tags = tags; else delete next.tags;
       payload = next;
     } else {
       try {
@@ -286,6 +320,40 @@ export function StepEditModal({
                 />
                 <span className="muted" style={{ fontSize: 12 }}>
                   Lower = smaller files; 70–85 is usually visually indistinguishable.
+                </span>
+              </label>
+            )}
+          </>
+        ) : isSaveText ? (
+          <>
+            <label style={col}>
+              <span>Label</span>
+              <input autoFocus value={label} onChange={(e) => setLabel(e.target.value)} placeholder="step-<position>" />
+              <span className="muted" style={{ fontSize: 12 }}>
+                Names the file; the same label pairs the file with the screenshot of that label across runs.
+              </span>
+            </label>
+            <label style={col}>
+              <span>What to save</span>
+              <select value={saveMode} onChange={(e) => setSaveMode(e.target.value as SaveMode)}>
+                {SAVE_MODES.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+              </select>
+              <span className="muted" style={{ fontSize: 12 }}>
+                {SAVE_MODES.find((m) => m.value === saveMode)!.help}
+              </span>
+            </label>
+            {saveMode === 'a11y' && (
+              <label style={col}>
+                <span>Limit to axe rule tags (optional)</span>
+                <input
+                  value={a11yTags}
+                  onChange={(e) => setA11yTags(e.target.value)}
+                  placeholder="all rules — the fullest report"
+                  spellCheck={false}
+                />
+                <span className="muted" style={{ fontSize: 12 }}>
+                  Comma-separated, e.g. <code>wcag2a,wcag2aa,wcag21aa,best-practice</code>. Leave empty to run every
+                  rule axe knows, which gives the richest report.
                 </span>
               </label>
             )}
