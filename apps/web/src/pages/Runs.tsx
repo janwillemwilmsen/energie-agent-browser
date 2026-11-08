@@ -3,6 +3,8 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { api, type PausedRun, type Recording, type Run, type Scenario } from '../lib/api.js';
 import { GroupBySwitch, GroupLabel, groupKey, sortByGroup, type GroupBy } from '../lib/tagGrouping.js';
 import { useResource, usePolling } from '../lib/resource.js';
+import { SavedTextBody, SAVED_TEXT_KIND_LABEL, fmtBytes, parseSavedText, type ParsedSavedText } from '../lib/SavedTextView.js';
+import { slotDisplayLabel } from '@eab/shared';
 
 /** How many of the newest runs the list shows; ALL is "no window". */
 const ALL = 100_000;
@@ -500,6 +502,11 @@ export function Runs() {
                           {clips > 0 && (
                             <span title="This run has a video recording — open the run to play it"> · 🎬 {clips === 1 ? 'video' : `${clips} videos`}</span>
                           )}
+                          {textFiles(r).length > 0 && (
+                            <span title="This run saved page text, HTML or an accessibility report — open the run to read it">
+                              {' '}· 📄 {textFiles(r).length === 1 ? 'text' : `${textFiles(r).length} texts`}
+                            </span>
+                          )}
                         </>
                       );
                     })()}
@@ -580,6 +587,7 @@ function RunDetail({
 }) {
   let screenshots: string[] = [];
   try { screenshots = JSON.parse(run.screenshot_paths_json); } catch {}
+  const texts = textFiles(run);
 
   // The run's video clips (record_start … record_stop). A clip is registered
   // when it stops, so a live run is re-polled until it finishes.
@@ -656,6 +664,7 @@ function RunDetail({
               </div>
             </>
           )}
+          <RunTexts run={run} files={texts} />
           <h3>Screenshots ({screenshots.length})</h3>
           <div className="screenshots">
             {screenshots.map((name) => (
@@ -681,6 +690,86 @@ function RunDetail({
       </div>
     </div>
   );
+}
+
+// The files the run's save_text steps wrote (page text, HTML, accessibility
+// report), each folded under its label with a link to the texts reader and
+// to the file itself. Loaded when the panel opens: a run has a few of them
+// and they are small next to its screenshots.
+function RunTexts({ run, files }: { run: Run; files: string[] }) {
+  type Loaded = { parsed: ParsedSavedText; bytes: number } | { error: string };
+  const [loaded, setLoaded] = useState<Record<string, Loaded>>({});
+  const filesKey = files.join('|');
+  useEffect(() => {
+    let cancelled = false;
+    setLoaded({});
+    for (const file of files) {
+      api.runText(run.id, file)
+        .then((content) => {
+          if (cancelled) return;
+          setLoaded((cur) => ({ ...cur, [file]: { parsed: parseSavedText(content, file), bytes: new Blob([content]).size } }));
+        })
+        .catch((e: any) => {
+          if (cancelled) return;
+          setLoaded((cur) => ({ ...cur, [file]: { error: e?.message ?? String(e) } }));
+        });
+    }
+    return () => { cancelled = true; };
+  }, [run.id, filesKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (files.length === 0) return null;
+  const readerUrl = (file?: string) =>
+    `/scenarios/${run.scenario_id}/texts?run=${run.id}${file ? `&file=${encodeURIComponent(file)}` : ''}`;
+  return (
+    <>
+      <h3>
+        Saved texts ({files.length}){' '}
+        <Link to={readerUrl()} className="muted" style={{ fontSize: 12, fontWeight: 400 }}>
+          all texts
+        </Link>
+      </h3>
+      <div className="run-texts">
+        {files.map((file) => {
+          const st = loaded[file];
+          const parsed = st && 'parsed' in st ? st.parsed : null;
+          const kind = parsed?.kind ?? (/\.html$/i.test(file) ? 'html' : 'text');
+          return (
+            <details key={file} className="run-text">
+              <summary>
+                <span className="tag tag-type">{SAVED_TEXT_KIND_LABEL[kind]}</span>{' '}
+                <strong>{slotDisplayLabel(file)}</strong>
+                <span className="muted"> · {file}{st && 'parsed' in st ? ` · ${fmtBytes(st.bytes)}` : ''}</span>
+                <span className="run-text-links">
+                  <Link to={readerUrl(file)} title="Open in the texts reader (raw view, editing)">reader</Link>
+                  <a href={`/api/runs/${run.id}/texts/${encodeURIComponent(file)}`} target="_blank" rel="noreferrer" title="Open the file itself">file ↗</a>
+                </span>
+              </summary>
+              <div className="run-text-body">
+                {!st && <p className="muted">Loading…</p>}
+                {st && 'error' in st && <p className="error">{st.error}</p>}
+                {parsed && (
+                  <>
+                    {parsed.header && <p className="muted" style={{ fontSize: 12, margin: '0 0 8px' }}>{parsed.header}</p>}
+                    <SavedTextBody body={parsed.body} kind={parsed.kind} />
+                  </>
+                )}
+              </div>
+            </details>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
+// The files a run's save_text steps wrote (from the JSON list the runner
+// stores on the row). Tolerates a missing/corrupt value → none.
+function textFiles(r: Run): string[] {
+  try {
+    const arr = JSON.parse(r.text_paths_json || '[]');
+    return Array.isArray(arr) ? arr.filter((x): x is string => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
 }
 
 // Number of screenshots a run produced (from the JSON list the runner stores

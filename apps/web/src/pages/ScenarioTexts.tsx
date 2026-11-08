@@ -1,35 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
-import ReactMarkdown, { type Components } from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { api, errorMessage, type Scenario, type ScenarioText } from '../lib/api.js';
+import { SavedTextBody, fmtBytes, parseSavedText } from '../lib/SavedTextView.js';
 
 // /scenarios/:id/texts — every file a scenario's save_text steps saved,
 // grouped by run, newest first, with a reader pane. Texts (agent-browser
 // read) and accessibility reports are Markdown, so they render as Markdown
 // with a raw toggle for copy/paste; saved page HTML (.html) is shown raw.
-
-// An accessibility report ends with the engine's raw JSON under this heading
-// (see stepExecutor's captureA11yReport). It is long and rarely read, so the
-// reader folds it into a closed <details> below the rendered report.
-const RAW_HEADING = /^## Raw result \(JSON\)\s*$/m;
-function splitRawSection(md: string): { main: string; raw: string | null } {
-  const m = RAW_HEADING.exec(md);
-  if (!m) return { main: md, raw: null };
-  return { main: md.slice(0, m.index).replace(/\s+$/, ''), raw: md.slice(m.index + m[0].length).trim() };
-}
-
-// Every link in a saved text points out of the app (the audited page, a
-// deque help page), so they open in a new tab and leave the reader in place.
-const mdComponents: Components = {
-  a: ({ node: _node, children, ...props }) => (
-    <a {...props} target="_blank" rel="noreferrer noopener">{children}</a>
-  ),
-};
-
-function fmtBytes(n: number): string {
-  return n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`;
-}
 
 export function ScenarioTexts() {
   const { id } = useParams();
@@ -45,12 +22,24 @@ export function ScenarioTexts() {
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // A link from a run's panel names what to open (?run=ID&file=NAME); else
+  // the newest file is shown.
+  const [searchParams] = useSearchParams();
+  const wantRun = Number(searchParams.get('run')) || null;
+  const wantFile = searchParams.get('file');
   useEffect(() => {
     api.getScenario(scenarioId).then((s) => setScenario(s)).catch((e) => setError(errorMessage(e)));
     api.scenarioTexts(scenarioId)
-      .then((t) => { setTexts(t); if (t[0]) setSelected(t[0]); })
+      .then((t) => {
+        setTexts(t);
+        const wanted =
+          (wantFile ? t.find((x) => x.file === wantFile && (!wantRun || x.runId === wantRun)) : undefined)
+          ?? (wantRun ? t.find((x) => x.runId === wantRun) : undefined)
+          ?? t[0];
+        if (wanted) setSelected(wanted);
+      })
       .catch((e) => setError(errorMessage(e)));
-  }, [scenarioId]);
+  }, [scenarioId, wantRun, wantFile]);
 
   useEffect(() => {
     if (!selected) return;
@@ -76,11 +65,9 @@ export function ScenarioTexts() {
 
   // The file starts with an HTML comment header (label · what · viewport · url · time);
   // show it as a caption rather than letting Markdown swallow it.
-  const header = /^<!--\s*(.*?)\s*-->\n*/.exec(content);
-  const body = header ? content.slice(header[0].length) : content;
-  const isHtml = !!selected && /\.html$/i.test(selected.file);
-  const showRaw = raw || isHtml;
-  const sections = useMemo(() => splitRawSection(body), [body]);
+  const parsed = useMemo(() => parseSavedText(content, selected?.file ?? ''), [content, selected]);
+  const { header, body, kind } = parsed;
+  const isHtml = kind === 'html';
 
   // Editing touches the body only; the header is re-attached on save.
   function startEdit() {
@@ -94,7 +81,7 @@ export function ScenarioTexts() {
     setSaving(true);
     setError(null);
     try {
-      const next = `${header ? header[0] : ''}${draft.replace(/\s+$/, '')}\n`;
+      const next = `${header != null ? `<!-- ${header} -->\n\n` : ''}${draft.replace(/\s+$/, '')}\n`;
       const r = await api.saveRunText(selected.runId, selected.file, next);
       setContent(next);
       setTexts((cur) => cur.map((t) => (t.runId === selected.runId && t.file === selected.file ? { ...t, bytes: r.bytes } : t)));
@@ -153,7 +140,7 @@ export function ScenarioTexts() {
             {selected && (
               <div className="texts-reader-head">
                 <code>{selected.file}</code>
-                {header && <span className="muted">{header[1]}</span>}
+                {header && <span className="muted">{header}</span>}
                 <span style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
                   {editing ? (
                     <>
@@ -182,19 +169,7 @@ export function ScenarioTexts() {
                 spellCheck={false}
                 autoFocus
               />
-            ) : content && (showRaw
-              ? <pre className="texts-raw">{body}</pre>
-              : (
-                <div className="aui-md texts-md">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>{sections.main}</ReactMarkdown>
-                  {sections.raw !== null && (
-                    <details className="texts-details">
-                      <summary>Raw result (JSON)</summary>
-                      <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>{sections.raw}</ReactMarkdown>
-                    </details>
-                  )}
-                </div>
-              ))}
+            ) : content && <SavedTextBody body={body} kind={kind} raw={raw} />}
           </div>
         </div>
       )}

@@ -779,6 +779,15 @@ code { background: rgba(255,255,255,0.06); padding: 2px 4px; border-radius: 3px;
 .run-recordings { display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px; }
 .run-recording video { width: 100%; max-height: 420px; background: #000; border: 1px solid var(--border); border-radius: 4px; }
 .run-recording a { color: var(--accent); }
+/* Saved texts in the run panel: one folded <details> per file. */
+.run-texts { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
+.run-text { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; }
+.run-text > summary { cursor: pointer; font-size: 13px; }
+.run-text > summary:hover { color: var(--accent); }
+.run-text > summary .muted { font-size: 12px; }
+.run-text-links { margin-left: 10px; display: inline-flex; gap: 10px; font-size: 12px; }
+.run-text-links a { color: var(--accent); }
+.run-text-body { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); max-height: 520px; overflow: auto; }
 .shot img { width: 100%; height: auto; border: 1px solid var(--border); border-radius: 4px; }
 .run-tags { display: inline-flex; gap: 4px; flex-wrap: wrap; }
 /* Tag chips in a group header (Dashboard sections, /runs and /scenarios group rows). */
