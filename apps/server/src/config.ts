@@ -63,6 +63,10 @@ export interface Config {
     // Optional explicit signing secret; when empty a random one is generated and
     // persisted to DATA_DIR/auth-secret so sessions survive restarts.
     secret: string;
+    // Static bearer token for non-browser clients (the MCP server at /api/mcp,
+    // scripts). Sent as `Authorization: Bearer <token>`; empty disables the
+    // bearer path entirely so the cookie login stays the only way in.
+    apiToken: string;
   };
   agentBrowserBin: string;
   sessionIdleTtlMs: number;
@@ -128,6 +132,7 @@ export function loadConfig(env: NodeJS.ProcessEnv, opts: { root?: string } = {})
       user: optional('APP_AUTH_USER', 'jw@ikkoop.nl'),
       pass: optional('APP_AUTH_PASS', 'jw@ikkoop.nl'),
       secret: optional('APP_AUTH_SECRET', ''),
+      apiToken: optional('EAB_API_TOKEN', ''),
     },
     agentBrowserBin: optional('AGENT_BROWSER_BIN', 'agent-browser'),
     sessionIdleTtlMs: Number(optional('SESSION_IDLE_TTL_MS', '300000')),

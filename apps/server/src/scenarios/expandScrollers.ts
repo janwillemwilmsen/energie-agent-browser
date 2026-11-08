@@ -8,11 +8,20 @@ import type { Browser } from './stepExecutor.js';
 // document's scroll height IS the viewport height and `screenshot --full`
 // comes out viewport-sized with the rest of the page cut off.
 //
-// The fix is a temporary layout change: give html/body and every scrolling
-// container `overflow: visible; height: auto; max-height: none` so the
-// document grows to the real content height, capture, then put every inline
-// style back exactly as it was. The saved styles live on `window` so the
-// restore runs in a separate `eval` after the capture.
+// The fix is a temporary layout change: give html/body, every scrolling
+// container AND every ancestor of such a container `overflow: visible;
+// height: auto; max-height: none` so the document grows to the real content
+// height, capture, then put every inline style back exactly as it was. The
+// saved styles live on `window` so the restore runs in a separate `eval`
+// after the capture.
+//
+// The ancestors matter on app shells where the scroller sits in a chain of
+// flex/grid containers that take their height from the viewport (html 100%
+// -> ... -> scroller). Unlocking html/body alone breaks that chain: the
+// containers in between resolve to 0px and the first one with
+// `overflow: hidden` clips the whole page away (Gemini's chat view came out
+// as a blank 900px capture). Fixed/sticky ancestors (drawers, headers) are
+// skipped so they aren't stretched.
 
 const STASH = '__eabExpandedScrollers';
 
@@ -25,9 +34,12 @@ const EXPAND_JS = `(() => {
     el.style.setProperty('height', 'auto', 'important');
     el.style.setProperty('max-height', 'none', 'important');
   };
-  unlock(document.documentElement);
-  unlock(document.body);
+  const done = new Set();
+  const unlockOnce = (el) => { if (done.has(el)) return; done.add(el); unlock(el); };
+  unlockOnce(document.documentElement);
+  unlockOnce(document.body);
   let inner = 0;
+  const scrollers = [];
   for (const el of document.querySelectorAll('body *')) {
     const s = getComputedStyle(el);
     // Only real scroll containers with hidden content; fixed/sticky chrome
@@ -35,8 +47,17 @@ const EXPAND_JS = `(() => {
     if (!/(auto|scroll)/.test(s.overflowY)) continue;
     if (s.position === 'fixed') continue;
     if (el.scrollHeight <= el.clientHeight + 5) continue;
-    unlock(el);
+    scrollers.push(el);
+  }
+  for (const el of scrollers) {
+    unlockOnce(el);
     inner++;
+    // The containers between the scroller and <body>: see the header comment.
+    for (let a = el.parentElement; a && a !== document.body; a = a.parentElement) {
+      const p = getComputedStyle(a).position;
+      if (p === 'fixed' || p === 'sticky') continue;
+      unlockOnce(a);
+    }
   }
   window[${JSON.stringify(STASH)}] = saved;
   return 'ok:' + inner + ':' + document.documentElement.scrollHeight;

@@ -34,6 +34,7 @@ import { screencastWsRoute } from './ws/screencast.js';
 import { connectorRoutes } from './routes/connector.js';
 import { connectorWsRoutes } from './connector/hub.js';
 import { projectsRoutes } from './routes/projects.js';
+import { mcpRoutes } from './mcp/routes.js';
 import { projectScope } from './projects.js';
 
 // The composition root for the HTTP app: error handling, the login gate,
@@ -124,6 +125,9 @@ export async function createApp(opts: CreateAppOptions = {}): Promise<FastifyIns
   await app.register(screencastWsRoute);
   await app.register(connectorRoutes);
   await app.register(connectorWsRoutes);
+  // Last: the MCP server's tools call the routes above through app.inject(),
+  // so every API route must already be registered when a tool runs.
+  await app.register(mcpRoutes);
 
   // Static SPA: serve apps/web/dist/ when the build output exists. Skipped
   // silently in development, where Vite runs on its own port and proxies

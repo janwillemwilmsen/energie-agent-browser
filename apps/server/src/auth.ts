@@ -86,8 +86,22 @@ function readCookie(req: FastifyRequest, name: string): string | null {
   return null;
 }
 
+// Non-browser clients (the MCP server, scripts) authenticate with the static
+// EAB_API_TOKEN as a bearer token instead of the login cookie. An empty
+// configured token disables this path, so a missing env var can never open
+// the API.
+function hasValidBearer(req: FastifyRequest): boolean {
+  const expected = config.auth.apiToken;
+  if (!expected) return false;
+  const header = req.headers.authorization;
+  if (typeof header !== 'string') return false;
+  const m = /^Bearer\s+(.+)$/i.exec(header.trim());
+  return m?.[1] != null && timingSafeEqual(m[1], expected);
+}
+
 export function isAuthenticated(req: FastifyRequest): boolean {
   if (!config.auth.enabled) return true;
+  if (hasValidBearer(req)) return true;
   const token = readCookie(req, SESSION_COOKIE);
   return token != null && verifySessionToken(token);
 }
