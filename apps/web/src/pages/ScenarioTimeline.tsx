@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { parseSlot, slotDisplayLabel, slotKey } from '@eab/shared';
 import { api, type Run, type Scenario } from '../lib/api.js';
-import { ScreenshotCanvas } from '../lib/ScreenshotCanvas.js';
+import { CanvasSurface, ScreenshotCanvas, runGroup, type CanvasGroup } from '../lib/ScreenshotCanvas.js';
 
 export function ScenarioTimeline() {
   const { id } = useParams();
@@ -12,6 +12,8 @@ export function ScenarioTimeline() {
   const [err, setErr] = useState<string | null>(null);
   // The run open on the canvas (pan-and-zoom view of its screenshots), if any.
   const [canvasRun, setCanvasRun] = useState<number | null>(null);
+  // The canvas over every completed run: a row per run, in the table's order.
+  const [canvasAll, setCanvasAll] = useState(false);
 
   async function removeRun(runId: number) {
     if (!confirm(`Delete run #${runId} with its screenshots, texts and video recording?`)) return;
@@ -43,6 +45,16 @@ export function ScenarioTimeline() {
     [runs],
   );
   const matrix = useMemo(() => buildMatrix(completedRuns), [completedRuns]);
+  // Every completed run as a canvas row, in the column order (newest first),
+  // each row's screenshots in capture order like the table's rows.
+  const canvasGroups = useMemo<CanvasGroup[]>(
+    () => completedRuns.map((r) => {
+      const g = runGroup(r, scenario?.name ?? '');
+      return { ...g, names: [...g.names].sort(compareCapture) };
+    }),
+    [completedRuns, scenario?.name],
+  );
+  const canvasShots = canvasGroups.reduce((n, g) => n + g.names.length, 0);
 
   if (err && !scenario) return <p className="error">{err}</p>;
   if (!scenario) return <p>Loading…</p>;
@@ -65,10 +77,10 @@ export function ScenarioTimeline() {
           <button
             type="button"
             className="ss-timeline-link"
-            onClick={() => setCanvasRun(completedRuns[0]!.id)}
-            title="Open the latest run's screenshots on a full-screen canvas: pan, zoom, switch runs"
+            onClick={() => setCanvasAll(true)}
+            title="Open every run below on one canvas, a row per run in this order: pan and zoom through all of them"
           >
-            ⊞ canvas
+            ⊞ canvas ({completedRuns.length} run{completedRuns.length === 1 ? '' : 's'}, {canvasShots} screenshot{canvasShots === 1 ? '' : 's'})
           </button>
         </p>
       )}
@@ -143,6 +155,14 @@ export function ScenarioTimeline() {
             </tbody>
           </table>
         </div>
+      )}
+      {canvasAll && (
+        <CanvasSurface
+          title={scenario.name}
+          groups={canvasGroups.filter((g) => g.names.length > 0)}
+          note={canvasShots === 0 ? 'None of the completed runs produced screenshots.' : null}
+          onClose={() => setCanvasAll(false)}
+        />
       )}
       {canvasRun != null && (
         <ScreenshotCanvas
