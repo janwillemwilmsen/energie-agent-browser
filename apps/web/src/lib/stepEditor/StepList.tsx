@@ -20,12 +20,58 @@ import type { EditableStep, StepId, StepStore } from './store.js';
 // `revealNew` scrolls a freshly added Step into view — for a list inside a
 // scroll container (the editor's compact mode), where an appended row would
 // otherwise land below the fold.
+//
+// `selectMode` puts a checkbox in front of every row and a bar above the list
+// that deletes the ticked Steps in one go. Boxes are ticked one by one, or
+// painted: press one and sweep the pointer down the rows, and every row the
+// pointer passes takes the state of the first (ticked or cleared).
 export function StepList({
-  store, empty, filter, revealNew,
-}: { store: StepStore; empty: ReactNode; filter?: (step: EditableStep) => boolean; revealNew?: boolean }) {
+  store, empty, filter, revealNew, selectMode = false,
+}: {
+  store: StepStore;
+  empty: ReactNode;
+  filter?: (step: EditableStep) => boolean;
+  revealNew?: boolean;
+  selectMode?: boolean;
+}) {
   const [editing, setEditing] = useState<EditableStep | null>(null);
   const { activePick } = useStepDnd();
   const hidden = filter ? store.steps.filter((s) => !filter(s)).length : 0;
+
+  // The selection, and the value being painted while a sweep is in progress
+  // (null outside one). The sweep ends on any pointer release, wherever it is.
+  const [selected, setSelected] = useState<Set<StepId>>(() => new Set());
+  const paint = useRef<boolean | null>(null);
+  useEffect(() => {
+    if (!selectMode) { setSelected(new Set()); paint.current = null; return; }
+    const end = () => { paint.current = null; };
+    window.addEventListener('pointerup', end);
+    window.addEventListener('pointercancel', end);
+    return () => {
+      window.removeEventListener('pointerup', end);
+      window.removeEventListener('pointercancel', end);
+    };
+  }, [selectMode]);
+  const setOne = (id: StepId, on: boolean) => setSelected((cur) => {
+    if (cur.has(id) === on) return cur;
+    const next = new Set(cur);
+    if (on) next.add(id); else next.delete(id);
+    return next;
+  });
+  const toggle = (id: StepId) => setOne(id, !selected.has(id));
+  const startPaint = (id: StepId) => { const on = !selected.has(id); paint.current = on; setOne(id, on); };
+  const sweep = (id: StepId) => { if (paint.current != null) setOne(id, paint.current); };
+  // Only ids still in the list count (a row may have gone meanwhile).
+  const selectedIds = store.steps.map((s) => s.id).filter((id) => selected.has(id));
+  const shown = store.steps.filter((s) => !filter || filter(s));
+
+  async function deleteSelected() {
+    const n = selectedIds.length;
+    if (n === 0) return;
+    if (!confirm(`Delete ${n === 1 ? 'this step' : `these ${n} steps`}? This cannot be undone.`)) return;
+    await store.removeMany(selectedIds);
+    setSelected(new Set());
+  }
 
   // Ids seen on the previous render; null until the first list has rendered
   // so the initial load never scrolls.
@@ -48,11 +94,38 @@ export function StepList({
 
   return (
     <>
+      {selectMode && store.steps.length > 0 && (
+        <div className="step-select-bar" role="toolbar" aria-label="Selected steps">
+          <strong>{selectedIds.length} selected</strong>
+          <button
+            type="button"
+            className="chip"
+            onClick={() => setSelected(new Set(shown.map((s) => s.id)))}
+            disabled={store.busy || shown.length === 0}
+            title={hidden > 0 ? 'Tick every step the filter shows' : 'Tick every step'}
+          >
+            select all{hidden > 0 ? ' shown' : ''}
+          </button>
+          <button type="button" className="chip" onClick={() => setSelected(new Set())} disabled={store.busy || selectedIds.length === 0}>
+            clear
+          </button>
+          <button
+            type="button"
+            className="chip step-select-delete"
+            onClick={() => void deleteSelected()}
+            disabled={store.busy || selectedIds.length === 0}
+            title="Remove the ticked steps from the scenario"
+          >
+            🗑 delete {selectedIds.length > 0 ? `${selectedIds.length} ` : ''}selected
+          </button>
+          <span className="muted">tick a box, or press one and sweep down the list</span>
+        </div>
+      )}
       {store.steps.length === 0 ? (
         <p className="muted">{empty}</p>
       ) : (
         <SortableContext items={store.steps.map((s) => s.id)} strategy={verticalListSortingStrategy}>
-          <ol className="step-list" ref={listRef}>
+          <ol className={`step-list${selectMode ? ' step-list-selecting' : ''}`} ref={listRef}>
             {store.steps.map((s, idx) => filter && !filter(s) ? null : (
               <StepRow
                 key={s.id}
@@ -61,6 +134,11 @@ export function StepList({
                 total={store.steps.length}
                 busy={store.busy}
                 pickDragging={activePick != null}
+                selectMode={selectMode}
+                selected={selected.has(s.id)}
+                onToggle={() => toggle(s.id)}
+                onPaintStart={() => startPaint(s.id)}
+                onSweep={() => sweep(s.id)}
                 onEdit={() => setEditing(s)}
                 onUpdate={(payload) => store.update(s.id, payload)}
                 onMoveUp={() => void store.move(s.id, 'up')}
@@ -119,6 +197,11 @@ function StepRow({
   total,
   busy,
   pickDragging,
+  selectMode,
+  selected,
+  onToggle,
+  onPaintStart,
+  onSweep,
   onEdit,
   onUpdate,
   onMoveUp,
@@ -130,6 +213,14 @@ function StepRow({
   total: number;
   busy: boolean;
   pickDragging: boolean;
+  selectMode: boolean;
+  selected: boolean;
+  /** Flip this row's box (keyboard). */
+  onToggle: () => void;
+  /** Flip this row's box and start painting that state over the rows swept next. */
+  onPaintStart: () => void;
+  /** The pointer entered this row; takes the painted state if a sweep is on. */
+  onSweep: () => void;
   onEdit: () => void;
   /** Replace the payload; rejects with a message when the store refuses it. */
   onUpdate: (payload: Record<string, unknown>) => Promise<void>;
@@ -148,8 +239,32 @@ function StepRow({
   // A pick hovering this row will be inserted BEFORE it.
   const insertBefore = pickDragging && isOver;
   const field = step.invalid ? null : inlineField(step.kind, step.payload);
+  const liClass = [insertBefore ? 'step-insert-before' : '', selectMode && selected ? 'step-selected' : ''].filter(Boolean).join(' ');
   return (
-    <li ref={setNodeRef} style={style} data-step-id={String(step.id)} className={insertBefore ? 'step-insert-before' : undefined}>
+    <li
+      ref={setNodeRef}
+      style={style}
+      data-step-id={String(step.id)}
+      className={liClass || undefined}
+      onPointerEnter={selectMode ? onSweep : undefined}
+    >
+      {selectMode && (
+        // The box is driven by the pointer handlers (so a press can start a
+        // sweep without the native toggle fighting it); the keyboard toggles.
+        <span
+          className="step-select"
+          onPointerDown={(e) => { if (e.button === 0) { e.preventDefault(); onPaintStart(); } }}
+        >
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={() => undefined}
+            onClick={(e) => e.preventDefault()}
+            onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); onToggle(); } }}
+            aria-label={`Select step ${idx + 1}`}
+          />
+        </span>
+      )}
       <button
         className="step-drag"
         title="Drag to reorder"

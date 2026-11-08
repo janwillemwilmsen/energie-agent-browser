@@ -34,6 +34,8 @@ export interface StepStore {
   /** Replace a Step's payload. Rejects on failure so an edit form can show it. */
   update(id: StepId, payload: Record<string, unknown>): Promise<void>;
   remove(id: StepId): Promise<void>;
+  /** Remove several Steps at once (the list's select mode); the caller has confirmed. */
+  removeMany(ids: StepId[]): Promise<void>;
   move(id: StepId, direction: 'up' | 'down'): Promise<void>;
   reorder(orderedIds: StepId[]): Promise<void>;
 }
@@ -142,6 +144,17 @@ export function useServerStepStore(opts: ServerStepStoreOptions): StepStore {
       if (!confirm('Delete this step?')) return;
       await mutate(() => api.deleteStep(scenarioId, Number(id)));
     },
+    removeMany: (ids) =>
+      mutate(async () => {
+        // One delete per step (there is no bulk endpoint), then one reload. A
+        // failure midway still refetches, so the rows already gone disappear.
+        try {
+          for (const id of ids) await api.deleteStep(scenarioId, Number(id));
+        } catch (e) {
+          await reload().catch(() => undefined);
+          throw e;
+        }
+      }),
     move: (id, direction) => mutate(() => api.moveStep(scenarioId, Number(id), direction).then(() => undefined)),
     reorder: async (orderedIds) => {
       const byId = new Map(rows.map((r) => [r.id, r] as const));
@@ -214,6 +227,10 @@ export function useDraftStepStore<T extends { kind: string }>(opts: DraftStepSto
     remove: async (id) => {
       const index = Number(id);
       setSteps((prev) => prev.filter((_, i) => i !== index));
+    },
+    removeMany: async (ids) => {
+      const gone = new Set(ids.map(Number));
+      setSteps((prev) => prev.filter((_, i) => !gone.has(i)));
     },
     move: async (id, direction) => {
       setSteps((prev) => draftMove(prev, Number(id), direction));

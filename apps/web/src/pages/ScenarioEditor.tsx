@@ -148,6 +148,8 @@ export function ScenarioEditor() {
     return () => ro.disconnect();
   }, [compactSteps, compactHeight]);
   const [stepFilter, setStepFilter] = useState<StepFilter>('all');
+  // "delete" next to the Steps heading: checkboxes on the rows, delete in bulk.
+  const [selectMode, setSelectMode] = useState(false);
   // The retry / restart policy rows: a per-browser preference, hidden by
   // default so the step list sits right under the heading.
   const [retryOpen, setRetryOpen] = useState<boolean>(() => {
@@ -675,6 +677,19 @@ export function ScenarioEditor() {
               onClick={() => setCompactSteps((v) => !v)}
             >
               {compactSteps ? 'compact ✓' : 'compact'}
+            </button>{' '}
+            <button
+              type="button"
+              className={`steps-raw-link${selectMode ? ' active' : ''}`}
+              aria-pressed={selectMode}
+              title={
+                selectMode
+                  ? 'Leave select mode (the checkboxes go away)'
+                  : 'Select steps with checkboxes — tick them, or press one and sweep down the list — and delete them in one go'
+              }
+              onClick={() => setSelectMode((v) => !v)}
+            >
+              {selectMode ? 'delete ✓' : 'delete'}
             </button>
             {(Object.keys(STEP_FILTERS) as Exclude<StepFilter, 'all'>[]).map((f) => {
               const def = STEP_FILTERS[f];
@@ -765,6 +780,7 @@ export function ScenarioEditor() {
               filter={stepFilter === 'all' ? undefined : (step) => STEP_FILTERS[stepFilter].test(step.kind)}
               empty="No steps yet. Take a snapshot, then click any node to add a step."
               revealNew={compactSteps}
+              selectMode={selectMode}
             />
           </div>
 
